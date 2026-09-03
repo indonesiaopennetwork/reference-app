@@ -42,6 +42,21 @@ URLs and the new instances' addresses.
   small set of env vars Cloud Run actually varies at runtime (Redis address,
   cross-service URLs, signing keys). Everything else is baked into the image
   at build time.
+- **OTel sidecar**: onix-bap/onix-bpp each carry a second container,
+  `otel-collector` (`otel-collector/`, image pinned at
+  `otel/opentelemetry-collector-contrib:0.159.0`), reachable at
+  `localhost:4317` since Cloud Run v2 sidecars share a network namespace —
+  same pattern as the `cloudsql-proxy` sidecar below. Each onix config's
+  top-level `plugins.otelsetup` block (added to `local-simple-{bap,bpp}.yaml.tmpl`)
+  ships metrics/traces/logs to it over OTLP/gRPC; `otel-collector/config.yaml`
+  filters that down to only network-relevant signals (`onix_http_request_count`,
+  and spans carrying `sender.id`) and re-exports OTLP/HTTP to
+  `https://netcol.iontest.in`, the network-level collector operated outside
+  this deployment — not something this module deploys itself.
+  `auditFieldsConfig` (`onix-bap/templates/audit-fields.yaml` and the bpp
+  equivalent, byte-identical) controls PII masking in audit logs; both are
+  static, non-templated files copied in by `entrypoint.sh`'s generic
+  (non-`.tmpl`) copy loop.
 - **Cloud SQL Auth Proxy sidecar**: bap/bpp/the migrate jobs reach Postgres
   via a `cloudsql-proxy` sidecar container on `127.0.0.1:5432`, not the
   native `/cloudsql` socket — zero app-code changes needed (`DB_HOST` is
@@ -136,7 +151,7 @@ URLs and the new instances' addresses.
    `BAP_ONIX_SIGNING_PRIVATE_KEY`/`BAP_ONIX_KEY_ID` — see the network identity
    note above.
 
-5. Build and push all 10 images:
+5. Build and push all 11 images:
    ```sh
    PROJECT_ID=ion-sandbox-001 REGION=asia-southeast2 ../scripts/build-and-push.sh
    ```

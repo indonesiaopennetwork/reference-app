@@ -128,7 +128,7 @@ PROJECT_ID=<YOUR_PROJECT_ID> \
   ../scripts/seed-secrets.sh
 ```
 
-### 5. Build and push all 10 images
+### 5. Build and push all 11 images
 
 ```sh
 PROJECT_ID=<YOUR_PROJECT_ID> REGION=<YOUR_REGION> ../scripts/build-and-push.sh

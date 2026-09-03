@@ -1,0 +1,71 @@
+# Companion collector for onix-bap/onix-bpp — network-forwarding only.
+# Forwards filtered signals to the network-level collector at netcol.iontest.in
+# (operated by the network governing entity, not this deployment).
+# No local Prometheus or Jaeger exporters — node-level telemetry is not
+# enabled in this config. Shared as-is between the onix-bap and onix-bpp
+# sidecars (identical config; each runs its own instance).
+#
+# Mirrors https://github.com/indonesiaopennetwork/ion-onix's
+# bapONIX/config/otel-collector-bap/config.yaml and
+# bppONIX/config/otel-collector-bpp/config.yaml.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+processors:
+  batch:
+    send_batch_size: 1024
+    timeout: 10s
+  batch/traces:
+    send_batch_size: 1024
+    timeout: 2s
+
+  # Pass only onix_http_request_count to the network observer.
+  filter/network_metrics:
+    error_mode: ignore
+    metrics:
+      metric:
+        - 'name != "onix_http_request_count"'
+
+  # Pass only spans that carry sender.id (inter-participant request spans).
+  filter/network_traces:
+    error_mode: ignore
+    traces:
+      span:
+        - 'attributes["sender.id"] == nil'
+
+exporters:
+  debug:
+    verbosity: detailed
+  otlp_http/collector-network:
+    endpoint: https://netcol.iontest.in
+    compression: gzip
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check]
+  pipelines:
+    metrics/network:
+      receivers: [otlp]
+      processors: [filter/network_metrics, batch]
+      exporters: [otlp_http/collector-network]
+
+    traces/network:
+      receivers: [otlp]
+      processors: [filter/network_traces, batch/traces]
+      exporters: [otlp_http/collector-network]
+
+    logs/network:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug,otlp_http/collector-network]
+
+  telemetry:
+    logs:
+      level: info

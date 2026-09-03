@@ -16,6 +16,28 @@ http:
     idle: 30
 pluginManager:
   root: ./plugins
+
+# Ships telemetry to the otel-collector-bpp sidecar (docker-compose.yml),
+# which filters and forwards only network-relevant signals to
+# netcol.iontest.in — see otel-collector/config.yaml. `producer` must be the
+# SAME value as `networkParticipant` in the keyManager blocks below (one
+# registered identity) — when you replace that stale example value with your
+# real subscriber ID, update this to match too, or telemetry will be
+# attributed to the wrong participant.
+plugins:
+  otelsetup:
+    id: otelsetup
+    config:
+      serviceName: "beckn-onix"
+      otlpEndpoint: "otel-collector-bpp:4317"
+      enableMetrics: "true"
+      enableTracing: "true"
+      enableLogs: "true"
+      timeInterval: "5"
+      auditFieldsConfig: "/app/config/audit-fields.yaml"
+      producer: "bpptest1.remiges.tech"
+      producerType: "bpp"
+
 modules:
   - name: bppTxnReceiver
     path: /bpp/receiver/

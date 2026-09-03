@@ -62,12 +62,12 @@ modules:
         keyManager:
           id: simplekeymanager
           config:
-            subscriberId: REPLACE_WITH_YOUR_SUBSCRIBER_ID
-            keyId: REPLACE_WITH_YOUR_KEY_ID
-            signingPrivateKey: REPLACE_WITH_YOUR_SIGNING_PRIVATE_KEY
-            signingPublicKey: REPLACE_WITH_YOUR_SIGNING_PUBLIC_KEY
-            encrPrivateKey: REPLACE_WITH_YOUR_ENCR_PRIVATE_KEY
-            encrPublicKey: REPLACE_WITH_YOUR_ENCR_PUBLIC_KEY
+            subscriberId: onix-bap-x7m2wmy7nq-et.a.run.app
+            keyId: 76EU91ME6AjAq2emEzHCJ2aNXgZAfRTF2VNRa3o6j6m7KPT7AdKmLc
+            signingPrivateKey: REMOVED
+            signingPublicKey: nHKQUR4dfE40eGnxP6phRvWiNzYRQuetJiybTtpndbs=
+            encrPrivateKey: REMOVED
+            encrPublicKey: nHKQUR4dfE40eGnxP6phRvWiNzYRQuetJiybTtpndbs=
         catalogPublisher:
           id: catalogpublisher
           config:
