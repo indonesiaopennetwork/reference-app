@@ -16,6 +16,24 @@ http:
     idle: 30
 pluginManager:
   root: ./plugins
+
+# Ships telemetry to the otel-collector sidecar in this same Cloud Run
+# service (localhost:4317), which filters and forwards only
+# network-relevant signals to netcol.iontest.in — see otel-collector/config.yaml.
+plugins:
+  otelsetup:
+    id: otelsetup
+    config:
+      serviceName: "beckn-onix"
+      otlpEndpoint: "localhost:4317"
+      enableMetrics: "true"
+      enableTracing: "true"
+      enableLogs: "true"
+      timeInterval: "5"
+      auditFieldsConfig: "/app/config/audit-fields.yaml"
+      producer: "${NETWORK_PARTICIPANT}"
+      producerType: "bpp"
+
 modules:
   - name: bppTxnReceiver
     path: /bpp/receiver/

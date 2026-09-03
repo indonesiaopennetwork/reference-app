@@ -106,6 +106,22 @@ resource "google_cloud_run_v2_service" "onix_bap" {
         value = "https://placeholder.invalid"
       }
     }
+
+    # otel-collector sidecar — onix-bap's otelsetup plugin ships telemetry to
+    # it over localhost (Cloud Run v2 sidecars share a network namespace),
+    # which then filters and forwards network-relevant signals to
+    # netcol.iontest.in. See ../otel-collector/config.yaml.
+    containers {
+      name  = "otel-collector"
+      image = local.images.otel_collector
+
+      resources {
+        limits = {
+          cpu    = "1"
+          memory = "512Mi"
+        }
+      }
+    }
   }
 
   lifecycle {

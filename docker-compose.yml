@@ -10,16 +10,16 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: postgres # default db (not used by services)
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: postgres # default admin db, not used by services
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./postgres/init-dbs.sh:/docker-entrypoint-initdb.d/init-dbs.sh:ro
     ports:
       - "5435:5432"
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      test: [ "CMD-SHELL", "pg_isready -U ${DB_USER}" ]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -49,6 +49,25 @@ services:
       timeout: 3s
       retries: 5
 
+  # ─── OTel companion collectors ─────────────────────────────────────────────
+  # Filter onix's telemetry down to network-relevant signals and forward to
+  # netcol.iontest.in. Same image for both — see otel-collector/.
+  otel-collector-bap:
+    build:
+      context: ./otel-collector
+    container_name: otel-collector-bap
+    restart: unless-stopped
+    networks:
+      - beckn
+
+  otel-collector-bpp:
+    build:
+      context: ./otel-collector
+    container_name: otel-collector-bpp
+    restart: unless-stopped
+    networks:
+      - beckn
+
   onix-bap:
     image: fidedocker/onix-adapter:latest
     container_name: onix-bap
@@ -60,15 +79,16 @@ services:
       - "8081:8081"
     environment:
       CONFIG_FILE: "/app/config/local-simple-bap.yaml"
-      VAULT_ADDR: http://vault:8200
-      VAULT_TOKEN: root
       REDIS_ADDR: redis-bap:6379
-      RABBITMQ_ADDR: rabbitmq:5672
-      RABBITMQ_USER: admin
-      RABBITMQ_PASS: admin123
+      # onix's own otelsetup config (local-simple-bap.yaml) is what actually
+      # ships telemetry; these are just SDK-standard env var parity.
+      OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector-bap:4317
+      OTEL_EXPORTER_OTLP_INSECURE: "true"
     depends_on:
       redis-bap:
         condition: service_healthy
+      otel-collector-bap:
+        condition: service_started
     volumes:
       - ./config:/app/config
       - ./schemas:/app/schemas
@@ -85,30 +105,24 @@ services:
       - "8082:8082"
     environment:
       CONFIG_FILE: "/app/config/local-simple-bpp.yaml"
-      VAULT_ADDR: http://vault:8200
-      VAULT_TOKEN: root
       REDIS_ADDR: redis-bpp:6379
-      RABBITMQ_ADDR: rabbitmq:5672
-      RABBITMQ_USER: admin
-      RABBITMQ_PASS: admin123
+      OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector-bpp:4317
+      OTEL_EXPORTER_OTLP_INSECURE: "true"
     depends_on:
       redis-bpp:
         condition: service_healthy
+      otel-collector-bpp:
+        condition: service_started
     volumes:
       - ./config:/app/config
       - ./schemas:/app/schemas
     command: [ "./server", "--config=/app/config/local-simple-bpp.yaml" ]
 
   # ─── Catalog Publish (standalone) ─────────────────────────────────────────
-  # File-based catalog/publish onix container, isolated from onix-bpp's txn
-  # routes and from the Go `bpp` app's Postgres/CDS-forwarding publish route.
-  # Config + published output live under file-onboarding-and-catalog-publish/.
-  # See file-onboarding-and-catalog-publish/README.md.
-  #
-  #   Catalog publish (internal trigger): http://localhost:8085/catalog/publish
-  #
-  # NOT fidedocker/onix-adapter:latest -- that image lacks the catalogPublish
-  # handler type and fails startup with "invalid module : catalogPublish".
+  # File-based catalog/publish, isolated from onix-bpp's txn routes and from
+  # bap's own Postgres/CDS-forwarding publish route. See
+  # file-onboarding-and-catalog-publish/README.md.
+  # NOT fidedocker/onix-adapter -- that image lacks the catalogPublish handler.
   onix-catalog-publish:
     image: fidedocker/catalog-publisher:latest
     container_name: onix-catalog-publish
@@ -144,34 +158,25 @@ services:
     environment:
       APP_PORT: "8080"
       APP_ENV: development
+      LOG_LEVEL: info
 
       DB_HOST: postgres
       DB_PORT: "5432"
       DB_NAME: bpp
-      DB_USER: postgres
-      DB_PASSWORD: postgres
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
       DB_SSLMODE: disable
 
-      LOG_LEVEL: info
-
-      # bpptest1.remiges.tech retired — onix-bpp-x7m2wmy7nq-et.a.run.app is the
-      # only currently-registered identity for this side (matches remiges-trade).
-      BPP_ID: onix-bpp-x7m2wmy7nq-et.a.run.app
-      # Bare registered Subscriber URL, not the internal /bpp/receiver path —
-      # goes straight into context.bppUri (matches remiges-trade).
+      # Registered identity — must equal config/local-simple-bpp.yaml's networkParticipant.
+      BPP_ID: ${BPP_ID}
+      NETWORK_ID: ${NETWORK_ID}
+      # Signature-checked entry point other participants call back to —
+      # onix-bpp, not bpp itself. Fixed docker-compose topology.
       BPP_URI: http://onix-bpp:8082
-      NETWORK_ID: ion.id/ion-launch
-
-      # BppCallerURL is the ONIX BPP caller base URL used for outbound on_* callbacks.
       BPP_CALLER_URL: http://onix-bpp:8082/bpp/caller
+      CDS_PUBLISH_URL: http://onix-catalog-publish:8085/catalog/publish
 
-      CDS_PUBLISH_URL: "http://onix-catalog-publish:8085/catalog/publish" # BPP → onix-catalog-publish (local docker network)
-
-      # Ed25519 signing key registered for onix-bpp-x7m2wmy7nq-et.a.run.app —
-      # signs outbound requests to CDS_PUBLISH_URL, and is the SAME keypair as
-      # the onix keyManager below (one registered identity, one key). Mirrors
-      # the keyManager config in config/local-simple-bpp.yaml. Sourced from
-      # the git-ignored root .env file.
+      # Same keypair as config/local-simple-bpp.yaml's keyManager — one registered identity.
       BPP_PRIVATE_KEY: ${BPP_PRIVATE_KEY}
       BPP_KEY_ID: ${BPP_KEY_ID}
     ports:
@@ -193,38 +198,33 @@ services:
     environment:
       APP_PORT: "8083"
       APP_ENV: development
+      LOG_LEVEL: info
 
       DB_HOST: postgres
       DB_PORT: "5432"
       DB_NAME: bap
-      DB_USER: postgres
-      DB_PASSWORD: postgres
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
       DB_SSLMODE: disable
 
-      LOG_LEVEL: info
-
-      # baptest1.remiges.tech retired — onix-bap-x7m2wmy7nq-et.a.run.app is the
-      # only currently-registered identity for this side (matches remiges-trade).
-      BAP_ID: onix-bap-x7m2wmy7nq-et.a.run.app
-      # Bare registered Subscriber URL, not the internal /bap/receiver path —
-      # goes straight into context.bapUri (matches remiges-trade).
+      # Registered identity — must equal config/local-simple-bap.yaml's networkParticipant.
+      BAP_ID: ${BAP_ID}
+      NETWORK_ID: ${NETWORK_ID}
+      # Signature-checked entry point other participants call back to —
+      # onix-bap, not bap itself. Fixed docker-compose topology.
       BAP_URI: http://onix-bap:8081
-      NETWORK_ID: ion.id/ion-launch
-
-      # BPP identity placed in context.bppId / context.bppUri.
-      BPP_ID: onix-bpp-x7m2wmy7nq-et.a.run.app
-      BPP_URI: http://onix-bpp:8082
-
-      # ADAPTER_URL is the ONIX BAP adapter the BAP actually POSTs to.
       ADAPTER_URL: http://onix-bap:8081/bap/caller
 
-      CDS_DISCOVER_URL: "https://34.47.138.217.sslip.io/beckn/discover"
+      # BPP counterpart identity, placed in context.bppId / context.bppUri.
+      BPP_ID: ${BPP_ID}
+      BPP_URI: http://onix-bpp:8082
 
-      # Ed25519 signing key registered for onix-bap-x7m2wmy7nq-et.a.run.app —
-      # signs outbound requests to CDS_DISCOVER_URL, and is the SAME keypair as
-      # the onix keyManager below (one registered identity, one key). Mirrors
-      # the keyManager config in config/local-simple-bap.yaml. Sourced from
-      # the git-ignored root .env file.
+      # onix-bap's own router has an independent discover target in
+      # config/local-simple-routing-BAPCaller.yaml — this only controls bap's
+      # own direct call, not what onix itself routes to.
+      CDS_DISCOVER_URL: ${CDS_DISCOVER_URL}
+
+      # Same keypair as config/local-simple-bap.yaml's keyManager — one registered identity.
       BAP_PRIVATE_KEY: ${BAP_PRIVATE_KEY}
       BAP_KEY_ID: ${BAP_KEY_ID}
     ports:
@@ -242,8 +242,7 @@ services:
       - bap
     environment:
       BAP_URL: http://bap:8083
-      # 127.0.0.11 is Docker's embedded DNS, resolves compose service names.
-      NGINX_RESOLVER: "127.0.0.11 8.8.8.8 8.8.4.4"
+      NGINX_RESOLVER: "127.0.0.11 8.8.8.8 8.8.4.4" # Docker's embedded DNS
     ports:
       - "3000:80"
     networks:
@@ -281,7 +280,6 @@ services:
 
 volumes:
   postgres_data:
-
 
 networks:
   beckn:

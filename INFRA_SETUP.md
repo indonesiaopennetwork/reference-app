@@ -107,6 +107,66 @@ to the *old* container IP and you'll get `502 Bad Gateway`. Either
 `docker compose up -d` the whole stack together, or explicitly
 `docker compose restart frontend bpp-frontend` after rebuilding a backend.
 
+### 1f. Observability (OTel)
+
+`onix-bap`/`onix-bpp` each ship telemetry to their own companion collector
+sidecar — `otel-collector-bap`/`otel-collector-bpp` in `docker-compose.yml`,
+both built from `otel-collector/` (same image/config as the cloud deploy's
+sidecar). The collector filters onix's raw telemetry down to only
+network-relevant signals (the `onix_http_request_count` metric; spans
+carrying `sender.id`) and forwards OTLP/HTTP to the network-level collector
+at `https://netcol.iontest.in` — nothing this repo deploys itself.
+
+**How it's wired**: `config/local-simple-{bap,bpp}.yaml`'s top-level
+`plugins.otelsetup` block sets `otlpEndpoint` to the sidecar's docker-compose
+service name (`otel-collector-bap:4317`/`otel-collector-bpp:4317`, OTLP/gRPC).
+`config/audit-fields.yaml` (shared by both) controls PII masking in audit
+logs — see its own comments for the masking model. **Known gap**: this onix
+version doesn't appear to pick up the `auditFieldsConfig`/`producer`/
+`producerType` fields from this config shape — its own debug log
+(`Telemetry config mapped: ...`) shows them empty even when set, while
+`serviceName`/`otlpEndpoint`/`enableMetrics`/`enableTracing`/`enableLogs`/
+`timeInterval` all map correctly. Metrics/traces/logs shipping is confirmed
+working (see verification below); audit-field masking and producer
+attribution are not — don't rely on them without checking upstream.
+
+**To verify it's actually working:**
+
+```sh
+docker compose up -d postgres redis-bap redis-bpp otel-collector-bap otel-collector-bpp onix-bap onix-bpp
+docker logs onix-bap --tail 300 | grep -i otel
+```
+You should see `Loaded plugin: otelsetup`, then `OpenTelemetry metrics
+initialized ... (OTLP endpoint=otel-collector-bap:4317)` and the tracing
+equivalent — confirms the plugin loaded and the sidecar address resolved
+(same check works for `onix-bpp` / `otel-collector-bpp:4317`). Then hit an
+onix endpoint directly to generate real telemetry and watch the collector
+try to export it:
+```sh
+curl -X POST http://localhost:8081/bap/receiver/ -H "Content-Type: application/json" -d '{"context":{"action":"on_search"},"message":{}}'
+sleep 12   # otelsetup's timeInterval is 5s
+docker logs otel-collector-bap --tail 40
+```
+
+**What this actually proved, verified 2026-09-02**: the full local pipeline
+— onix's otelsetup plugin → `otel-collector-bap` sidecar → a real HTTPS POST
+to `netcol.iontest.in` — works end-to-end on our side. But
+`netcol.iontest.in` itself currently returns **HTTP 404** for both
+`/v1/traces` and `/v1/metrics`:
+```
+error exporting items, request to https://netcol.iontest.in/v1/traces responded with HTTP Status Code 404
+error exporting items, request to https://netcol.iontest.in/v1/metrics responded with HTTP Status Code 404
+```
+Confirmed on both the bap and bpp sidecars, and independently by probing
+`netcol.iontest.in` directly with `curl` outside the collector. **This means
+nothing will actually show up on `observe.iontest.in`'s dashboard yet** —
+not because of anything wrong in this repo's wiring, but because the
+network-level collector hasn't got working OTLP/HTTP ingestion routes at
+those paths (or they're not the right paths/protocol — worth confirming with
+whoever operates that endpoint, the same "word of mouth" caveat as before).
+Re-run the verification above after that's fixed upstream to confirm data
+actually flows through.
+
 ## 2. Cloud deployment (Cloud Run)
 
 Full step-by-step is in [`terraform/README.md`](terraform/README.md) —
