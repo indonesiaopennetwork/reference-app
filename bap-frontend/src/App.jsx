@@ -40,12 +40,12 @@ function parseCatalogs(data) {
       // Resources with no offer have no price — skip them to avoid blank cards.
       if (!offer) return;
 
-      const oa    = offer.offerAttributes || {};
-      const pa    = oa.price || {};
-      const cons  = offer.considerations?.[0]?.considerationAttributes || {};
+      const oa = offer.offerAttributes || {};
+      const pa = oa.price || {};
+      const cons = offer.considerations?.[0]?.considerationAttributes || {};
 
       // Price: prefer considerations.totalAmount, fallback to offerAttributes.price.value
-      let price    = cons.totalAmount ?? pa.value ?? 0;
+      let price = cons.totalAmount ?? pa.value ?? 0;
       let currency = cons.currency || pa.currency || 'INR';
 
       // Price breakup: prefer considerations.breakup, build from price.components if needed
@@ -58,25 +58,25 @@ function parseCatalogs(data) {
               breakup.push({ title: `Discount (${c.value}%)`, amount: -(pa.value * c.value / 100), type: 'DISCOUNT' });
             }
           });
-          const discountAmt = pa.components.filter(c=>c.type==='DISCOUNT').reduce((s,c)=>s+(pa.value*c.value/100),0);
+          const discountAmt = pa.components.filter(c => c.type === 'DISCOUNT').reduce((s, c) => s + (pa.value * c.value / 100), 0);
           price = pa.value - discountAmt;
         }
       }
 
       // Seller / provider
-      const provider      = offer.provider || {};
-      const sellerName    = provider.descriptor?.name || '';
+      const provider = offer.provider || {};
+      const sellerName = provider.descriptor?.name || '';
       const sellerAddress = provider.availableAt?.[0]?.address;
 
       // Policies
-      const policies      = oa.policies || {};
-      const serviceability= oa.serviceability || {};
-      const timing        = serviceability.timing?.[0] || {};
-      const distance      = serviceability.distanceConstraint || {};
+      const policies = oa.policies || {};
+      const serviceability = oa.serviceability || {};
+      const timing = serviceability.timing?.[0] || {};
+      const distance = serviceability.distanceConstraint || {};
 
       // Composite dedup key: bpp + resource so cross-BPP resources with
       // the same resource ID (unlikely but possible) are treated as distinct.
-      const bppId  = cat.bppId  || '';
+      const bppId = cat.bppId || '';
       const bppUri = cat.bppUri || '';
       const dedupKey = `${bppId}::${res.id}`;
 
@@ -90,22 +90,22 @@ function parseCatalogs(data) {
         currency,
         image: res.descriptor?.mediaFile?.[0]?.uri ||
           'https://images.unsplash.com/photo-1542838132-92c53300491e?w=600&auto=format&fit=crop&q=70',
-        offerId:      offer.id || '',
-        offerName:    offer.descriptor?.name || offer.descriptor?.shortDesc || '',
-        providerId:   provider.id || '',
+        offerId: offer.id || '',
+        offerName: offer.descriptor?.name || offer.descriptor?.shortDesc || '',
+        providerId: provider.id || '',
         sellerName,
         bppId,
         bppUri,
-        offerAttr:    oa,
+        offerAttr: oa,
         breakup,
         sellerAddress,
-        returnPolicy:   policies.returns,
-        cancelPolicy:   policies.cancellation,
-        codAvailable:   oa.paymentConstraints?.codAvailable,
-        deliveryRange:  distance.maxDistance ? `${distance.maxDistance} ${distance.unit || 'KM'}` : '',
-        deliveryDays:   timing.daysOfWeek || [],
-        deliveryHours:  timing.timeRange ? `${timing.timeRange.start}–${timing.timeRange.end}` : '',
-        offerValidity:  offer.validity?.endDate ? new Date(offer.validity.endDate).toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' }) : '',
+        returnPolicy: policies.returns,
+        cancelPolicy: policies.cancellation,
+        codAvailable: oa.paymentConstraints?.codAvailable,
+        deliveryRange: distance.maxDistance ? `${distance.maxDistance} ${distance.unit || 'KM'}` : '',
+        deliveryDays: timing.daysOfWeek || [],
+        deliveryHours: timing.timeRange ? `${timing.timeRange.start}–${timing.timeRange.end}` : '',
+        offerValidity: offer.validity?.endDate ? new Date(offer.validity.endDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '',
       });
     });
   });
@@ -117,19 +117,19 @@ function parseCatalogs(data) {
 function parseOnSelectContract(contract) {
   if (!contract) return null;
   const consideration = contract.consideration?.[0] ?? contract.considerations?.[0];
-  const commitment    = contract.commitments?.[0];
-  const ca  = consideration?.considerationAttributes || {};
+  const commitment = contract.commitments?.[0];
+  const ca = consideration?.considerationAttributes || {};
   const pol = commitment?.offer?.offerAttributes?.policies || {};
   return {
-    total:          ca.totalAmount,
-    currency:       ca.currency || 'INR',
-    breakup:        ca.breakup || [],
+    total: ca.totalAmount,
+    currency: ca.currency || 'INR',
+    breakup: ca.breakup || [],
     paymentMethods: ca.paymentMethods || [],
-    codAvailable:   commitment?.offer?.offerAttributes?.paymentConstraints?.codAvailable,
-    seller:         commitment?.offer?.provider?.descriptor?.name,
-    offerName:      commitment?.offer?.descriptor?.name,
-    returnPolicy:   pol.returns,
-    cancelPolicy:   pol.cancellation,
+    codAvailable: commitment?.offer?.offerAttributes?.paymentConstraints?.codAvailable,
+    seller: commitment?.offer?.provider?.descriptor?.name,
+    offerName: commitment?.offer?.descriptor?.name,
+    returnPolicy: pol.returns,
+    cancelPolicy: pol.cancellation,
   };
 }
 
@@ -163,8 +163,8 @@ function SkeletonCard() {
 // Shows catalog offer details: price breakdown, seller, policies, serviceability
 function OfferInfoPanel({ product }) {
   const { breakup, currency, price, sellerName, sellerAddress,
-          returnPolicy, cancelPolicy, codAvailable,
-          deliveryRange, deliveryHours, deliveryDays, offerName, offerValidity } = product;
+    returnPolicy, cancelPolicy, codAvailable,
+    deliveryRange, deliveryHours, deliveryDays, offerName, offerValidity } = product;
 
   const shortAddr = sellerAddress
     ? [sellerAddress.streetAddress, sellerAddress.addressLocality, sellerAddress.addressRegion].filter(Boolean).join(', ')
@@ -193,7 +193,7 @@ function OfferInfoPanel({ product }) {
                   <span className="text-slate-400">{b.title}</span>
                   <span className={
                     b.type === 'DISCOUNT' ? 'text-emerald-400 font-medium' :
-                    b.type === 'TAX'      ? 'text-amber-400' : 'text-slate-200'
+                      b.type === 'TAX' ? 'text-amber-400' : 'text-slate-200'
                   }>
                     {b.type === 'DISCOUNT' && b.amount < 0 ? '−' : ''}{fmt(Math.abs(b.amount), currency)}
                   </span>
@@ -243,7 +243,7 @@ function OfferInfoPanel({ product }) {
         )}
         {returnPolicy?.allowed && (
           <span className="flex items-center gap-1 text-[10px] font-semibold bg-purple-500/10 text-purple-400 border border-purple-500/20 px-2.5 py-1 rounded-full">
-            <RotateCcw className="w-3 h-3" /> {returnPolicy.window?.replace('P','').replace('D',' day')} returns
+            <RotateCcw className="w-3 h-3" /> {returnPolicy.window?.replace('P', '').replace('D', ' day')} returns
           </span>
         )}
         {cancelPolicy?.allowed && (
@@ -261,7 +261,7 @@ function OfferInfoPanel({ product }) {
 function ConfirmedQuotePanel({ quote, onInit, isLoading }) {
   if (!quote) return null;
   const { total, currency, breakup, paymentMethods, codAvailable,
-          seller, returnPolicy, cancelPolicy } = quote;
+    seller, returnPolicy, cancelPolicy } = quote;
   return (
     <motion.div
       initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
@@ -308,23 +308,23 @@ function ConfirmedQuotePanel({ quote, onInit, isLoading }) {
 /* ─────────────────────────── ProductModal ───────────────────────────────── */
 function ProductModal({ product, transaction, onClose, onSelect, onInit, onConfirm, isLoading }) {
   const isThisProduct = transaction?.product?.id === product.id;
-  const status        = isThisProduct ? transaction.status : null;
+  const status = isThisProduct ? transaction.status : null;
 
   // Parse confirmed on_select contract once QUOTE_RECEIVED
   const confirmedQuote = (status === 'QUOTE_RECEIVED' && transaction?.contract)
     ? parseOnSelectContract(
-        typeof transaction.contract === 'string'
-          ? JSON.parse(transaction.contract)
-          : transaction.contract
-      )
+      typeof transaction.contract === 'string'
+        ? JSON.parse(transaction.contract)
+        : transaction.contract
+    )
     : null;
 
   const pendingStatuses = ['SELECT_SENT', 'INIT_SENT', 'CONFIRM_SENT'];
   const isPending = pendingStatuses.includes(status);
 
   const pendingLabel = {
-    SELECT_SENT:  'Requesting quote from BPP…',
-    INIT_SENT:    'Initializing order…',
+    SELECT_SENT: 'Requesting quote from BPP…',
+    INIT_SENT: 'Initializing order…',
     CONFIRM_SENT: 'Confirming your order…',
   }[status];
 
@@ -445,7 +445,7 @@ function StarRating({ value, onChange }) {
   const [hover, setHover] = useState(0);
   return (
     <div className="flex gap-1">
-      {[1,2,3,4,5].map(n => (
+      {[1, 2, 3, 4, 5].map(n => (
         <button key={n}
           onClick={() => onChange(n)}
           onMouseEnter={() => setHover(n)}
@@ -469,10 +469,10 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
   // Parse BPP-confirmed quote from on_select
   const confirmedQuote = (status === 'QUOTE_RECEIVED' && transaction?.contract)
     ? parseOnSelectContract(
-        typeof transaction.contract === 'string'
-          ? JSON.parse(transaction.contract)
-          : transaction.contract
-      )
+      typeof transaction.contract === 'string'
+        ? JSON.parse(transaction.contract)
+        : transaction.contract
+    )
     : null;
 
   const currency = confirmedQuote?.currency || 'INR';
@@ -480,17 +480,17 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
   /* ── Stepper ───────────────────────────────────────────────────────── */
   const STEPS = ['Quote', 'Billing', 'Confirm', 'Done'];
   const stepIndex = {
-    SELECT_SENT:    0,
+    SELECT_SENT: 0,
     QUOTE_RECEIVED: 1,
-    INIT_SENT:      1,
-    INIT_RECEIVED:  2,
-    CONFIRM_SENT:   2,
-    CONFIRMED:      3,
-    STATUS_SENT:    3,
-    CANCEL_SENT:    3,
-    CANCELLED:      3,
-    RATE_SENT:      3,
-    SUPPORT_SENT:   3,
+    INIT_SENT: 1,
+    INIT_RECEIVED: 2,
+    CONFIRM_SENT: 2,
+    CONFIRMED: 3,
+    STATUS_SENT: 3,
+    CANCEL_SENT: 3,
+    CANCELLED: 3,
+    RATE_SENT: 3,
+    SUPPORT_SENT: 3,
   }[status] ?? 0;
 
   return (
@@ -504,10 +504,9 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
             style={{ width: `${(stepIndex / (STEPS.length - 1)) * 100}%` }} />
           {STEPS.map((label, i) => (
             <div key={i} className="relative flex flex-col items-center gap-1.5 z-10">
-              <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold transition-all duration-500 ${
-                i < stepIndex ? 'bg-emerald-400 text-slate-900' :
+              <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold transition-all duration-500 ${i < stepIndex ? 'bg-emerald-400 text-slate-900' :
                 i === stepIndex ? 'bg-emerald-400 text-slate-900 ring-4 ring-emerald-400/20' :
-                'bg-slate-700 text-slate-400'}`}>
+                  'bg-slate-700 text-slate-400'}`}>
                 {i < stepIndex ? <CheckCircle2 className="w-3.5 h-3.5" /> : i + 1}
               </div>
               <span className={`text-[10px] font-medium whitespace-nowrap ${i <= stepIndex ? 'text-emerald-400' : 'text-slate-500'}`}>{label}</span>
@@ -933,11 +932,11 @@ let _billingIdx = 0;
 /* ─────────────────── Order History Drawer ──────────────────────────────── */
 
 const STATUS_COLORS = {
-  CONFIRMED:     { bg: 'bg-emerald-500/10', text: 'text-emerald-400', border: 'border-emerald-500/20' },
-  CANCELLED:     { bg: 'bg-rose-500/10',    text: 'text-rose-400',    border: 'border-rose-500/20'    },
-  INIT_SENT:     { bg: 'bg-blue-500/10',    text: 'text-blue-400',    border: 'border-blue-500/20'    },
-  CONFIRM_SENT:  { bg: 'bg-amber-500/10',   text: 'text-amber-400',   border: 'border-amber-500/20'   },
-  CANCEL_SENT:   { bg: 'bg-rose-500/10',    text: 'text-rose-400',    border: 'border-rose-500/20'    },
+  CONFIRMED: { bg: 'bg-emerald-500/10', text: 'text-emerald-400', border: 'border-emerald-500/20' },
+  CANCELLED: { bg: 'bg-rose-500/10', text: 'text-rose-400', border: 'border-rose-500/20' },
+  INIT_SENT: { bg: 'bg-blue-500/10', text: 'text-blue-400', border: 'border-blue-500/20' },
+  CONFIRM_SENT: { bg: 'bg-amber-500/10', text: 'text-amber-400', border: 'border-amber-500/20' },
+  CANCEL_SENT: { bg: 'bg-rose-500/10', text: 'text-rose-400', border: 'border-rose-500/20' },
 };
 
 function fmtOrderDate(iso) {
@@ -958,23 +957,23 @@ function parseContractDetail(contract) {
   // Commitments → items
   const commitments = contract.commitments || [];
   const items = commitments.map(c => ({
-    id:       c.id || '',
-    name:     c.descriptor?.name || c.offer?.descriptor?.name || c.id || 'Item',
-    qty:      c.quantity?.count ?? 1,
-    offerId:  c.offer?.id || '',
+    id: c.id || '',
+    name: c.descriptor?.name || c.offer?.descriptor?.name || c.id || 'Item',
+    qty: c.quantity?.count ?? 1,
+    offerId: c.offer?.id || '',
     resourceId: c.offer?.resourceIds?.[0] || '',
   }));
 
   // Consideration → price
   const consideration = (contract.consideration || [])[0];
   const consAttr = consideration?.considerationAttributes || {};
-  const price    = consAttr.totalAmount ?? null;
+  const price = consAttr.totalAmount ?? null;
   const currency = consAttr.currency || 'INR';
-  const breakup  = consAttr.breakup || [];
+  const breakup = consAttr.breakup || [];
 
   // Participants
   const participants = contract.participants || [];
-  const buyer  = participants.find(p => p.role?.code === 'BUYER'  || p.role === 'BUYER');
+  const buyer = participants.find(p => p.role?.code === 'BUYER' || p.role === 'BUYER');
   const seller = participants.find(p => p.role?.code === 'SELLER' || p.role === 'SELLER');
 
   // Status
@@ -984,23 +983,23 @@ function parseContractDetail(contract) {
 }
 
 const ACTION_LABELS = {
-  select:     { icon: '🔍', label: 'Item Selected',    color: 'text-cyan-400'    },
-  on_select:  { icon: '💬', label: 'Quote Received',   color: 'text-blue-400'    },
-  init:       { icon: '📋', label: 'Order Initialised', color: 'text-indigo-400' },
-  on_init:    { icon: '✅', label: 'Order Confirmed',   color: 'text-emerald-400' },
-  confirm:    { icon: '🛒', label: 'Confirm Sent',      color: 'text-amber-400'   },
-  on_confirm: { icon: '🎉', label: 'Order Placed',      color: 'text-emerald-400' },
-  cancel:     { icon: '🚫', label: 'Cancel Requested',  color: 'text-rose-400'    },
-  on_cancel:  { icon: '❌', label: 'Order Cancelled',   color: 'text-rose-400'    },
-  rate:       { icon: '⭐', label: 'Rated',             color: 'text-amber-400'   },
-  on_rate:    { icon: '⭐', label: 'Rating Confirmed',  color: 'text-amber-400'   },
-  on_status:  { icon: '📊', label: 'Status Update',     color: 'text-slate-400'   },
+  select: { icon: '🔍', label: 'Item Selected', color: 'text-cyan-400' },
+  on_select: { icon: '💬', label: 'Quote Received', color: 'text-blue-400' },
+  init: { icon: '📋', label: 'Order Initialised', color: 'text-indigo-400' },
+  on_init: { icon: '✅', label: 'Order Confirmed', color: 'text-emerald-400' },
+  confirm: { icon: '🛒', label: 'Confirm Sent', color: 'text-amber-400' },
+  on_confirm: { icon: '🎉', label: 'Order Placed', color: 'text-emerald-400' },
+  cancel: { icon: '🚫', label: 'Cancel Requested', color: 'text-rose-400' },
+  on_cancel: { icon: '❌', label: 'Order Cancelled', color: 'text-rose-400' },
+  rate: { icon: '⭐', label: 'Rated', color: 'text-amber-400' },
+  on_rate: { icon: '⭐', label: 'Rating Confirmed', color: 'text-amber-400' },
+  on_status: { icon: '📊', label: 'Status Update', color: 'text-slate-400' },
 };
 
 function OrderDetailPanel({ txnId, onBack }) {
-  const [detail, setDetail]   = useState(null);
+  const [detail, setDetail] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError]     = useState(null);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     setLoading(true); setError(null);
@@ -1053,8 +1052,8 @@ function OrderDetailPanel({ txnId, onBack }) {
           {detail.status === 'CONFIRMED' || detail.status === 'on_confirm'
             ? <CheckCircle2 className={`w-5 h-5 ${sc.text}`} />
             : detail.status.includes('CANCEL')
-            ? <Ban className={`w-5 h-5 ${sc.text}`} />
-            : <Package className={`w-5 h-5 ${sc.text}`} />
+              ? <Ban className={`w-5 h-5 ${sc.text}`} />
+              : <Package className={`w-5 h-5 ${sc.text}`} />
           }
         </div>
         <div>
@@ -1180,10 +1179,10 @@ function OrderDetailPanel({ txnId, onBack }) {
 }
 
 function OrderHistoryDrawer({ open, onClose }) {
-  const [orders, setOrders]       = useState([]);
-  const [loading, setLoading]     = useState(false);
-  const [total, setTotal]         = useState(0);
-  const [page, setPage]           = useState(1);
+  const [orders, setOrders] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
   const [selectedId, setSelectedId] = useState(null);
   const limit = 10;
 
@@ -1285,7 +1284,7 @@ function OrderHistoryDrawer({ open, onClose }) {
                                 {order.item_name || 'Order #' + order.transaction_id.slice(0, 8)}
                               </p>
                               <span className={`shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full border ${sc.bg} ${sc.text} ${sc.border}`}>
-                                {order.status.replace(/_/g,' ')}
+                                {order.status.replace(/_/g, ' ')}
                               </span>
                             </div>
                             <div className="flex items-center gap-3 mt-0.5 flex-wrap">
@@ -1331,20 +1330,20 @@ function OrderHistoryDrawer({ open, onClose }) {
 
 /* ─────────────────────────── App ────────────────────────────────────────── */
 export default function App() {
-  const [catalog, setCatalog]           = useState([]);
-  const [isSearching, setIsSearching]   = useState(false);
-  const [searchQuery, setSearchQuery]   = useState('');
-  const [cart, setCart]                 = useState([]);
-  const [transaction, setTransaction]   = useState(null);
-  const [isLoading, setIsLoading]       = useState(false);
+  const [catalog, setCatalog] = useState([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [cart, setCart] = useState([]);
+  const [transaction, setTransaction] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
   const [isOrdersOpen, setIsOrdersOpen] = useState(false);
-  const [isCartOpen, setIsCartOpen]     = useState(false);
+  const [isCartOpen, setIsCartOpen] = useState(false);
   const [cartCheckout, setCartCheckout] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState(null);
-  const [error, setError]               = useState(null);
-  const [activeCategory, setActiveCategory]   = useState('All');
-  const [sortBy, setSortBy]             = useState('default');
-  const [billing, setBilling]           = useState({
+  const [error, setError] = useState(null);
+  const [activeCategory, setActiveCategory] = useState('All');
+  const [sortBy, setSortBy] = useState('default');
+  const [billing, setBilling] = useState({
     name: '', email: '', phone: '',
     streetAddress: '', addressLocality: '', addressRegion: '', postalCode: '', addressCountry: 'IN',
   });
@@ -1379,9 +1378,9 @@ export default function App() {
   const visibleCatalog = catalog
     .filter(p => activeCategory === 'All' || p.category === activeCategory)
     .sort((a, b) => {
-      if (sortBy === 'price_asc')  return a.price - b.price;
+      if (sortBy === 'price_asc') return a.price - b.price;
       if (sortBy === 'price_desc') return b.price - a.price;
-      if (sortBy === 'name')       return a.name.localeCompare(b.name);
+      if (sortBy === 'name') return a.name.localeCompare(b.name);
       return 0;
     });
 
@@ -1412,7 +1411,7 @@ export default function App() {
             return { ...p, ...d };
           });
         })
-        .catch(() => {});
+        .catch(() => { });
     }, 2000);
     return () => clearInterval(id);
   }, [transaction]);
@@ -1425,15 +1424,15 @@ export default function App() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           items: [{
-            resource_id:      product.id,
-            offer_id:         product.offerId,
-            offer_name:       product.offerName,
-            quantity:         1,
-            provider_id:      product.providerId,
-            provider_name:    product.sellerName,
+            resource_id: product.id,
+            offer_id: product.offerId,
+            offer_name: product.offerName,
+            quantity: 1,
+            provider_id: product.providerId,
+            provider_name: product.sellerName,
             offer_attributes: product.offerAttr || {},
-            bpp_id:           product.bppId  || '',
-            bpp_uri:          product.bppUri || '',
+            bpp_id: product.bppId || '',
+            bpp_uri: product.bppUri || '',
           }],
         }),
       });
@@ -1452,15 +1451,15 @@ export default function App() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           items: cart.map(i => ({
-            resource_id:      i.id,
-            offer_id:         i.offerId      || '',
-            offer_name:       i.offerName    || i.name,
-            quantity:         i.qty,
-            provider_id:      i.providerId   || '',
-            provider_name:    i.sellerName   || '',
-            offer_attributes: i.offerAttr    || {},
-            bpp_id:           i.bppId        || '',
-            bpp_uri:          i.bppUri       || '',
+            resource_id: i.id,
+            offer_id: i.offerId || '',
+            offer_name: i.offerName || i.name,
+            quantity: i.qty,
+            provider_id: i.providerId || '',
+            provider_name: i.sellerName || '',
+            offer_attributes: i.offerAttr || {},
+            bpp_id: i.bppId || '',
+            bpp_uri: i.bppUri || '',
           })),
         }),
       });
@@ -1483,14 +1482,14 @@ export default function App() {
         body: JSON.stringify({
           transaction_id: transaction.id,
           billing: {
-            name:            billing.name            || 'Customer',
-            email:           billing.email           || '',
-            phone:           billing.phone           || '9999999999',
-            streetAddress:   billing.streetAddress   || 'TBD',
+            name: billing.name || 'Customer',
+            email: billing.email || '',
+            phone: billing.phone || '9999999999',
+            streetAddress: billing.streetAddress || 'TBD',
             addressLocality: billing.addressLocality || 'TBD',
-            addressRegion:   billing.addressRegion   || 'TBD',
-            postalCode:      billing.postalCode      || '000000',
-            addressCountry:  billing.addressCountry  || 'IN',
+            addressRegion: billing.addressRegion || 'TBD',
+            postalCode: billing.postalCode || '000000',
+            addressCountry: billing.addressCountry || 'IN',
           },
         }),
       });
@@ -1634,6 +1633,16 @@ export default function App() {
               )}
             </div>
           </form>
+
+          <a
+            href={window.__env__?.BPP_ADMIN_URL || import.meta.env.VITE_BPP_ADMIN_URL || "#"}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="shrink-0 flex items-center gap-2 px-3 py-2 rounded-xl transition-all text-sm font-medium text-emerald-400 hover:text-emerald-300 border border-emerald-500/20 hover:border-emerald-500/40 bg-emerald-500/10"
+          >
+            <ExternalLink className="w-4 h-4" />
+            <span className="hidden sm:block">BPP APP</span>
+          </a>
 
           <button
             onClick={() => setIsOrdersOpen(true)}
@@ -1940,7 +1949,7 @@ export default function App() {
                   {cartCheckout
                     ? <><Receipt className="w-5 h-5 text-emerald-400" /><h2 className="text-lg">Checkout</h2></>
                     : <><ShoppingCart className="w-5 h-5 text-emerald-400" /><h2 className="text-lg">Your Cart</h2>
-                        {cartCount > 0 && <span className="bg-emerald-500/20 text-emerald-400 text-xs font-bold px-2 py-0.5 rounded-full">{cartCount}</span>}</>
+                      {cartCount > 0 && <span className="bg-emerald-500/20 text-emerald-400 text-xs font-bold px-2 py-0.5 rounded-full">{cartCount}</span>}</>
                   }
                 </div>
                 {!cartCheckout && (
@@ -2036,7 +2045,7 @@ export default function App() {
                                 )}
                                 {item.returnPolicy?.allowed && (
                                   <span className="flex items-center gap-1 text-[10px] font-semibold bg-purple-500/10 text-purple-400 border border-purple-500/20 px-2 py-0.5 rounded-full">
-                                    <RotateCcw className="w-2.5 h-2.5" /> {item.returnPolicy.window?.replace('P','').replace('D',' day')} returns
+                                    <RotateCcw className="w-2.5 h-2.5" /> {item.returnPolicy.window?.replace('P', '').replace('D', ' day')} returns
                                   </span>
                                 )}
                                 {item.cancelPolicy?.allowed && (
