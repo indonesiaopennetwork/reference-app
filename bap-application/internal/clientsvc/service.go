@@ -41,9 +41,6 @@ func NewClientService(pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.Log
 // Discover sends a Beckn v2 `discover` action to the CDS and returns the raw JSON response.
 // Logs an OUTBOUND row to beckn_message_log capturing both the request and the CDS response.
 func (s *ClientService) Discover(ctx context.Context, req *ClientDiscoverRequest) (json.RawMessage, error) {
-	if s.cfg.CDSDiscoverURL == "" {
-		return json.RawMessage(`{"message":{"catalogs":[]}}`), nil
-	}
 
 	start := time.Now()
 	msgID := uuid.New()
@@ -75,6 +72,8 @@ func (s *ClientService) Discover(ctx context.Context, req *ClientDiscoverRequest
 		httpStatus int
 	)
 
+	discoverURL := s.cfg.BapCallerURL + "/discover"
+
 	// Deferred block: DB log + logharbour ACK/ERR entry.
 	defer func() {
 		dur := time.Since(start)
@@ -82,7 +81,7 @@ func (s *ClientService) Discover(ctx context.Context, req *ClientDiscoverRequest
 		ack := dbsqlc.NullAckStatus{AckStatus: dbsqlc.AckStatusACK, Valid: true}
 		if callErr != nil {
 			ack = dbsqlc.NullAckStatus{AckStatus: dbsqlc.AckStatusNACK, Valid: true}
-			s.logBecknErr("discover", txnID.String(), s.cfg.CDSDiscoverURL, callErr, dur)
+			s.logBecknErr("discover", txnID.String(), discoverURL, callErr, dur)
 		} else {
 			s.logBecknAck("discover", txnID.String(), httpStatus, respBody, dur)
 		}
@@ -92,7 +91,7 @@ func (s *ClientService) Discover(ctx context.Context, req *ClientDiscoverRequest
 			MessageID:            msgID,
 			Action:               dbsqlc.BecknActionDiscover,
 			Direction:            dbsqlc.MessageDirectionOUTBOUND,
-			Url:                  strPtr(s.cfg.CDSDiscoverURL),
+			Url:                  strPtr(discoverURL),
 			BapID:                strPtr(s.cfg.BapID),
 			BapUri:               strPtr(s.cfg.BapURI),
 			NetworkID:            strPtr(s.cfg.NetworkID),
@@ -106,9 +105,9 @@ func (s *ClientService) Discover(ctx context.Context, req *ClientDiscoverRequest
 		}
 	}()
 
-	s.logBecknOut("discover", http.MethodGet, s.cfg.CDSDiscoverURL, txnID.String(), msgID.String(), reqJSON)
+	s.logBecknOut("discover", http.MethodPost, discoverURL, txnID.String(), msgID.String(), reqJSON)
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, s.cfg.CDSDiscoverURL, bytes.NewBuffer(reqJSON))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, discoverURL, bytes.NewBuffer(reqJSON))
 	if err != nil {
 		callErr = fmt.Errorf("build discover request: %w", err)
 		return nil, callErr

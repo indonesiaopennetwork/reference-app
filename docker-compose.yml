@@ -130,6 +130,20 @@ services:
       - ./file-onboarding-and-catalog-publish/data/beckn:/beckn
     command: [ "./server", "--config=/app/config/catalog-publish.yaml" ]
 
+  # ─── Mock CDS (Local Only) ────────────────────────────────────────────────
+  mock-cds:
+    image: python:3.9-alpine
+    container_name: mock-cds
+    restart: unless-stopped
+    ports:
+      - "8086:8086"
+    networks:
+      - beckn
+    volumes:
+      - ./scripts/mock-cds.py:/app/mock-cds.py:ro
+      - ./file-onboarding-and-catalog-publish/data/beckn:/beckn:ro
+    command: [ "python", "-u", "/app/mock-cds.py" ]
+
   # ─── BPP Application ──────────────────────────────────────────────────────
   bpp:
     build:
@@ -156,10 +170,10 @@ services:
 
       # bpptest1.remiges.tech retired — onix-bpp-x7m2wmy7nq-et.a.run.app is the
       # only currently-registered identity for this side (matches remiges-trade).
-      BPP_ID: onix-bpp-x7m2wmy7nq-et.a.run.app
+      BPP_ID: sample-pn.ion-ref-app.ayushmatha.in
       # Bare registered Subscriber URL, not the internal /bpp/receiver path —
       # goes straight into context.bppUri (matches remiges-trade).
-      BPP_URI: http://onix-bpp:8082
+      BPP_URI: http://onix-bpp:8082/bpp/receiver
       NETWORK_ID: ion.id/ion-launch
 
       # BppCallerURL is the ONIX BPP caller base URL used for outbound on_* callbacks.
@@ -208,17 +222,16 @@ services:
       BAP_ID: onix-bap-x7m2wmy7nq-et.a.run.app
       # Bare registered Subscriber URL, not the internal /bap/receiver path —
       # goes straight into context.bapUri (matches remiges-trade).
-      BAP_URI: http://onix-bap:8081
+      BAP_URI: http://onix-bap:8081/bap/receiver
       NETWORK_ID: ion.id/ion-launch
 
       # BPP identity placed in context.bppId / context.bppUri.
-      BPP_ID: onix-bpp-x7m2wmy7nq-et.a.run.app
-      BPP_URI: http://onix-bpp:8082
+      BPP_ID: sample-pn.ion-ref-app.ayushmatha.in
+      BPP_URI: http://onix-bpp:8082/bpp/receiver
 
       # ADAPTER_URL is the ONIX BAP adapter the BAP actually POSTs to.
       ADAPTER_URL: http://onix-bap:8081/bap/caller
 
-      CDS_DISCOVER_URL: "https://34.47.138.217.sslip.io/beckn/discover"
 
       # Ed25519 signing key registered for onix-bap-x7m2wmy7nq-et.a.run.app —
       # signs outbound requests to CDS_DISCOVER_URL, and is the SAME keypair as
@@ -243,7 +256,8 @@ services:
     environment:
       BAP_URL: http://bap:8083
       # 127.0.0.11 is Docker's embedded DNS, resolves compose service names.
-      NGINX_RESOLVER: "127.0.0.11 8.8.8.8 8.8.4.4"
+      NGINX_RESOLVER: "127.0.0.11"
+      BPP_ADMIN_URL: ${VITE_BPP_ADMIN_URL}
     ports:
       - "3000:80"
     networks:
@@ -259,7 +273,8 @@ services:
       - bpp
     environment:
       BPP_URL: http://bpp:8080
-      NGINX_RESOLVER: "127.0.0.11 8.8.8.8 8.8.4.4"
+      NGINX_RESOLVER: "127.0.0.11"
+      BAP_URL: ${VITE_BAP_URL}
     ports:
       - "3001:80"
     networks:
@@ -281,7 +296,6 @@ services:
 
 volumes:
   postgres_data:
-
 
 networks:
   beckn:

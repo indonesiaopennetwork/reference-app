@@ -7,12 +7,12 @@ import {
   Upload, Plus, Trash2, Eye, ArrowUpRight, Filter, Search,
   Activity, Zap, Store, Calendar, Tag, BarChart2, Inbox,
   ArrowRight, Circle, Star, Ticket, Ban, Wand2,
-  BookOpen, FolderOpen, Send, ArrowLeft,
+  BookOpen, FolderOpen, Send, ArrowLeft, ExternalLink,
 } from 'lucide-react'
 
 const API_BASE = '/api/v1'
-const BRAND    = 'linear-gradient(135deg,#00b8e6 0%,#1e2fa0 100%)'
-const BRAND2   = 'linear-gradient(135deg,#e6006e 0%,#7c3aed 100%)'
+const BRAND = 'linear-gradient(135deg,#00b8e6 0%,#1e2fa0 100%)'
+const BRAND2 = 'linear-gradient(135deg,#e6006e 0%,#7c3aed 100%)'
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -25,9 +25,9 @@ async function apiFetch(path, opts = {}) {
 }
 
 function useApi(path, deps = []) {
-  const [data, setData]       = useState(null)
+  const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [error, setError]     = useState(null)
+  const [error, setError] = useState(null)
   const load = useCallback(async () => {
     if (!path) return
     setLoading(true); setError(null)
@@ -61,12 +61,12 @@ function fmtName(obj) {
 
 function StatusBadge({ status }) {
   const map = {
-    ACTIVE:    { cls: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25', dot: 'bg-emerald-400' },
-    DRAFT:     { cls: 'bg-amber-500/15  text-amber-400  border-amber-500/25',    dot: 'bg-amber-400' },
-    CANCELLED: { cls: 'bg-red-500/15    text-red-400    border-red-500/25',      dot: 'bg-red-400' },
-    COMPLETE:  { cls: 'bg-sky-500/15    text-sky-400    border-sky-500/25',      dot: 'bg-sky-400' },
-    ACK:       { cls: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25', dot: 'bg-emerald-400' },
-    NACK:      { cls: 'bg-red-500/15    text-red-400    border-red-500/25',      dot: 'bg-red-400' },
+    ACTIVE: { cls: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25', dot: 'bg-emerald-400' },
+    DRAFT: { cls: 'bg-amber-500/15  text-amber-400  border-amber-500/25', dot: 'bg-amber-400' },
+    CANCELLED: { cls: 'bg-red-500/15    text-red-400    border-red-500/25', dot: 'bg-red-400' },
+    COMPLETE: { cls: 'bg-sky-500/15    text-sky-400    border-sky-500/25', dot: 'bg-sky-400' },
+    ACK: { cls: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25', dot: 'bg-emerald-400' },
+    NACK: { cls: 'bg-red-500/15    text-red-400    border-red-500/25', dot: 'bg-red-400' },
   }
   const s = map[status] || { cls: 'bg-slate-500/15 text-slate-400 border-slate-500/25', dot: 'bg-slate-400' }
   return (
@@ -132,13 +132,13 @@ function Pagination({ page, totalPages, onPage, total, limit }) {
 // ─── Sidebar ─────────────────────────────────────────────────────────────────
 
 const NAV_ITEMS = [
-  { id: 'overview',  label: 'Overview',        icon: LayoutDashboard, desc: 'Stats & insights' },
-  { id: 'orders',    label: 'Orders',           icon: ShoppingBag,     desc: 'Manage contracts' },
-  { id: 'inventory', label: 'Inventory',        icon: Package,         desc: 'Resources & offers' },
-  { id: 'catalogs',  label: 'Catalogs',         icon: BookOpen,        desc: 'Manage & publish' },
-  { id: 'messages',  label: 'Message Log',      icon: MessageSquare,   desc: 'Protocol audit' },
-  { id: 'support',   label: 'Support Tickets',  icon: Ticket,          desc: 'Customer support' },
-  { id: 'ratings',   label: 'Ratings',          icon: Star,            desc: 'Order ratings' },
+  { id: 'overview', label: 'Overview', icon: LayoutDashboard, desc: 'Stats & insights' },
+  { id: 'orders', label: 'Orders', icon: ShoppingBag, desc: 'Manage contracts' },
+  { id: 'inventory', label: 'Inventory', icon: Package, desc: 'Resources & offers' },
+  { id: 'catalogs', label: 'Catalogs', icon: BookOpen, desc: 'Manage & publish' },
+  { id: 'messages', label: 'Message Log', icon: MessageSquare, desc: 'Protocol audit' },
+  { id: 'support', label: 'Support Tickets', icon: Ticket, desc: 'Customer support' },
+  { id: 'ratings', label: 'Ratings', icon: Star, desc: 'Order ratings' },
 ]
 
 function Sidebar({ active, onNav, open, onClose }) {
@@ -165,17 +165,15 @@ function Sidebar({ active, onNav, open, onClose }) {
       {/* Nav */}
       <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
         {NAV_ITEMS.map(({ id, label, icon: Icon, desc }) => {
-          const isActive = active === id || (id === 'catalogs' && ['catalog_detail','create_catalog','add_product'].includes(active))
+          const isActive = active === id || (id === 'catalogs' && ['catalog_detail', 'create_catalog', 'add_product'].includes(active))
           return (
             <button key={id} onClick={() => { onNav(id); onClose?.() }}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all group ${
-                isActive ? 'text-white' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
-              }`}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all group ${isActive ? 'text-white' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+                }`}
               style={isActive ? { background: 'rgba(0,184,230,0.12)', border: '1px solid rgba(0,184,230,0.25)' } : {}}
             >
-              <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-all ${
-                isActive ? '' : 'bg-slate-900 group-hover:bg-white/[0.07]'
-              }`}
+              <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-all ${isActive ? '' : 'bg-slate-900 group-hover:bg-white/[0.07]'
+                }`}
                 style={isActive ? { background: 'rgba(0,184,230,0.2)' } : {}}>
                 <Icon size={15} style={isActive ? { color: '#00b8e6' } : {}} />
               </div>
@@ -190,8 +188,16 @@ function Sidebar({ active, onNav, open, onClose }) {
       </nav>
 
       {/* Footer */}
-      <div className="px-4 py-3 border-t border-white/[0.06]">
-        <p className="text-[10px] text-slate-600">Beckn Protocol v2.0 · ION Retail</p>
+      <div className="px-4 py-3 border-t border-white/[0.06] space-y-3">
+        <a
+          href={window.__env__?.BAP_URL || import.meta.env.VITE_BAP_URL || "#"}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-emerald-400 transition-all bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 hover:border-emerald-500/40"
+        >
+          <ExternalLink size={13} /> Go to BAP APP
+        </a>
+        <p className="text-[10px] text-slate-600 text-center">Beckn Protocol v2.0 · ION Retail</p>
       </div>
     </>
   )
@@ -272,8 +278,8 @@ function StatCard({ label, value, icon: Icon, gradient, sub, onClick, loading })
 
 function FunnelCard({ funnel, loading }) {
   const steps = [
-    { key: 'select',  label: 'Select',  color: '#00b8e6', emoji: '🔍' },
-    { key: 'init',    label: 'Init',    color: '#7c3aed', emoji: '📋' },
+    { key: 'select', label: 'Select', color: '#00b8e6', emoji: '🔍' },
+    { key: 'init', label: 'Init', color: '#7c3aed', emoji: '📋' },
     { key: 'confirm', label: 'Confirm', color: '#10b981', emoji: '✅' },
   ]
   const max = Math.max(1, ...steps.map(s => funnel?.[s.key] ?? 0))
@@ -357,9 +363,9 @@ function OverviewPage({ onNav }) {
   const { data: stats, loading: sLoad, error: sErr, reload } = useApi('/dashboard/stats')
   const { data: orders } = useApi('/orders?limit=6')
   const { data: supportData } = useApi('/support-tickets?page=1&limit=1')
-  const { data: ratingsData  } = useApi('/ratings?page=1&limit=1')
+  const { data: ratingsData } = useApi('/ratings?page=1&limit=1')
   const totalTickets = supportData?.total ?? null
-  const totalRatings = ratingsData?.total  ?? null
+  const totalRatings = ratingsData?.total ?? null
 
   return (
     <div>
@@ -402,16 +408,16 @@ function OverviewPage({ onNav }) {
 
       {/* Stat cards */}
       <div className="grid grid-cols-2 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-4">
-        <StatCard label="Active Orders"  value={stats?.active_orders}  icon={CheckCircle2} gradient="linear-gradient(135deg,#10b981,#059669)" loading={sLoad} onClick={() => onNav('orders')} />
-        <StatCard label="Pending Orders" value={stats?.pending_orders} icon={Clock}        gradient="linear-gradient(135deg,#f59e0b,#d97706)" loading={sLoad} onClick={() => onNav('orders')} />
-        <StatCard label="Orders Today"   value={stats?.today_orders}   icon={TrendingUp}   gradient="linear-gradient(135deg,#00b8e6,#1e2fa0)" loading={sLoad} onClick={() => onNav('orders')} />
-        <StatCard label="Resources"      value={stats?.resource_count} icon={Package}      gradient="linear-gradient(135deg,#06b6d4,#0891b2)" loading={sLoad} onClick={() => onNav('inventory', { initialTab: 'resources' })} />
+        <StatCard label="Active Orders" value={stats?.active_orders} icon={CheckCircle2} gradient="linear-gradient(135deg,#10b981,#059669)" loading={sLoad} onClick={() => onNav('orders')} />
+        <StatCard label="Pending Orders" value={stats?.pending_orders} icon={Clock} gradient="linear-gradient(135deg,#f59e0b,#d97706)" loading={sLoad} onClick={() => onNav('orders')} />
+        <StatCard label="Orders Today" value={stats?.today_orders} icon={TrendingUp} gradient="linear-gradient(135deg,#00b8e6,#1e2fa0)" loading={sLoad} onClick={() => onNav('orders')} />
+        <StatCard label="Resources" value={stats?.resource_count} icon={Package} gradient="linear-gradient(135deg,#06b6d4,#0891b2)" loading={sLoad} onClick={() => onNav('inventory', { initialTab: 'resources' })} />
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
-        <StatCard label="Active Offers"  value={stats?.offer_count}    icon={Tag}          gradient="linear-gradient(135deg,#e6006e,#7c3aed)" loading={sLoad} onClick={() => onNav('inventory', { initialTab: 'offers' })} />
-        <StatCard label="Out of Stock"   value={stats?.out_of_stock ?? 0} icon={Ban}       gradient="linear-gradient(135deg,#ef4444,#b91c1c)" loading={sLoad} onClick={() => onNav('inventory', { initialTab: 'stock' })} />
-        <StatCard label="Support Tickets" value={totalTickets}         icon={Ticket}       gradient="linear-gradient(135deg,#8b5cf6,#6d28d9)" loading={totalTickets === null} onClick={() => onNav('support')} />
-        <StatCard label="Ratings"        value={totalRatings}          icon={Star}         gradient="linear-gradient(135deg,#f59e0b,#b45309)" loading={totalRatings === null} onClick={() => onNav('ratings')} />
+        <StatCard label="Active Offers" value={stats?.offer_count} icon={Tag} gradient="linear-gradient(135deg,#e6006e,#7c3aed)" loading={sLoad} onClick={() => onNav('inventory', { initialTab: 'offers' })} />
+        <StatCard label="Out of Stock" value={stats?.out_of_stock ?? 0} icon={Ban} gradient="linear-gradient(135deg,#ef4444,#b91c1c)" loading={sLoad} onClick={() => onNav('inventory', { initialTab: 'stock' })} />
+        <StatCard label="Support Tickets" value={totalTickets} icon={Ticket} gradient="linear-gradient(135deg,#8b5cf6,#6d28d9)" loading={totalTickets === null} onClick={() => onNav('support')} />
+        <StatCard label="Ratings" value={totalRatings} icon={Star} gradient="linear-gradient(135deg,#f59e0b,#b45309)" loading={totalRatings === null} onClick={() => onNav('ratings')} />
       </div>
 
       {/* Bottom section */}
@@ -434,8 +440,8 @@ function OverviewPage({ onNav }) {
               {!orders?.items?.length
                 ? <p className="text-sm text-slate-500 py-8 text-center">No orders yet</p>
                 : orders.items.map(o => (
-                    <ActivityRow key={o.id} o={o} onView={() => onNav('orders')} />
-                  ))
+                  <ActivityRow key={o.id} o={o} onView={() => onNav('orders')} />
+                ))
               }
             </div>
           </Card>
@@ -485,9 +491,9 @@ function OrderDetailDrawer({ order, onClose }) {
                     <SectionTitle>Contract</SectionTitle>
                     <Card className="divide-y divide-white/[0.05]">
                       {[
-                        ['Status',  <StatusBadge key="s" status={data?.contract?.status} />],
-                        ['Buyer',   data?.contract?.bap_id],
-                        ['Domain',  data?.contract?.domain || '—'],
+                        ['Status', <StatusBadge key="s" status={data?.contract?.status} />],
+                        ['Buyer', data?.contract?.bap_id],
+                        ['Domain', data?.contract?.domain || '—'],
                         ['Created', fmtDate(data?.contract?.created_at?.Time || data?.contract?.created_at)],
                         ['Updated', fmtDate(data?.contract?.updated_at?.Time || data?.contract?.updated_at)],
                       ].map(([k, v]) => (
@@ -529,8 +535,8 @@ function OrderDetailDrawer({ order, onClose }) {
                       <div className="space-y-2">
                         {data.considerations.map((c, i) => {
                           let attrs = c.consideration_attributes
-                          try { if (typeof attrs === 'string') attrs = JSON.parse(attrs) } catch {}
-                          const price    = attrs?.price || attrs?.totalAmount
+                          try { if (typeof attrs === 'string') attrs = JSON.parse(attrs) } catch { }
+                          const price = attrs?.price || attrs?.totalAmount
                           const currency = attrs?.currency || 'INR'
                           return (
                             <Card key={i} className="p-4">
@@ -567,14 +573,14 @@ function OrderDetailDrawer({ order, onClose }) {
 }
 
 function OrdersPage() {
-  const [page, setPage]     = useState(1)
+  const [page, setPage] = useState(1)
   const [selected, setSelected] = useState(null)
   const [search, setSearch] = useState('')
   const limit = 20
   const { data, loading, error, reload } = useApi(`/orders?page=${page}&limit=${limit}`, [page])
-  const total      = data?.total ?? 0
+  const total = data?.total ?? 0
   const totalPages = Math.max(1, Math.ceil(total / limit))
-  const items      = (data?.items ?? []).filter(o =>
+  const items = (data?.items ?? []).filter(o =>
     !search || o.bap_id?.includes(search) || o.transaction_id?.includes(search) || o.status?.includes(search.toUpperCase())
   )
 
@@ -735,7 +741,7 @@ function StockTab() {
   const items = data?.items ?? []
 
   const totalStock = items.reduce((s, r) => s + r.quantity, 0)
-  const totalSold  = items.reduce((s, r) => s + r.sold, 0)
+  const totalSold = items.reduce((s, r) => s + r.sold, 0)
   const outOfStock = items.filter(r => r.quantity === 0).length
 
   return (
@@ -834,8 +840,8 @@ function OffersTab() {
                   <td className="px-5 py-3">
                     {o.resource_ids?.length
                       ? <span className="text-xs px-2 py-0.5 rounded-full border border-cyan-500/25 font-semibold" style={{ color: '#00b8e6', background: 'rgba(0,184,230,0.1)' }}>
-                          {o.resource_ids.length} resource{o.resource_ids.length !== 1 ? 's' : ''}
-                        </span>
+                        {o.resource_ids.length} resource{o.resource_ids.length !== 1 ? 's' : ''}
+                      </span>
                       : <span className="text-slate-600">—</span>
                     }
                   </td>
@@ -859,22 +865,22 @@ function OffersTab() {
 }
 
 function InventoryProductsTab() {
-  const [search, setSearch]           = useState('')
+  const [search, setSearch] = useState('')
   const [catalogFilter, setCatalogFilter] = useState('')
   const [providerFilter, setProviderFilter] = useState('')
-  const [page, setPage]               = useState(1)
+  const [page, setPage] = useState(1)
   const limit = 20
 
   const url = `/inventory/items?search=${encodeURIComponent(search)}&catalog_id=${encodeURIComponent(catalogFilter)}&provider_id=${encodeURIComponent(providerFilter)}&page=${page}&limit=${limit}`
   const { data, loading, error, reload } = useApi(url, [search, catalogFilter, providerFilter, page])
-  const { data: catData }  = useApi('/catalogs?limit=100', [])
+  const { data: catData } = useApi('/catalogs?limit=100', [])
   const { data: provData } = useApi('/providers', [])
 
-  const items      = data?.items || []
-  const total      = data?.total || 0
+  const items = data?.items || []
+  const total = data?.total || 0
   const totalPages = Math.max(1, Math.ceil(total / limit))
-  const catalogs   = catData?.items || []
-  const providers  = provData?.items || []
+  const catalogs = catData?.items || []
+  const providers = provData?.items || []
 
   // Group items by provider then catalog
   const grouped = {}
@@ -979,9 +985,8 @@ function InventoryPage({ initialTab = 'products' }) {
       <div className="flex gap-1 p-1 rounded-xl w-fit" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}>
         {['products', 'resources', 'offers', 'stock'].map(t => (
           <button key={t} onClick={() => setTab(t)}
-            className={`px-5 py-2 rounded-lg text-sm font-semibold transition-all capitalize ${
-              tab !== t ? 'text-slate-400 hover:text-slate-200' : 'text-white shadow-lg'
-            }`}
+            className={`px-5 py-2 rounded-lg text-sm font-semibold transition-all capitalize ${tab !== t ? 'text-slate-400 hover:text-slate-200' : 'text-white shadow-lg'
+              }`}
             style={tab === t ? { background: BRAND } : {}}>
             {t === 'products' ? '🏪 By Catalog' : t === 'resources' ? '📦 Resources' : t === 'offers' ? '🏷️ Offers' : '📊 Stock'}
           </button>
@@ -989,8 +994,8 @@ function InventoryPage({ initialTab = 'products' }) {
       </div>
       {tab === 'products' ? <InventoryProductsTab />
         : tab === 'resources' ? <ResourcesTab />
-        : tab === 'offers' ? <OffersTab />
-        : <StockTab />}
+          : tab === 'offers' ? <OffersTab />
+            : <StockTab />}
     </div>
   )
 }
@@ -1019,9 +1024,9 @@ const EMPTY_OFFER = () => ({
   // offer attributes
   offer_context: 'https://raw.githubusercontent.com/beckn/local-retail/refs/heads/main/schema/RetailOffer/v2.1/context.jsonld',
   // policies
-  returns_allowed: true,  returns_window: 'P7D',  returns_method: 'SELLER_PICKUP',
-  cancel_allowed:  true,  cancel_window:  'PT2H', cancel_event:   'BEFORE_PACKING',
-  replace_allowed: true,  replace_window: 'P7D',  replace_method: 'SELLER_PICKUP', replace_subject_avail: true,
+  returns_allowed: true, returns_window: 'P7D', returns_method: 'SELLER_PICKUP',
+  cancel_allowed: true, cancel_window: 'PT2H', cancel_event: 'BEFORE_PACKING',
+  replace_allowed: true, replace_window: 'P7D', replace_method: 'SELLER_PICKUP', replace_subject_avail: true,
   // payment & serviceability
   cod_available: true,
   max_distance: '15', distance_unit: 'KM',
@@ -1029,7 +1034,7 @@ const EMPTY_OFFER = () => ({
   timing_start: '09:00', timing_end: '21:00',
 })
 
-const CATALOG_TYPES  = ['', 'regular']
+const CATALOG_TYPES = ['', 'regular']
 const ALL_DAYS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN']
 
 // ---------------------------------------------------------------------------
@@ -1159,9 +1164,9 @@ const AUTO_FILL_POOL = [
 
 // Build resourceAttributes JSON-LD object from flat form fields.
 function buildResourceAttrs(r) {
-  const hasIdentity  = r.brand || r.origin_country
-  const hasPhysical  = r.weight_value || r.volume_value || r.dim_length || r.color || r.material || r.finish
-  const hasPkg       = r.mfr_name || r.common_name || r.net_qty_value
+  const hasIdentity = r.brand || r.origin_country
+  const hasPhysical = r.weight_value || r.volume_value || r.dim_length || r.color || r.material || r.finish
+  const hasPkg = r.mfr_name || r.common_name || r.net_qty_value
   if (!hasIdentity && !hasPhysical && !hasPkg) return undefined
 
   const attrs = {
@@ -1170,20 +1175,20 @@ function buildResourceAttrs(r) {
   }
   if (hasIdentity) {
     attrs.identity = {}
-    if (r.brand)          attrs.identity.brand         = r.brand
+    if (r.brand) attrs.identity.brand = r.brand
     if (r.origin_country) attrs.identity.originCountry = r.origin_country
   }
   if (hasPhysical) {
     attrs.physical = {}
-    if (r.weight_value) attrs.physical.weight     = { unitCode: r.weight_unit, unitQuantity: Number(r.weight_value) }
-    if (r.volume_value) attrs.physical.volume     = { unitCode: r.volume_unit, unitQuantity: Number(r.volume_value) }
+    if (r.weight_value) attrs.physical.weight = { unitCode: r.weight_unit, unitQuantity: Number(r.weight_value) }
+    if (r.volume_value) attrs.physical.volume = { unitCode: r.volume_unit, unitQuantity: Number(r.volume_value) }
     if (r.dim_length || r.dim_breadth || r.dim_height)
       attrs.physical.dimensions = { unit: r.dim_unit, length: Number(r.dim_length) || 0, breadth: Number(r.dim_breadth) || 0, height: Number(r.dim_height) || 0 }
     if (r.color || r.material || r.finish) {
       attrs.physical.appearance = {}
-      if (r.color)    attrs.physical.appearance.color    = r.color
+      if (r.color) attrs.physical.appearance.color = r.color
       if (r.material) attrs.physical.appearance.material = r.material
-      if (r.finish)   attrs.physical.appearance.finish   = r.finish
+      if (r.finish) attrs.physical.appearance.finish = r.finish
     }
   }
   if (hasPkg) {
@@ -1199,10 +1204,10 @@ function buildResourceAttrs(r) {
 // Returns undefined when no meaningful attributes are set so the field is
 // omitted from the payload entirely (avoids sending a broken @context to CDS).
 function buildOfferAttrs(o) {
-  const hasPolicies     = o.returns_allowed || o.cancel_allowed || o.replace_allowed
-  const hasPayment      = o.cod_available
+  const hasPolicies = o.returns_allowed || o.cancel_allowed || o.replace_allowed
+  const hasPayment = o.cod_available
   const hasServiceability = o.max_distance || (o.timing_days && o.timing_days.length > 0)
-  const hasContext      = o.offer_context
+  const hasContext = o.offer_context
 
   if (!hasPolicies && !hasPayment && !hasServiceability && !hasContext) return undefined
 
@@ -1211,9 +1216,9 @@ function buildOfferAttrs(o) {
 
   if (hasPolicies) {
     attrs.policies = {
-      returns:      { allowed: !!o.returns_allowed,  ...(o.returns_allowed  ? { window: o.returns_window,  method: o.returns_method } : {}) },
-      cancellation: { allowed: !!o.cancel_allowed,   ...(o.cancel_allowed   ? { window: o.cancel_window,   cutoffEvent: o.cancel_event } : {}) },
-      replacement:  { allowed: !!o.replace_allowed,  ...(o.replace_allowed  ? { window: o.replace_window,  method: o.replace_method, subjectToAvailability: !!o.replace_subject_avail } : {}) },
+      returns: { allowed: !!o.returns_allowed, ...(o.returns_allowed ? { window: o.returns_window, method: o.returns_method } : {}) },
+      cancellation: { allowed: !!o.cancel_allowed, ...(o.cancel_allowed ? { window: o.cancel_window, cutoffEvent: o.cancel_event } : {}) },
+      replacement: { allowed: !!o.replace_allowed, ...(o.replace_allowed ? { window: o.replace_window, method: o.replace_method, subjectToAvailability: !!o.replace_subject_avail } : {}) },
     }
   }
   if (hasPayment) attrs.paymentConstraints = { codAvailable: true }
@@ -1231,14 +1236,14 @@ function buildOfferAttrs(o) {
 }
 
 function PublishPage({ onNav }) {
-  const [step, setStep]       = useState(0) // 0=catalog, 1=resources, 2=offers, 3=review
-  const [form, setForm]       = useState({
+  const [step, setStep] = useState(0) // 0=catalog, 1=resources, 2=offers, 3=review
+  const [form, setForm] = useState({
     catalog_id: '', catalog_name: '', provider_id: '', provider_name: '', catalog_type: '',
     validity_start: '', validity_end: '',
     resources: [EMPTY_RESOURCE()], offers: [EMPTY_OFFER()],
   })
-  const [error, setError]       = useState(null)
-  const [loading, setLoading]   = useState(false)
+  const [error, setError] = useState(null)
+  const [loading, setLoading] = useState(false)
   const [autoFillIdx, setAutoFillIdx] = useState(0)
   // track which resource/offer "advanced" sections are expanded
   const [resOpen, setResOpen] = useState({})
@@ -1247,9 +1252,9 @@ function PublishPage({ onNav }) {
   // Cycle through AUTO_FILL_POOL on each click so consecutive clicks give different products.
   // A short hex suffix is appended to every ID to guarantee uniqueness across publishes.
   const handleAutoFill = () => {
-    const seed  = AUTO_FILL_POOL[autoFillIdx % AUTO_FILL_POOL.length]
+    const seed = AUTO_FILL_POOL[autoFillIdx % AUTO_FILL_POOL.length]
     const suffix = Date.now().toString(36) // e.g. "lf3k2a"
-    const uid    = id => `${id}-${suffix}`
+    const uid = id => `${id}-${suffix}`
 
     setForm({
       ...seed,
@@ -1257,7 +1262,7 @@ function PublishPage({ onNav }) {
       resources: seed.resources.map(r => ({ ...r, id: uid(r.id) })),
       offers: seed.offers.map(o => ({
         ...o,
-        id:           uid(o.id),
+        id: uid(o.id),
         resource_ids: o.resource_ids.split(',').map(rid => uid(rid.trim())).join(', '),
       })),
     })
@@ -1269,10 +1274,10 @@ function PublishPage({ onNav }) {
 
   const STEPS = ['Catalog Info', 'Resources', 'Offers', 'Review & Publish']
 
-  const setField         = (k, v)    => setForm(f => ({ ...f, [k]: v }))
+  const setField = (k, v) => setForm(f => ({ ...f, [k]: v }))
   const setResourceField = (i, k, v) => setForm(f => { const r = [...f.resources]; r[i] = { ...r[i], [k]: v }; return { ...f, resources: r } })
-  const setOfferField    = (i, k, v) => setForm(f => { const o = [...f.offers];    o[i] = { ...o[i], [k]: v }; return { ...f, offers: o } })
-  const toggleDay        = (i, day)  => setForm(f => {
+  const setOfferField = (i, k, v) => setForm(f => { const o = [...f.offers]; o[i] = { ...o[i], [k]: v }; return { ...f, offers: o } })
+  const toggleDay = (i, day) => setForm(f => {
     const o = [...f.offers]; const days = o[i].timing_days
     o[i] = { ...o[i], timing_days: days.includes(day) ? days.filter(d => d !== day) : [...days, day] }
     return { ...f, offers: o }
@@ -1308,15 +1313,19 @@ function PublishPage({ onNav }) {
             id: o.id,
             descriptor: { name: o.name, shortDesc: o.short_desc },
             resourceIds: o.resource_ids.split(',').map(s => s.trim()).filter(Boolean),
-            ...(o.price ? { considerations: [{ id: `${o.id}-price`, status: { code: 'ACTIVE', name: 'ACTIVE' },
-              considerationAttributes: {
-                '@context': 'https://schema.beckn.io/RetailConsideration/v2.1/context.jsonld',
-                '@type': 'RetailConsideration',
-                currency: o.currency,
-                breakup: [{ title: o.name || o.id, amount: Number(o.price), type: 'BASE_PRICE' }],
-                totalAmount: Number(o.price),
-                paymentMethods: o.cod_available ? ['PREPAID', 'COD', 'UPI'] : ['PREPAID', 'UPI'],
-              } }] } : {}),
+            ...(o.price ? {
+              considerations: [{
+                id: `${o.id}-price`, status: { code: 'ACTIVE', name: 'ACTIVE' },
+                considerationAttributes: {
+                  '@context': 'https://schema.beckn.io/RetailConsideration/v2.1/context.jsonld',
+                  '@type': 'RetailConsideration',
+                  currency: o.currency,
+                  breakup: [{ title: o.name || o.id, amount: Number(o.price), type: 'BASE_PRICE' }],
+                  totalAmount: Number(o.price),
+                  paymentMethods: o.cod_available ? ['PREPAID', 'COD', 'UPI'] : ['PREPAID', 'UPI'],
+                }
+              }]
+            } : {}),
             ...(start ? { validity: { startDate: start, endDate: end } } : {}),
             ...(offerAttrs ? { offerAttributes: offerAttrs } : {}),
           }
@@ -1349,13 +1358,11 @@ function PublishPage({ onNav }) {
         {STEPS.map((s, i) => (
           <div key={i} className="flex items-center flex-1 last:flex-none">
             <button onClick={() => i < step && setStep(i)}
-              className={`flex items-center gap-2 text-xs font-semibold transition-all ${
-                i < step ? 'cursor-pointer' : 'cursor-default'
-              }`}>
-              <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold transition-all ${
-                i < step ? 'bg-emerald-500 text-white' :
-                i === step ? 'text-white' : 'bg-slate-800 text-slate-500'
-              }`}
+              className={`flex items-center gap-2 text-xs font-semibold transition-all ${i < step ? 'cursor-pointer' : 'cursor-default'
+                }`}>
+              <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold transition-all ${i < step ? 'bg-emerald-500 text-white' :
+                  i === step ? 'text-white' : 'bg-slate-800 text-slate-500'
+                }`}
                 style={i === step ? { background: BRAND } : {}}>
                 {i < step ? <CheckCircle2 size={14} /> : i + 1}
               </div>
@@ -1726,11 +1733,10 @@ function PublishPage({ onNav }) {
                           {ALL_DAYS.map(day => (
                             <button key={day} type="button"
                               onClick={() => toggleDay(i, day)}
-                              className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition-all ${
-                                o.timing_days.includes(day)
+                              className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition-all ${o.timing_days.includes(day)
                                   ? 'text-white border-cyan-500/40'
                                   : 'text-slate-500 border-white/[0.08] hover:border-white/20'
-                              }`}
+                                }`}
                               style={o.timing_days.includes(day) ? { background: 'rgba(0,184,230,0.15)' } : {}}>
                               {day}
                             </button>
@@ -1767,7 +1773,7 @@ function PublishPage({ onNav }) {
                     ['Provider', `${form.provider_name} (${form.provider_id})`],
                     ['Type', form.catalog_type || 'Not set'],
                     ['Valid From', form.validity_start ? fmtDate(new Date(form.validity_start).toISOString()) : '—'],
-                    ['Valid Until', form.validity_end   ? fmtDate(new Date(form.validity_end).toISOString())   : '—'],
+                    ['Valid Until', form.validity_end ? fmtDate(new Date(form.validity_end).toISOString()) : '—'],
                   ].map(([k, v]) => (
                     <div key={k} className="flex justify-between">
                       <span className="text-slate-500">{k}</span>
@@ -1782,7 +1788,7 @@ function PublishPage({ onNav }) {
                   {form.resources.map((r, i) => (
                     <div key={i} className="flex items-start gap-3 text-sm">
                       {r.media_url
-                        ? <img src={r.media_url} alt={r.name} className="w-10 h-10 rounded-lg object-cover shrink-0 border border-white/[0.08]" onError={e => { e.target.style.display='none' }} />
+                        ? <img src={r.media_url} alt={r.name} className="w-10 h-10 rounded-lg object-cover shrink-0 border border-white/[0.08]" onError={e => { e.target.style.display = 'none' }} />
                         : <div className="w-10 h-10 rounded-lg shrink-0 flex items-center justify-center" style={{ background: 'rgba(0,184,230,0.08)', border: '1px solid rgba(0,184,230,0.15)' }}><Package size={16} style={{ color: '#00b8e6' }} /></div>
                       }
                       <div className="flex-1 min-w-0">
@@ -1860,27 +1866,27 @@ function PublishPage({ onNav }) {
 // ─── Messages ─────────────────────────────────────────────────────────────────
 
 const ACTION_META = {
-  select:     { color: '#00b8e6', bg: 'rgba(0,184,230,0.12)',  label: 'SELECT' },
-  on_select:  { color: '#67e8f9', bg: 'rgba(103,232,249,0.1)', label: 'ON_SELECT' },
-  init:       { color: '#a78bfa', bg: 'rgba(167,139,250,0.12)',label: 'INIT' },
-  on_init:    { color: '#c4b5fd', bg: 'rgba(196,181,253,0.1)', label: 'ON_INIT' },
-  confirm:    { color: '#34d399', bg: 'rgba(52,211,153,0.12)', label: 'CONFIRM' },
+  select: { color: '#00b8e6', bg: 'rgba(0,184,230,0.12)', label: 'SELECT' },
+  on_select: { color: '#67e8f9', bg: 'rgba(103,232,249,0.1)', label: 'ON_SELECT' },
+  init: { color: '#a78bfa', bg: 'rgba(167,139,250,0.12)', label: 'INIT' },
+  on_init: { color: '#c4b5fd', bg: 'rgba(196,181,253,0.1)', label: 'ON_INIT' },
+  confirm: { color: '#34d399', bg: 'rgba(52,211,153,0.12)', label: 'CONFIRM' },
   on_confirm: { color: '#6ee7b7', bg: 'rgba(110,231,183,0.1)', label: 'ON_CONFIRM' },
 }
 
 function MessagesPage() {
-  const [limit, setLimit]   = useState(50)
+  const [limit, setLimit] = useState(50)
   const [filter, setFilter] = useState('')
   const [dirFilter, setDirFilter] = useState('ALL')
   const { data, loading, error, reload } = useApi(`/messages?limit=${limit}`, [limit])
 
   const items = (data?.items ?? []).filter(m => {
     const matchText = !filter || String(m.action).includes(filter.toLowerCase()) || String(m.transaction_id).includes(filter)
-    const matchDir  = dirFilter === 'ALL' || m.direction === dirFilter
+    const matchDir = dirFilter === 'ALL' || m.direction === dirFilter
     return matchText && matchDir
   })
 
-  const ackCount  = items.filter(m => m.ack_status?.ack_status === 'ACK'  || m.ack_status === 'ACK').length
+  const ackCount = items.filter(m => m.ack_status?.ack_status === 'ACK' || m.ack_status === 'ACK').length
   const nackCount = items.filter(m => m.ack_status?.ack_status === 'NACK' || m.ack_status === 'NACK').length
 
   return (
@@ -1954,7 +1960,7 @@ function MessagesPage() {
             <tbody className="divide-y divide-white/[0.04]">
               {items.map((m, idx) => {
                 const meta = ACTION_META[m.action] || { color: '#94a3b8', bg: 'rgba(148,163,184,0.08)', label: m.action?.toUpperCase() }
-                const ack  = m.ack_status?.ack_status || m.ack_status
+                const ack = m.ack_status?.ack_status || m.ack_status
                 return (
                   <tr key={idx} className="hover:bg-white/[0.025] transition-colors">
                     <td className="px-5 py-2.5">
@@ -2002,9 +2008,9 @@ function OrderRatings({ contractId }) {
       <div className="space-y-2">
         {ratings.map(r => {
           let range = r.range
-          try { if (typeof range === 'string') range = JSON.parse(range) } catch {}
+          try { if (typeof range === 'string') range = JSON.parse(range) } catch { }
           const score = range?.value ?? range?.score ?? '?'
-          const max   = range?.max ?? 5
+          const max = range?.max ?? 5
           return (
             <Card key={r.id} className="p-4">
               <div className="flex items-center justify-between mb-1">
@@ -2036,7 +2042,7 @@ function SupportPage() {
   const totalPages = Math.ceil(total / limit) || 1
 
   const statusCls = {
-    OPEN:     'bg-amber-500/15 text-amber-400 border border-amber-500/25',
+    OPEN: 'bg-amber-500/15 text-amber-400 border border-amber-500/25',
     RESOLVED: 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25',
   }
 
@@ -2060,8 +2066,8 @@ function SupportPage() {
             <tbody>
               {items.map(t => (
                 <tr key={t.id} className="border-b border-white/[0.04] hover:bg-white/[0.02] transition-colors">
-                  <td className="px-5 py-3 font-mono text-slate-400">{t.id.slice(0,8)}…</td>
-                  <td className="px-5 py-3 font-mono text-slate-400">{t.transactionId ? t.transactionId.slice(0,8) + '…' : '—'}</td>
+                  <td className="px-5 py-3 font-mono text-slate-400">{t.id.slice(0, 8)}…</td>
+                  <td className="px-5 py-3 font-mono text-slate-400">{t.transactionId ? t.transactionId.slice(0, 8) + '…' : '—'}</td>
                   <td className="px-5 py-3 text-slate-300 max-w-[140px] truncate">{t.bapId || '—'}</td>
                   <td className="px-5 py-3 text-slate-300 max-w-[200px] truncate">{t.name || t.shortDesc || '—'}</td>
                   <td className="px-5 py-3">
@@ -2114,12 +2120,12 @@ function RatingsPage() {
             <tbody>
               {items.map(r => {
                 let range = r.range
-                try { if (typeof range === 'string') range = JSON.parse(range) } catch {}
+                try { if (typeof range === 'string') range = JSON.parse(range) } catch { }
                 const score = range?.value ?? range?.score ?? '?'
-                const max   = range?.max ?? 5
+                const max = range?.max ?? 5
                 return (
                   <tr key={r.id} className="border-b border-white/[0.04] hover:bg-white/[0.02] transition-colors">
-                    <td className="px-5 py-3 font-mono text-slate-400">{r.transactionId ? r.transactionId.slice(0,8) + '…' : '—'}</td>
+                    <td className="px-5 py-3 font-mono text-slate-400">{r.transactionId ? r.transactionId.slice(0, 8) + '…' : '—'}</td>
                     <td className="px-5 py-3 text-slate-300 max-w-[140px] truncate">{r.bapId || '—'}</td>
                     <td className="px-5 py-3 text-slate-400 max-w-[120px] truncate">{r.targetId || '—'}</td>
                     <td className="px-5 py-3">
@@ -2149,9 +2155,9 @@ function RatingsPage() {
 // ─── Catalog Management ───────────────────────────────────────────────────────
 
 function CatalogsPage({ onNav }) {
-  const [search, setSearch]         = useState('')
+  const [search, setSearch] = useState('')
   const [providerFilter, setProviderFilter] = useState('')
-  const [page, setPage]             = useState(1)
+  const [page, setPage] = useState(1)
   const [publishing, setPublishing] = useState(null)
   const limit = 20
 
@@ -2289,14 +2295,22 @@ function CatalogsPage({ onNav }) {
 // ─── Create Catalog Page ──────────────────────────────────────────────────────
 
 const CATALOG_AUTOFILL_POOL = [
-  { id: 'cat-outdoor-gear', name: 'Outdoor Gear Store', short_desc: 'Camping, hiking & adventure equipment',
-    provider_id: 'provider-venky-bazaar', provider_name: 'Venky Bazaar' },
-  { id: 'cat-indonesian-snacks', name: 'Toko Camilan Nusantara', short_desc: 'Authentic Indonesian biscuits, chips & sweets',
-    provider_id: 'provider-toko-nusantara', provider_name: 'Toko Nusantara' },
-  { id: 'cat-electronics', name: 'Tech Essentials Hub', short_desc: 'Gadgets, accessories and consumer electronics',
-    provider_id: 'provider-techmart', provider_name: 'TechMart' },
-  { id: 'cat-apparel', name: 'FashionForward Apparel', short_desc: 'Trendy clothing for men and women',
-    provider_id: 'provider-fashionco', provider_name: 'FashionCo' },
+  {
+    id: 'cat-outdoor-gear', name: 'Outdoor Gear Store', short_desc: 'Camping, hiking & adventure equipment',
+    provider_id: 'provider-venky-bazaar', provider_name: 'Venky Bazaar'
+  },
+  {
+    id: 'cat-indonesian-snacks', name: 'Toko Camilan Nusantara', short_desc: 'Authentic Indonesian biscuits, chips & sweets',
+    provider_id: 'provider-toko-nusantara', provider_name: 'Toko Nusantara'
+  },
+  {
+    id: 'cat-electronics', name: 'Tech Essentials Hub', short_desc: 'Gadgets, accessories and consumer electronics',
+    provider_id: 'provider-techmart', provider_name: 'TechMart'
+  },
+  {
+    id: 'cat-apparel', name: 'FashionForward Apparel', short_desc: 'Trendy clothing for men and women',
+    provider_id: 'provider-fashionco', provider_name: 'FashionCo'
+  },
 ]
 let _catalogFillIdx = 0
 
@@ -2307,7 +2321,7 @@ function CreateCatalogPage({ onNav }) {
     validity_start: '', validity_end: '',
   })
   const [loading, setLoading] = useState(false)
-  const [error, setError]     = useState(null)
+  const [error, setError] = useState(null)
 
   const labelCls = 'block text-[11px] uppercase tracking-widest text-slate-500 font-semibold mb-1'
   const inputCls = 'w-full px-3 py-2 rounded-lg text-sm text-white placeholder-slate-600 border border-white/[0.08] bg-slate-900 focus:outline-none focus:border-blue-500/50 transition-colors'
@@ -2315,12 +2329,12 @@ function CreateCatalogPage({ onNav }) {
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
   const handleAutoFill = () => {
-    const seed   = CATALOG_AUTOFILL_POOL[_catalogFillIdx % CATALOG_AUTOFILL_POOL.length]
+    const seed = CATALOG_AUTOFILL_POOL[_catalogFillIdx % CATALOG_AUTOFILL_POOL.length]
     _catalogFillIdx++
     const suffix = Date.now().toString(36)
-    const now    = new Date()
-    const start  = now.toISOString().slice(0,16)
-    const end    = new Date(now.getTime() + 365*24*60*60*1000).toISOString().slice(0,16)
+    const now = new Date()
+    const start = now.toISOString().slice(0, 16)
+    const end = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 16)
     setForm({ ...seed, id: `${seed.id}-${suffix}`, validity_start: start, validity_end: end })
   }
 
@@ -2431,9 +2445,9 @@ function CatalogDetailPage({ onNav, catalogId }) {
   const { data, loading, error, reload } = useApi(`/catalogs/${catalogId}`, [catalogId])
   const [publishing, setPublishing] = useState(false)
 
-  const cat       = data?.catalog   || {}
+  const cat = data?.catalog || {}
   const resources = data?.resources || []
-  const offers    = data?.offers    || []
+  const offers = data?.offers || []
 
   // Build a map from resource_id → offer for quick lookup
   const offerByResourceId = {}
@@ -2621,12 +2635,18 @@ function CatalogDetailPage({ onNav, catalogId }) {
 const DAYS_OF_WEEK = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN']
 
 const PRODUCT_AUTOFILL_POOL = [
-  { res: { id: 'item-keripik-singkong', name: 'Keripik Singkong Balado (Spicy Cassava Chips)', short_desc: 'Crispy cassava chips with balado seasoning', stock_quantity: '50', media_url: 'https://images.unsplash.com/photo-1621939514649-280e2ee25f60?w=400', brand: 'Chitato', origin_country: 'ID', weight_value: '150', weight_unit: 'G', color: 'Golden', material: 'Cassava' },
-    off: { id: 'offer-keripik-singkong', name: 'Keripik Singkong Balado', price: '25000', currency: 'IDR', cod_available: true, returns_allowed: true, returns_window: 'P7D', returns_method: 'SELLER_PICKUP', cancel_allowed: true, cancel_window: 'PT2H', cancel_event: 'BEFORE_PACKING', replace_allowed: false, max_distance: '20', timing_days: ['MON','TUE','WED','THU','FRI','SAT','SUN'], timing_start: '09:00', timing_end: '21:00', offer_context: 'https://raw.githubusercontent.com/beckn/local-retail/refs/heads/main/schema/RetailOffer/v2.1/context.jsonld' } },
-  { res: { id: 'item-bolu-pisang', name: 'Bolu Pisang Cokelat (Chocolate Banana Cake)', short_desc: 'Soft banana cake with chocolate chips', stock_quantity: '30', media_url: 'https://images.unsplash.com/photo-1578985545062-69928b1d9587?w=400', brand: 'HomeMade', origin_country: 'ID', weight_value: '400', weight_unit: 'G', color: 'Brown', material: 'Flour' },
-    off: { id: 'offer-bolu-pisang', name: 'Bolu Pisang Cokelat', price: '45000', currency: 'IDR', cod_available: true, returns_allowed: false, cancel_allowed: true, cancel_window: 'PT1H', cancel_event: 'BEFORE_PACKING', replace_allowed: false, max_distance: '10', timing_days: ['MON','TUE','WED','THU','FRI','SAT'], timing_start: '08:00', timing_end: '18:00', offer_context: 'https://raw.githubusercontent.com/beckn/local-retail/refs/heads/main/schema/RetailOffer/v2.1/context.jsonld' } },
-  { res: { id: 'item-teh-botol', name: 'Teh Botol Sosro (Bottled Jasmine Tea)', short_desc: 'Ready-to-drink jasmine tea', stock_quantity: '200', media_url: 'https://images.unsplash.com/photo-1556679343-c7306c1976bc?w=400', brand: 'Sosro', origin_country: 'ID', weight_value: '350', weight_unit: 'ML', color: 'Amber', material: 'PET Bottle' },
-    off: { id: 'offer-teh-botol', name: 'Teh Botol Sosro', price: '5000', currency: 'IDR', cod_available: true, returns_allowed: false, cancel_allowed: true, cancel_window: 'PT30M', cancel_event: 'BEFORE_PACKING', replace_allowed: false, max_distance: '15', timing_days: ['MON','TUE','WED','THU','FRI','SAT','SUN'], timing_start: '07:00', timing_end: '22:00', offer_context: 'https://raw.githubusercontent.com/beckn/local-retail/refs/heads/main/schema/RetailOffer/v2.1/context.jsonld' } },
+  {
+    res: { id: 'item-keripik-singkong', name: 'Keripik Singkong Balado (Spicy Cassava Chips)', short_desc: 'Crispy cassava chips with balado seasoning', stock_quantity: '50', media_url: 'https://images.unsplash.com/photo-1621939514649-280e2ee25f60?w=400', brand: 'Chitato', origin_country: 'ID', weight_value: '150', weight_unit: 'G', color: 'Golden', material: 'Cassava' },
+    off: { id: 'offer-keripik-singkong', name: 'Keripik Singkong Balado', price: '25000', currency: 'IDR', cod_available: true, returns_allowed: true, returns_window: 'P7D', returns_method: 'SELLER_PICKUP', cancel_allowed: true, cancel_window: 'PT2H', cancel_event: 'BEFORE_PACKING', replace_allowed: false, max_distance: '20', timing_days: ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'], timing_start: '09:00', timing_end: '21:00', offer_context: 'https://raw.githubusercontent.com/beckn/local-retail/refs/heads/main/schema/RetailOffer/v2.1/context.jsonld' }
+  },
+  {
+    res: { id: 'item-bolu-pisang', name: 'Bolu Pisang Cokelat (Chocolate Banana Cake)', short_desc: 'Soft banana cake with chocolate chips', stock_quantity: '30', media_url: 'https://images.unsplash.com/photo-1578985545062-69928b1d9587?w=400', brand: 'HomeMade', origin_country: 'ID', weight_value: '400', weight_unit: 'G', color: 'Brown', material: 'Flour' },
+    off: { id: 'offer-bolu-pisang', name: 'Bolu Pisang Cokelat', price: '45000', currency: 'IDR', cod_available: true, returns_allowed: false, cancel_allowed: true, cancel_window: 'PT1H', cancel_event: 'BEFORE_PACKING', replace_allowed: false, max_distance: '10', timing_days: ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'], timing_start: '08:00', timing_end: '18:00', offer_context: 'https://raw.githubusercontent.com/beckn/local-retail/refs/heads/main/schema/RetailOffer/v2.1/context.jsonld' }
+  },
+  {
+    res: { id: 'item-teh-botol', name: 'Teh Botol Sosro (Bottled Jasmine Tea)', short_desc: 'Ready-to-drink jasmine tea', stock_quantity: '200', media_url: 'https://images.unsplash.com/photo-1556679343-c7306c1976bc?w=400', brand: 'Sosro', origin_country: 'ID', weight_value: '350', weight_unit: 'ML', color: 'Amber', material: 'PET Bottle' },
+    off: { id: 'offer-teh-botol', name: 'Teh Botol Sosro', price: '5000', currency: 'IDR', cod_available: true, returns_allowed: false, cancel_allowed: true, cancel_window: 'PT30M', cancel_event: 'BEFORE_PACKING', replace_allowed: false, max_distance: '15', timing_days: ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'], timing_start: '07:00', timing_end: '22:00', offer_context: 'https://raw.githubusercontent.com/beckn/local-retail/refs/heads/main/schema/RetailOffer/v2.1/context.jsonld' }
+  },
 ]
 let _productFillIdx = 0
 
@@ -2680,7 +2700,7 @@ function OfferForm({ off, oSet, offOpen, setOffOpen, catalogId, showResourcePick
         </div>
         <div><label className={labelCls}>Currency</label>
           <select className={inputCls} value={off.currency} onChange={e => oSet('currency', e.target.value)}>
-            {['INR','USD','EUR','SGD','MYR','IDR'].map(c => <option key={c} className="bg-slate-900">{c}</option>)}
+            {['INR', 'USD', 'EUR', 'SGD', 'MYR', 'IDR'].map(c => <option key={c} className="bg-slate-900">{c}</option>)}
           </select>
         </div>
         <div><label className={labelCls}>Validity Start</label>
@@ -2719,7 +2739,7 @@ function OfferForm({ off, oSet, offOpen, setOffOpen, catalogId, showResourcePick
                   </div>
                   <div><label className={labelCls}>Method</label>
                     <select className={inputCls} value={off.returns_method} onChange={e => oSet('returns_method', e.target.value)}>
-                      {['SELLER_PICKUP','BUYER_RETURN','DROP_AT_STORE'].map(m => <option key={m} className="bg-slate-900">{m}</option>)}
+                      {['SELLER_PICKUP', 'BUYER_RETURN', 'DROP_AT_STORE'].map(m => <option key={m} className="bg-slate-900">{m}</option>)}
                     </select>
                   </div>
                 </div>
@@ -2741,7 +2761,7 @@ function OfferForm({ off, oSet, offOpen, setOffOpen, catalogId, showResourcePick
                   </div>
                   <div><label className={labelCls}>Cutoff</label>
                     <select className={inputCls} value={off.cancel_event} onChange={e => oSet('cancel_event', e.target.value)}>
-                      {['BEFORE_PACKING','BEFORE_SHIPPING','BEFORE_DELIVERY'].map(ev => <option key={ev} className="bg-slate-900">{ev}</option>)}
+                      {['BEFORE_PACKING', 'BEFORE_SHIPPING', 'BEFORE_DELIVERY'].map(ev => <option key={ev} className="bg-slate-900">{ev}</option>)}
                     </select>
                   </div>
                 </div>
@@ -2761,7 +2781,7 @@ function OfferForm({ off, oSet, offOpen, setOffOpen, catalogId, showResourcePick
               <div className="flex gap-2">
                 <input className={inputCls} type="number" value={off.max_distance} onChange={e => oSet('max_distance', e.target.value)} placeholder="15" />
                 <select className={`${inputCls} w-20 shrink-0`} value={off.distance_unit} onChange={e => oSet('distance_unit', e.target.value)}>
-                  {['KM','MI'].map(u => <option key={u} className="bg-slate-900">{u}</option>)}
+                  {['KM', 'MI'].map(u => <option key={u} className="bg-slate-900">{u}</option>)}
                 </select>
               </div>
             </div>
@@ -2800,16 +2820,16 @@ function AddProductPage({ onNav, catalogId }) {
   const labelCls = 'block text-[11px] uppercase tracking-widest text-slate-500 font-semibold mb-1'
   const inputCls = 'w-full px-3 py-2 rounded-lg text-sm text-white placeholder-slate-600 border border-white/[0.08] bg-slate-900 focus:outline-none focus:border-blue-500/50 transition-colors'
 
-  const [res, setRes]         = useState(EMPTY_RESOURCE())
+  const [res, setRes] = useState(EMPTY_RESOURCE())
   const [resOpen, setResOpen] = useState({})
   const [loading, setLoading] = useState(false)
-  const [error, setError]     = useState(null)
+  const [error, setError] = useState(null)
   const [success, setSuccess] = useState(false)
 
   const rSet = (k, v) => setRes(r => ({ ...r, [k]: v }))
 
   const handleAutoFill = () => {
-    const seed   = PRODUCT_AUTOFILL_POOL[_productFillIdx % PRODUCT_AUTOFILL_POOL.length]
+    const seed = PRODUCT_AUTOFILL_POOL[_productFillIdx % PRODUCT_AUTOFILL_POOL.length]
     _productFillIdx++
     const uid = id => `${id}-${Date.now().toString(36)}`
     setRes({ ...EMPTY_RESOURCE(), ...seed.res, id: uid(seed.res.id) })
@@ -2927,7 +2947,7 @@ function AddProductPage({ onNav, catalogId }) {
                 </div>
                 <div className="col-span-1 sm:col-span-2"><label className={labelCls}>Unit</label>
                   <select className={inputCls} value={res.weight_unit} onChange={e => rSet('weight_unit', e.target.value)}>
-                    {['G','KG','MG','OZ','LB'].map(u => <option key={u} className="bg-slate-900">{u}</option>)}
+                    {['G', 'KG', 'MG', 'OZ', 'LB'].map(u => <option key={u} className="bg-slate-900">{u}</option>)}
                   </select>
                 </div>
                 <div className="col-span-1 sm:col-span-2"><label className={labelCls}>Volume</label>
@@ -2935,7 +2955,7 @@ function AddProductPage({ onNav, catalogId }) {
                 </div>
                 <div className="col-span-1 sm:col-span-2"><label className={labelCls}>Unit</label>
                   <select className={inputCls} value={res.volume_unit} onChange={e => rSet('volume_unit', e.target.value)}>
-                    {['ML','L','FL_OZ'].map(u => <option key={u} className="bg-slate-900">{u}</option>)}
+                    {['ML', 'L', 'FL_OZ'].map(u => <option key={u} className="bg-slate-900">{u}</option>)}
                   </select>
                 </div>
               </div>
@@ -2957,7 +2977,7 @@ function AddProductPage({ onNav, catalogId }) {
             <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div><label className={labelCls}>Manufacturer Type</label>
                 <select className={inputCls} value={res.mfr_type} onChange={e => rSet('mfr_type', e.target.value)}>
-                  {['MANUFACTURER','PACKER','IMPORTER'].map(t => <option key={t} className="bg-slate-900">{t}</option>)}
+                  {['MANUFACTURER', 'PACKER', 'IMPORTER'].map(t => <option key={t} className="bg-slate-900">{t}</option>)}
                 </select>
               </div>
               <div><label className={labelCls}>Manufacturer Name</label>
@@ -2973,7 +2993,7 @@ function AddProductPage({ onNav, catalogId }) {
                 <div className="flex gap-2">
                   <input className={inputCls} type="number" value={res.net_qty_value} onChange={e => rSet('net_qty_value', e.target.value)} placeholder="500" />
                   <select className={`${inputCls} w-24 shrink-0`} value={res.net_qty_unit} onChange={e => rSet('net_qty_unit', e.target.value)}>
-                    {['ML','L','G','KG','PCS'].map(u => <option key={u} className="bg-slate-900">{u}</option>)}
+                    {['ML', 'L', 'G', 'KG', 'PCS'].map(u => <option key={u} className="bg-slate-900">{u}</option>)}
                   </select>
                 </div>
               </div>
@@ -3000,13 +3020,13 @@ function AddProductPage({ onNav, catalogId }) {
 // ── Add Offer Page (standalone) ───────────────────────────────────────────
 
 function AddOfferPage({ onNav, catalogId, preselectedResourceId }) {
-  const [off, setOff]         = useState(() => ({
+  const [off, setOff] = useState(() => ({
     ...EMPTY_OFFER(),
     resource_ids: preselectedResourceId || '',
   }))
   const [offOpen, setOffOpen] = useState({})
   const [loading, setLoading] = useState(false)
-  const [error, setError]     = useState(null)
+  const [error, setError] = useState(null)
   const [success, setSuccess] = useState(false)
 
   const oSet = (k, v) => setOff(o => ({ ...o, [k]: v }))
@@ -3015,8 +3035,10 @@ function AddOfferPage({ onNav, catalogId, preselectedResourceId }) {
     const seed = PRODUCT_AUTOFILL_POOL[_productFillIdx % PRODUCT_AUTOFILL_POOL.length]
     _productFillIdx++
     const uid = id => `${id}-${Date.now().toString(36)}`
-    setOff({ ...EMPTY_OFFER(), ...seed.off, id: uid(seed.off.id),
-      resource_ids: preselectedResourceId || '' })
+    setOff({
+      ...EMPTY_OFFER(), ...seed.off, id: uid(seed.off.id),
+      resource_ids: preselectedResourceId || ''
+    })
     setOffOpen({}); setError(null)
   }
 
@@ -3117,22 +3139,22 @@ function AddOfferPage({ onNav, catalogId, preselectedResourceId }) {
 // ─── App shell ────────────────────────────────────────────────────────────────
 
 const PAGES = {
-  overview:       OverviewPage,
-  orders:         OrdersPage,
-  inventory:      InventoryPage,
-  catalogs:       CatalogsPage,
+  overview: OverviewPage,
+  orders: OrdersPage,
+  inventory: InventoryPage,
+  catalogs: CatalogsPage,
   create_catalog: CreateCatalogPage,
   catalog_detail: CatalogDetailPage,
-  add_product:    AddProductPage,
-  add_offer:      AddOfferPage,
-  publish:        PublishPage,
-  messages:       MessagesPage,
-  support:        SupportPage,
-  ratings:        RatingsPage,
+  add_product: AddProductPage,
+  add_offer: AddOfferPage,
+  publish: PublishPage,
+  messages: MessagesPage,
+  support: SupportPage,
+  ratings: RatingsPage,
 }
 
 export default function App() {
-  const [page, setPage]       = useState('overview')
+  const [page, setPage] = useState('overview')
   const [navExtra, setNavExtra] = useState({})
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const Page = PAGES[page] || OverviewPage
@@ -3153,7 +3175,7 @@ export default function App() {
           style={{ background: '#0a0e1a' }}>
           <button onClick={() => setSidebarOpen(true)} className="p-2 rounded-lg text-slate-400 hover:text-white transition-colors">
             <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-              <path strokeLinecap="round" d="M4 6h16M4 12h16M4 18h16"/>
+              <path strokeLinecap="round" d="M4 6h16M4 12h16M4 18h16" />
             </svg>
           </button>
           <span className="text-sm font-semibold text-white">BPP Admin</span>

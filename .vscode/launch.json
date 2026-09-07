@@ -1,0 +1,59 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug BAP Application",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/bap-application/cmd/server/main.go",
+      "cwd": "${workspaceFolder}/bap-application",
+      "env": {
+        "APP_PORT": "8083",
+        "APP_ENV": "development",
+        "DB_HOST": "127.0.0.1",
+        "DB_PORT": "5435",
+        "DB_NAME": "bap",
+        "DB_USER": "postgres",
+        "DB_PASSWORD": "postgres",
+        "DB_SSLMODE": "disable",
+        "LOG_LEVEL": "debug",
+        "BAP_ID": "onix-bap-x7m2wmy7nq-et.a.run.app",
+        "BAP_URI": "http://localhost:8081",
+        "NETWORK_ID": "ion.id/ion-launch",
+        "BPP_ID": "onix-bpp-x7m2wmy7nq-et.a.run.app",
+        "BPP_URI": "http://localhost:8082",
+        "BAP_CALLER_URL": "http://localhost:8081/bap/caller",
+        "CDS_DISCOVER_URL": "",
+        "BAP_PRIVATE_KEY": "fSx93AbdN4aUAtDuR5ppFZP9iYOIOe94M86jZWPYlIc=",
+        "BAP_KEY_ID": "onix-bap-x7m2wmy7nq-et.a.run.app|key1|ed25519"
+      }
+    },
+    {
+      "name": "Debug BPP Application",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/bpp-application/cmd/server/main.go",
+      "cwd": "${workspaceFolder}/bpp-application",
+      "env": {
+        "APP_PORT": "8080",
+        "APP_ENV": "development",
+        "DB_HOST": "127.0.0.1",
+        "DB_PORT": "5435",
+        "DB_NAME": "bpp",
+        "DB_USER": "postgres",
+        "DB_PASSWORD": "postgres",
+        "DB_SSLMODE": "disable",
+        "LOG_LEVEL": "debug",
+        "BPP_ID": "onix-bpp-x7m2wmy7nq-et.a.run.app",
+        "BPP_URI": "http://localhost:8082",
+        "NETWORK_ID": "ion.id/ion-launch",
+        "BPP_CALLER_URL": "http://localhost:8082/bpp/caller",
+        "CDS_PUBLISH_URL": "http://localhost:8085/catalog/publish",
+        "BPP_PRIVATE_KEY": "z5U20e5V4NjqfPwolU2sfjhK5YDqJuYqhR10LB2hs5Q=",
+        "BPP_KEY_ID": "onix-bpp-x7m2wmy7nq-et.a.run.app|key1|ed25519"
+      }
+    }
+  ]
+}
