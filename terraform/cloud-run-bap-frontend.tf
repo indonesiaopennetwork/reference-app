@@ -41,6 +41,10 @@ resource "google_cloud_run_v2_service" "bap_frontend" {
         name  = "NGINX_RESOLVER"
         value = "8.8.8.8 8.8.4.4"
       }
+      env {
+        name  = "BPP_ADMIN_URL"
+        value = "https://${var.bpp_frontend_domain}"
+      }
     }
   }
 

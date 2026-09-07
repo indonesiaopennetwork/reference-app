@@ -24,6 +24,11 @@ cds_discover_url = "https://your-registry.example/beckn/discover"
 # `terraform apply` succeeds on its google_cloud_run_domain_mapping resource
 # — see README.md "Custom domain for DeDi discovery files" and the section
 # right after it.
+#
+# bap_frontend_domain/bpp_frontend_domain are also injected as the
+# BPP_ADMIN_URL/BAP_URL container env vars powering the cross-navigation
+# buttons in the sibling frontend's UI — see README.md "Custom domains for
+# bap, bap-frontend, bpp-frontend, and the landing page".
 dedi_domain         = "your-domain.example"
 dedi_domain_www     = "www.your-domain.example"
 bap_domain          = "bap.your-domain.example"

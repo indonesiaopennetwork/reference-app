@@ -308,6 +308,19 @@ provider-facing API, using the same envsubst'd-hostname proxy pattern as the
 Run URL (`BPP_URL`, set by `cloud-run-wiring.tf`) and is deliberately not
 exposed on any public domain.
 
+`bap_frontend_domain`/`bpp_frontend_domain` do double duty beyond domain
+mapping: `terraform/cloud-run-bap-frontend.tf` also injects
+`bap_frontend_domain` into `bap-frontend`'s own container as `BPP_ADMIN_URL`,
+and `terraform/cloud-run-bpp-frontend.tf` injects `bpp_frontend_domain` into
+`bpp-frontend`'s container as `BAP_URL` — these back the "BPP APP" /
+"Go to BAP APP" cross-navigation buttons in each frontend's UI (locally,
+the same values come from `VITE_BPP_ADMIN_URL`/`VITE_BAP_URL` in `.env`).
+Note that `BAP_URL` as a container env var name is overloaded: on
+`bap-frontend` it's a *different* var pointing at the bap backend (nginx's
+reverse-proxy target, `var.bap_domain`), while on `bpp-frontend` it points at
+bap-frontend's own URL for the button — same name, different meaning
+depending on which service reads it.
+
 After applying, get the DNS records for the four new domains the same way as
 `dedi_domain`:
 ```sh
