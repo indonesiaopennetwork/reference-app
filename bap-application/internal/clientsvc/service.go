@@ -105,9 +105,9 @@ func (s *ClientService) Discover(ctx context.Context, req *ClientDiscoverRequest
 		}
 	}()
 
-	s.logBecknOut("discover", http.MethodPost, discoverURL, txnID.String(), msgID.String(), reqJSON)
+	s.logBecknOut("discover", http.MethodGet, discoverURL, txnID.String(), msgID.String(), reqJSON)
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, discoverURL, bytes.NewBuffer(reqJSON))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, discoverURL, bytes.NewBuffer(reqJSON))
 	if err != nil {
 		callErr = fmt.Errorf("build discover request: %w", err)
 		return nil, callErr

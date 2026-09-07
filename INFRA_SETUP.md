@@ -34,6 +34,10 @@ section).
 ### 1a. Prerequisites
 
 - Docker + Docker Compose.
+- `envsubst` (from the `gettext`/`gettext-base` package — `apt install
+  gettext-base` on Debian/Ubuntu, `brew install gettext` on macOS). Used by
+  `scripts/render-onix-config.sh` in step 1b below to generate the onix
+  config files from `.env`.
 - A registered Beckn network identity for both `bap` and `bpp` — a
   subscriber ID, a `keyId`, and an Ed25519 keypair for signing (`signingPrivateKey`/
   `signingPublicKey`) plus an encryption keypair (`encrPrivateKey`/`encrPublicKey`),
@@ -43,33 +47,77 @@ section).
   be registered so other participants can verify your signatures. Ask
   whoever administers the network registry for a subscriber slot.
 
-### 1b. Config files you must create (all git-ignored, never committed)
+### 1b. Config files you must create (git-ignored, never committed)
 
 1. **`.env`** (repo root) — copy `.env.example`, fill in your registered
-   keys:
+   keys. This file is the single source for every `keyManager` field the
+   onix config files need — step 2 below generates them from it, nothing
+   is hand-copied:
    ```
+   NETWORK_ID=<the Beckn network both bap and bpp are registered on>
+
    BAP_PRIVATE_KEY=<your bap signingPrivateKey>
    BAP_KEY_ID=<bap subscriber id>|<bap keyId>|ed25519
+   BAP_ID=<bap subscriber id, same value as the subscriber-id segment of BAP_KEY_ID>
+   BAP_ONIX_KEY_ID=<bap keyId, same value as the keyId segment of BAP_KEY_ID>
+   BAP_ONIX_SIGNING_PRIVATE_KEY=<your bap signingPrivateKey, same value as BAP_PRIVATE_KEY>
+   BAP_ONIX_SIGNING_PUBLIC_KEY=<your bap signingPublicKey>
+   BAP_ONIX_ENCR_PRIVATE_KEY=<your bap encrPrivateKey>
+   BAP_ONIX_ENCR_PUBLIC_KEY=<your bap encrPublicKey>
+
    BPP_PRIVATE_KEY=<your bpp signingPrivateKey>
    BPP_KEY_ID=<bpp subscriber id>|<bpp keyId>|ed25519
+   BPP_ID=<bpp subscriber id, same value as the subscriber-id segment of BPP_KEY_ID>
+   BPP_ONIX_KEY_ID=<bpp keyId, same value as the keyId segment of BPP_KEY_ID>
+   BPP_ONIX_SIGNING_PRIVATE_KEY=<your bpp signingPrivateKey, same value as BPP_PRIVATE_KEY>
+   BPP_ONIX_SIGNING_PUBLIC_KEY=<your bpp signingPublicKey>
+   BPP_ONIX_ENCR_PRIVATE_KEY=<your bpp encrPrivateKey>
+   BPP_ONIX_ENCR_PUBLIC_KEY=<your bpp encrPublicKey>
    ```
+   Only `BAP_PRIVATE_KEY`/`BAP_KEY_ID` (and their bpp equivalents) are read
+   directly by the Go apps — the `*_ONIX_*` fields exist here purely so
+   step 2's script has one place to read every value from.
    **Important:** `BAP_PRIVATE_KEY`/`BAP_KEY_ID` must be the *same keypair
-   and subscriber identity* as whatever you put in `config/local-simple-bap.yaml`'s
-   `keyManager` block below — there's only one registered identity per side,
-   used for both the onix adapter's own signing and the app's direct CDS
-   calls. Same rule for bpp. (See `terraform/README.md`'s Gotcha #1 if you
-   want the full "why.")
+   and subscriber identity* as `BAP_ONIX_SIGNING_PRIVATE_KEY`/
+   `BAP_ONIX_KEY_ID` — there's only one registered identity per side, used
+   for both the onix adapter's own signing and the app's direct CDS calls;
+   they're separate `.env` fields only because the Go app and the onix
+   yaml consume the identity in different shapes. Same rule for bpp. (See
+   `terraform/README.md`'s Gotcha #1 if you want the full "why.")
 
-2. **`config/local-simple-bap.yaml`** and **`config/local-simple-bpp.yaml`**
-   — copy the `.example` versions next to them and fill in the same 5
-   `keyManager` fields (`networkParticipant`, `keyId`, `signingPrivateKey`,
-   `signingPublicKey`, `encrPrivateKey`, `encrPublicKey`) with your
-   registered identity, **twice each** — both the receiver and caller
-   modules in the file need the identical block.
+2. **Generate the onix config files** — run:
+   ```sh
+   ./scripts/render-onix-config.sh
+   ```
+   This renders `config/local-simple-bap.yaml`, `config/local-simple-bpp.yaml`,
+   and `config/catalog-publish.yaml` from their `.example` templates,
+   substituting every `keyManager` field (`networkParticipant`/`subscriberId`
+   — derived from `BAP_KEY_ID`/`BPP_KEY_ID` — plus `keyId`,
+   `signingPrivateKey`, `signingPublicKey`, `encrPrivateKey`,
+   `encrPublicKey` from their dedicated `*_ONIX_*` vars) from the `.env`
+   you just filled in — including both the receiver and caller modules in
+   the bap/bpp files, and
+   `catalog-publish.yaml`'s single module, which reuses the **same** bpp
+   identity (it's the same operator/key as `onix-bpp`, just named
+   `subscriberId` instead of `networkParticipant` — if the container still
+   fails config validation, check `docker logs onix-catalog-publish`; the
+   example file's own comment notes this name may need to change depending
+   on the deployed adapter build). `config/catalog-publish.yaml` is
+   required by `docker-compose.yml`'s `onix-catalog-publish` service —
+   without it that container fails to start.
 
-3. **`docker-compose.yml`**'s `BAP_ID`/`BPP_ID` env vars — these must equal
-   the same subscriber ID you used above. Edit them directly if your
-   registered identity isn't already what's there.
+   The script fails loudly (before you ever get to `docker compose up`) if
+   `.env` is missing or still has unfilled `REPLACE_WITH_*` placeholders.
+   Re-run it any time `.env`'s keys change — that's what keeps the
+   app-level signing key and the onix `keyManager` identity guaranteed
+   identical (Gotcha #1, above) instead of relying on careful hand-copying.
+
+3. **`docker-compose.yml`**'s `NETWORK_ID`/`BAP_ID`/`BPP_ID` env vars —
+   these are read straight from the `.env` fields above (Docker Compose
+   substitutes `${VAR}` in `docker-compose.yml` itself directly from
+   `.env`, no script needed). Nothing to hand-edit in `docker-compose.yml`
+   — just make sure `.env`'s `BAP_ID`/`BPP_ID` equal the subscriber ID in
+   `BAP_KEY_ID`/`BPP_KEY_ID` (the part before the first `|`).
 
 ### 1c. Bring it up
 
