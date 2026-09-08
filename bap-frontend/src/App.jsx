@@ -1669,7 +1669,7 @@ export default function App() {
       </header>
 
       <div className="bg-orange-500 text-white text-xs sm:text-sm text-center py-1.5 px-4">
-        This is the buyer (bap) reference app for ION network managed by remiges technologies pvt. ltd.
+        [FOR DEMO PURPOSE ONLY] - This is a sample application for reference and testing
       </div>
 
       {/* ── Category chips + sort ─────────────────────────────────────────── */}
