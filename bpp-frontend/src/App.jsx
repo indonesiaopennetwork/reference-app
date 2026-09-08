@@ -9,6 +9,7 @@ import {
   ArrowRight, Circle, Star, Ticket, Ban, Wand2,
   BookOpen, FolderOpen, Send, ArrowLeft, ExternalLink,
 } from 'lucide-react'
+import { captureTokenFromUrl, getToken, clearToken, redirectToLogin } from './auth.js'
 
 const API_BASE = '/api/v1'
 const BRAND = 'linear-gradient(135deg,#00b8e6 0%,#1e2fa0 100%)'
@@ -17,9 +18,21 @@ const BRAND2 = 'linear-gradient(135deg,#e6006e 0%,#7c3aed 100%)'
 // ─── helpers ────────────────────────────────────────────────────────────────
 
 async function apiFetch(path, opts = {}) {
+  const token = getToken()
   const res = await fetch(`${API_BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' }, ...opts,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    ...opts,
   })
+  if (res.status === 401) {
+    // Token missing/expired/invalid -- nothing to recover client-side,
+    // send the seller back through landing-page's login redirect.
+    clearToken()
+    redirectToLogin()
+    throw new Error('unauthorized')
+  }
   if (!res.ok) { const b = await res.text(); throw new Error(b || res.statusText) }
   return res.json()
 }
@@ -867,20 +880,20 @@ function OffersTab() {
 function InventoryProductsTab() {
   const [search, setSearch] = useState('')
   const [catalogFilter, setCatalogFilter] = useState('')
-  const [providerFilter, setProviderFilter] = useState('')
   const [page, setPage] = useState(1)
   const limit = 20
 
-  const url = `/inventory/items?search=${encodeURIComponent(search)}&catalog_id=${encodeURIComponent(catalogFilter)}&provider_id=${encodeURIComponent(providerFilter)}&page=${page}&limit=${limit}`
-  const { data, loading, error, reload } = useApi(url, [search, catalogFilter, providerFilter, page])
+  // provider_id is no longer a query param -- the API always scopes to the
+  // logged-in seller's own provider (see internal/dashboardsvc), so there's
+  // nothing left to filter by there.
+  const url = `/inventory/items?search=${encodeURIComponent(search)}&catalog_id=${encodeURIComponent(catalogFilter)}&page=${page}&limit=${limit}`
+  const { data, loading, error, reload } = useApi(url, [search, catalogFilter, page])
   const { data: catData } = useApi('/catalogs?limit=100', [])
-  const { data: provData } = useApi('/providers', [])
 
   const items = data?.items || []
   const total = data?.total || 0
   const totalPages = Math.max(1, Math.ceil(total / limit))
   const catalogs = catData?.items || []
-  const providers = provData?.items || []
 
   // Group items by provider then catalog
   const grouped = {}
@@ -903,11 +916,6 @@ function InventoryProductsTab() {
               placeholder="Search by name or ID…"
               className="w-full pl-8 pr-3 py-2 rounded-lg text-sm text-white placeholder-slate-600 border border-white/[0.08] bg-slate-900 focus:outline-none focus:border-blue-500/50 transition-colors" />
           </div>
-          <select value={providerFilter} onChange={e => { setProviderFilter(e.target.value); setPage(1) }}
-            className="px-3 py-2 rounded-lg text-sm text-white border border-white/[0.08] bg-slate-900 focus:outline-none">
-            <option value="">All Providers</option>
-            {providers.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
           <select value={catalogFilter} onChange={e => { setCatalogFilter(e.target.value); setPage(1) }}
             className="px-3 py-2 rounded-lg text-sm text-white border border-white/[0.08] bg-slate-900 focus:outline-none">
             <option value="">All Catalogs</option>
@@ -2156,16 +2164,16 @@ function RatingsPage() {
 
 function CatalogsPage({ onNav }) {
   const [search, setSearch] = useState('')
-  const [providerFilter, setProviderFilter] = useState('')
   const [page, setPage] = useState(1)
   const [publishing, setPublishing] = useState(null)
   const limit = 20
 
-  const url = `/catalogs?search=${encodeURIComponent(search)}&provider_id=${encodeURIComponent(providerFilter)}&page=${page}&limit=${limit}`
-  const { data, loading, error, reload } = useApi(url, [search, providerFilter, page])
-  const { data: provData } = useApi('/providers', [])
+  // provider_id is no longer a query param -- the API always scopes to the
+  // logged-in seller's own provider (see internal/dashboardsvc), so there's
+  // nothing left to filter by there.
+  const url = `/catalogs?search=${encodeURIComponent(search)}&page=${page}&limit=${limit}`
+  const { data, loading, error, reload } = useApi(url, [search, page])
 
-  const providers = provData?.items || []
   const items = data?.items || []
   const total = data?.total || 0
   const totalPages = Math.max(1, Math.ceil(total / limit))
@@ -2209,11 +2217,6 @@ function CatalogsPage({ onNav }) {
               placeholder="Search by name, ID or provider…"
               className="w-full pl-9 pr-3 py-2 rounded-lg text-sm text-white placeholder-slate-600 border border-white/[0.08] bg-slate-900 focus:outline-none focus:border-blue-500/50 transition-colors" />
           </div>
-          <select value={providerFilter} onChange={e => { setProviderFilter(e.target.value); setPage(1) }}
-            className="px-3 py-2 rounded-lg text-sm text-white border border-white/[0.08] bg-slate-900 focus:outline-none focus:border-blue-500/50 transition-colors">
-            <option value="">All Providers</option>
-            {providers.map(p => <option key={p.id} value={p.id}>{p.name} ({p.id})</option>)}
-          </select>
           <button onClick={reload} className="p-2 rounded-lg border border-white/[0.08] text-slate-400 hover:text-white transition-colors">
             <RefreshCw size={14} />
           </button>
@@ -3157,9 +3160,30 @@ export default function App() {
   const [page, setPage] = useState('overview')
   const [navExtra, setNavExtra] = useState({})
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [authReady, setAuthReady] = useState(false)
   const Page = PAGES[page] || OverviewPage
 
   const onNav = (target, extra = {}) => { setPage(target); setNavExtra(extra); setSidebarOpen(false) }
+
+  // Gate on a token before rendering anything real. There's no login UI
+  // here at all -- landing-page is the single entry point (see
+  // src/auth.js); a visit with no token, ever, redirects there.
+  useEffect(() => {
+    captureTokenFromUrl()
+    if (!getToken()) {
+      redirectToLogin()
+      return
+    }
+    setAuthReady(true)
+  }, [])
+
+  if (!authReady) {
+    return (
+      <div className="flex min-h-screen items-center justify-center" style={{ background: '#080d1e' }}>
+        <p className="text-slate-400 text-sm">Redirecting to login…</p>
+      </div>
+    )
+  }
 
   return (
     <div className="flex min-h-screen" style={{ background: '#080d1e' }}>

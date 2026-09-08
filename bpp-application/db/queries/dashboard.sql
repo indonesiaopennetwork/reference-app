@@ -5,18 +5,27 @@
 -- ============================================================
 
 -- name: GetDashboardStats :one
+-- provider_id: see ListContracts (below) -- NULL bypasses for internal/ops use.
 SELECT
     COUNT(*) FILTER (WHERE status = 'ACTIVE')                           AS active_orders,
     COUNT(*) FILTER (WHERE status = 'DRAFT')                            AS pending_orders,
     COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '24 hours')    AS today_orders
 FROM contracts
 WHERE bpp_id = $1
+  AND (sqlc.narg('provider_id')::TEXT IS NULL OR provider_id = sqlc.narg('provider_id'))
   AND deleted_at IS NULL;
 
 -- name: GetInventoryStats :one
+-- provider_id: see ListContracts -- NULL bypasses for internal/ops use.
 SELECT
-    (SELECT COUNT(*) FROM resources r2 WHERE r2.bpp_id = $1 AND r2.deleted_at IS NULL) AS resource_count,
-    (SELECT COUNT(*) FROM offers    o2 WHERE o2.bpp_id = $1 AND o2.deleted_at IS NULL) AS offer_count;
+    (SELECT COUNT(*) FROM resources r2 WHERE r2.bpp_id = $1
+        AND (sqlc.narg('provider_id')::TEXT IS NULL OR r2.provider_id = sqlc.narg('provider_id'))
+        AND r2.deleted_at IS NULL) AS resource_count,
+    (SELECT COUNT(*) FROM offers o2
+     JOIN catalogs cat2 ON cat2.id = o2.catalog_id AND cat2.bpp_id = o2.bpp_id
+     WHERE o2.bpp_id = $1
+        AND (sqlc.narg('provider_id')::TEXT IS NULL OR COALESCE(o2.provider_id, cat2.provider_id) = sqlc.narg('provider_id'))
+        AND o2.deleted_at IS NULL) AS offer_count;
 
 -- name: GetMessageFunnel :many
 SELECT
@@ -34,6 +43,9 @@ ORDER BY action;
 -- ============================================================
 
 -- name: ListContracts :many
+-- provider_id: NULL lists across all sellers (used by internal/ops tooling);
+-- a non-NULL value scopes to that seller's own orders only (the dashboard
+-- API always passes one, resolved from the authenticated session).
 SELECT
     c.id,
     c.transaction_id,
@@ -50,6 +62,7 @@ LEFT JOIN LATERAL (
     LIMIT 1
 ) co ON TRUE
 WHERE c.bpp_id = $1
+  AND (sqlc.narg('provider_id')::TEXT IS NULL OR c.provider_id = sqlc.narg('provider_id'))
   AND c.deleted_at IS NULL
 ORDER BY c.created_at DESC
 LIMIT  $2
@@ -57,9 +70,12 @@ OFFSET $3;
 
 -- name: CountContracts :one
 SELECT COUNT(*) FROM contracts
-WHERE bpp_id = $1 AND deleted_at IS NULL;
+WHERE bpp_id = $1
+  AND (sqlc.narg('provider_id')::TEXT IS NULL OR provider_id = sqlc.narg('provider_id'))
+  AND deleted_at IS NULL;
 
 -- name: GetContractDetail :one
+-- provider_id: see ListContracts -- NULL bypasses the check for internal/ops use.
 SELECT
     c.id,
     c.transaction_id,
@@ -71,7 +87,8 @@ SELECT
     c.updated_at
 FROM contracts c
 WHERE c.id = $1
-  AND c.bpp_id = $2;
+  AND c.bpp_id = $2
+  AND (sqlc.narg('provider_id')::TEXT IS NULL OR c.provider_id = sqlc.narg('provider_id'));
 
 -- name: ListContractCommitments :many
 SELECT
@@ -100,6 +117,7 @@ WHERE contract_id = $1;
 -- ============================================================
 
 -- name: ListResources :many
+-- provider_id: see ListContracts -- NULL bypasses for internal/ops use.
 SELECT
     r.id,
     r.catalog_id,
@@ -109,6 +127,7 @@ SELECT
     r.created_at
 FROM resources r
 WHERE r.bpp_id = $1
+  AND (sqlc.narg('provider_id')::TEXT IS NULL OR r.provider_id = sqlc.narg('provider_id'))
   AND r.deleted_at IS NULL
 ORDER BY r.created_at DESC
 LIMIT  $2
@@ -116,13 +135,19 @@ OFFSET $3;
 
 -- name: CountResources :one
 SELECT COUNT(*) FROM resources
-WHERE bpp_id = $1 AND deleted_at IS NULL;
+WHERE bpp_id = $1
+  AND (sqlc.narg('provider_id')::TEXT IS NULL OR provider_id = sqlc.narg('provider_id'))
+  AND deleted_at IS NULL;
 
 -- ============================================================
 -- OFFERS
 -- ============================================================
 
 -- name: ListOffers :many
+-- provider_id: see ListContracts -- NULL bypasses for internal/ops use.
+-- offers.provider_id is nullable (optional override of the catalog's own
+-- provider, per 007_offers.sql) so this falls back to the catalog's
+-- provider_id when unset, same as any other offer on that catalog.
 SELECT
     o.id,
     o.catalog_id,
@@ -133,15 +158,20 @@ SELECT
     o.validity_end,
     o.created_at
 FROM offers o
+JOIN catalogs cat ON cat.id = o.catalog_id AND cat.bpp_id = o.bpp_id
 WHERE o.bpp_id = $1
+  AND (sqlc.narg('provider_id')::TEXT IS NULL OR COALESCE(o.provider_id, cat.provider_id) = sqlc.narg('provider_id'))
   AND o.deleted_at IS NULL
 ORDER BY o.created_at DESC
 LIMIT  $2
 OFFSET $3;
 
 -- name: CountOffers :one
-SELECT COUNT(*) FROM offers
-WHERE bpp_id = $1 AND deleted_at IS NULL;
+SELECT COUNT(*) FROM offers o
+JOIN catalogs cat ON cat.id = o.catalog_id AND cat.bpp_id = o.bpp_id
+WHERE o.bpp_id = $1
+  AND (sqlc.narg('provider_id')::TEXT IS NULL OR COALESCE(o.provider_id, cat.provider_id) = sqlc.narg('provider_id'))
+  AND o.deleted_at IS NULL;
 
 -- name: ListOfferConsiderations :many
 SELECT

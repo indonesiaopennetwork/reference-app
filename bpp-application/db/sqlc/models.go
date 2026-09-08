@@ -988,3 +988,15 @@ type SupportTicket struct {
 	CreatedAt           pgtype.Timestamptz  `json:"created_at"`
 	UpdatedAt           pgtype.Timestamptz  `json:"updated_at"`
 }
+
+// Seller login accounts. One user owns exactly one provider (self-service registration).
+type User struct {
+	ID uuid.UUID `json:"id"`
+	// The "sub" claim from Zitadel-issued tokens — resolves an authenticated request to its provider_id.
+	ZitadelSubject string             `json:"zitadel_subject"`
+	Email          string             `json:"email"`
+	ProviderID     string             `json:"provider_id"`
+	BppID          string             `json:"bpp_id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}

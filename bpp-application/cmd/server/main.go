@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -14,6 +15,7 @@ import (
 	"github.com/remiges-tech/logharbour/logharbour"
 
 	dbsqlc "github.com/ion/winroom/bpp/db/sqlc"
+	"github.com/ion/winroom/bpp/internal/auth"
 	"github.com/ion/winroom/bpp/internal/config"
 	"github.com/ion/winroom/bpp/internal/server"
 )
@@ -71,6 +73,18 @@ func main() {
 	}
 	lh.WithModule("main").Log("BPP identity registered: " + cfg.BppID)
 
+	// --- Zitadel token verifier --------------------------------------------
+	// Fetches Zitadel's OIDC discovery doc, so this can fail if Zitadel
+	// hasn't finished its own first-boot yet (a real race in local dev,
+	// where docker-compose only waits for a healthcheck, not full
+	// first-instance bootstrap) -- retry a few times before giving up.
+	verifier, err := newAuthVerifierWithRetry(ctx, cfg.ZitadelIssuer, cfg.ZitadelInternalURL, 10, 3*time.Second)
+	if err != nil {
+		lh.WithModule("main").Crit().Error(err).Log("failed to reach Zitadel for token verification")
+		os.Exit(1)
+	}
+	lh.WithModule("main").Log("Zitadel token verifier ready")
+
 	// --- HTTP server -----------------------------------------------------
 	if cfg.IsProduction() {
 		gin.SetMode(gin.ReleaseMode)
@@ -83,7 +97,7 @@ func main() {
 		WithLogHarbour(lh).
 		WithDatabase(pool)
 
-	server.RegisterRoutes(svc, cfg)
+	server.RegisterRoutes(svc, cfg, verifier)
 
 	// --- Graceful shutdown -----------------------------------------------
 	addr := fmt.Sprintf(":%s", cfg.AppPort)
@@ -113,6 +127,23 @@ func registerBPPIdentity(ctx context.Context, pool *pgxpool.Pool, cfg *config.Co
 		BppUri:     cfg.BppURI,
 		NetworkIds: []string{cfg.NetworkID},
 	})
+}
+
+// newAuthVerifierWithRetry retries Zitadel's OIDC discovery fetch, since a
+// freshly-started Zitadel container can take longer to finish its
+// first-instance bootstrap than docker-compose's healthcheck-based
+// depends_on waits for.
+func newAuthVerifierWithRetry(ctx context.Context, issuer, internalURL string, attempts int, delay time.Duration) (*auth.Verifier, error) {
+	var lastErr error
+	for i := 0; i < attempts; i++ {
+		v, err := auth.NewVerifier(ctx, issuer, internalURL)
+		if err == nil {
+			return v, nil
+		}
+		lastErr = err
+		time.Sleep(delay)
+	}
+	return nil, lastErr
 }
 
 // logLevel maps the LOG_LEVEL env string to a logharbour priority constant.

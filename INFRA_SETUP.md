@@ -29,6 +29,18 @@ for local dev (in the cloud, these are a dedicated Cloud SQL instance and a
 dedicated Memorystore instance created in the same project — see the cloud
 section).
 
+Two more services exist **local-dev only** (not yet part of the Cloud Run
+deployment) for seller login:
+
+| Service | What it is | Local port | Local dev source |
+|---|---|---|---|
+| `landing-page` | Entry point + seller login/registration (React SPA) | 3002 | `landing-page/` |
+| `zitadel` | Identity provider issuing seller login sessions | 8090 | n/a (upstream image) |
+
+`bpp-frontend`'s dashboard now requires a logged-in seller session (see §1f
+below) — every `/api/v1/*` route except catalog/webhook ones is gated by it
+and scoped to that seller's own data.
+
 ## 1. Local development (Docker Compose)
 
 ### 1a. Prerequisites
@@ -38,6 +50,9 @@ section).
   gettext-base` on Debian/Ubuntu, `brew install gettext` on macOS). Used by
   `scripts/render-onix-config.sh` in step 1b below to generate the onix
   config files from `.env`.
+- `curl` and `jq`. Used by `scripts/setup-zitadel.sh` (§1f) to drive
+  Zitadel's Management API — no manual console setup needed for seller
+  login.
 - A registered Beckn network identity for both `bap` and `bpp` — a
   subscriber ID, a `keyId`, and an Ed25519 keypair for signing (`signingPrivateKey`/
   `signingPublicKey`) plus an encryption keypair (`encrPrivateKey`/`encrPublicKey`),
@@ -73,7 +88,16 @@ section).
    BPP_ONIX_SIGNING_PUBLIC_KEY=<your bpp signingPublicKey>
    BPP_ONIX_ENCR_PRIVATE_KEY=<your bpp encrPrivateKey>
    BPP_ONIX_ENCR_PUBLIC_KEY=<your bpp encrPublicKey>
+
+   # Seller login (Zitadel) — see §1f below for the full setup/test flow.
+   ZITADEL_MASTERKEY=<any 32-character string, e.g. `openssl rand -base64 24 | cut -c1-32`>
+   ZITADEL_ADMIN_USERNAME=admin
+   ZITADEL_ADMIN_EMAIL=admin@reference-app.local
+   ZITADEL_ADMIN_PASSWORD=<a password meeting Zitadel's default complexity policy>
+   ZITADEL_CLIENT_ID=SET_BY_SCRIPTS_SETUP_ZITADEL_SH
    ```
+   The last line is not something you fill in — leave it as-is;
+   `scripts/setup-zitadel.sh` (§1f) overwrites it with a real value.
    Only `BAP_PRIVATE_KEY`/`BAP_KEY_ID` (and their bpp equivalents) are read
    directly by the Go apps — the `*_ONIX_*` fields exist here purely so
    step 2's script has one place to read every value from.
@@ -121,20 +145,49 @@ section).
 
 ### 1c. Bring it up
 
-```sh
-docker compose up -d --build
-```
+Do these in order — `landing-page` and `bpp` both read
+`ZITADEL_CLIENT_ID`/`ZITADEL_ISSUER` from `.env` at container *start*, so
+Zitadel has to be up and set up (step 2) *before* step 3 builds them:
 
-This builds and starts all 6 app services + Postgres + 2 Redis instances.
-First run also needs the database schema created — migrations aren't run
-automatically. Requires the `tern` CLI (`go install github.com/jackc/tern/v2@latest`);
-each `tern.conf` already defaults to `docker-compose.yml`'s exposed Postgres
-port (`5435`), so no extra config is needed:
+1. Start Postgres and Zitadel on their own first:
+   ```sh
+   docker compose up -d postgres zitadel
+   ```
+   Wait for Zitadel to report healthy: `docker compose ps zitadel`.
 
-```sh
-cd bap-application/db/migrations && tern migrate && cd ../../..
-cd bpp-application/db/migrations && tern migrate && cd ../../..
-```
+2. Run the one-time Zitadel setup script:
+   ```sh
+   ./scripts/setup-zitadel.sh
+   ```
+   This waits for Zitadel to finish its first-boot bootstrap, then uses its
+   own Management API (via an auto-created machine-user token — no manual
+   console step, no credentials to copy by hand) to create a Project and a
+   public/PKCE OIDC Application for `landing-page`, writing the result into
+   `.env` as `ZITADEL_CLIENT_ID`. Safe to re-run — it finds the existing
+   Project/Application by name instead of creating duplicates.
+
+3. Bring up everything else:
+   ```sh
+   docker compose up -d --build
+   ```
+   This builds and starts the original 6 app services, `landing-page`, and
+   the 2 Redis instances (`postgres`/`zitadel` are already up from step 1).
+
+4. First run also needs the database schema created — migrations aren't
+   run automatically. Requires the `tern` CLI
+   (`go install github.com/jackc/tern/v2@latest`); each `tern.conf` already
+   defaults to `docker-compose.yml`'s exposed Postgres port (`5435`), so no
+   extra config is needed:
+   ```sh
+   cd bap-application/db/migrations && tern migrate && cd ../../..
+   cd bpp-application/db/migrations && tern migrate && cd ../../..
+   ```
+
+**If you ran step 3 before step 2** (e.g. you brought everything up in one
+shot): `landing-page`/`bpp` will have started with an empty
+`ZITADEL_CLIENT_ID`. Just run step 2 now, then
+`docker compose restart landing-page bpp` — no rebuild needed, `.env` is
+read at container start, not baked into the image.
 
 ### 1d. Verify
 
@@ -147,6 +200,14 @@ curl "http://localhost:3000/api/v1/discover?textSearch=coffee"   # full discover
 A `200` with real catalog data back means signing, routing, and the CDS
 connection are all working.
 
+```sh
+curl http://localhost:8090/debug/healthz          # zitadel — expect "ok"
+curl -o /dev/null -w "%{http_code}\n" http://localhost:8080/api/v1/orders   # expect 401 — dashboard API rejects unauthenticated requests
+```
+
+The `401` is the point, not a failure — it confirms `bpp`'s seller-auth
+middleware is actually wired in. See §1f for the real (logged-in) check.
+
 ### 1e. Known local-dev gotcha
 
 If you rebuild/recreate `bap`, `bpp`, `onix-bap`, or `onix-bpp` without also
@@ -155,7 +216,53 @@ to the *old* container IP and you'll get `502 Bad Gateway`. Either
 `docker compose up -d` the whole stack together, or explicitly
 `docker compose restart frontend bpp-frontend` after rebuilding a backend.
 
-### 1f. Observability (OTel)
+### 1f. Testing the seller login flow
+
+`bpp-frontend` requires a logged-in seller session — there's no way to see
+the dashboard without going through this once. This assumes §1c is
+already fully done (Zitadel is up *and* set up via
+`scripts/setup-zitadel.sh`).
+
+1. Open `http://localhost:3002` (`landing-page`) in a browser. With no
+   session yet, it redirects straight to Zitadel's hosted login page —
+   this is expected (see the note below on why there's no "Register"
+   button to click yet).
+2. Log in with the admin identity from `.env`:
+   `ZITADEL_ADMIN_EMAIL` / `ZITADEL_ADMIN_PASSWORD`. This account's email
+   is pre-verified (`ZITADEL_FIRSTINSTANCE_ORG_HUMAN_EMAIL_VERIFIED=true`
+   in `docker-compose.yml`), so it logs in directly with no email-OTP
+   step.
+3. Zitadel redirects back to `landing-page`. Since this is the first
+   login for this identity, you'll see a one-time "set up your seller
+   profile" form (business name) — this is what actually creates the
+   `providers`/`users` rows in `bpp`'s database
+   (`POST /api/v1/auth/bootstrap`, `bpp-application/internal/authsvc/`).
+4. You'll land on the buyer/seller chooser. Click **Enter as Seller** —
+   it carries your session token to `bpp-frontend`
+   (`http://localhost:3001`), which should load the full dashboard
+   (Overview, Orders, Inventory, Catalogs, …), scoped to the seller
+   profile you just created.
+5. **Enter as Buyer** stays unauthenticated, as before — only the seller
+   side requires login.
+
+**Why there's no self-service "Register" flow yet:** Zitadel's own hosted
+registration form requires verifying the new account's email via a
+one-time code, and this local setup has no SMTP configured to actually
+deliver that email — registering a brand-new (non-admin) identity here
+will get stuck at that step. Use the admin identity above as your test
+seller for now; adding a local SMTP catcher (e.g. Mailpit) so real
+self-registration can be tested end-to-end is a known follow-up, not yet
+done.
+
+**If something goes wrong:** `docker logs zitadel` for first-boot/bootstrap
+issues; `docker logs beckn-app-bpp-1` for `"Zitadel token verifier ready"`
+(confirms `bpp` reached Zitadel successfully at startup) or a `Crit`-level
+error if it couldn't. A `403` with `"code":"NO_PROVIDER"` from any
+`/api/v1/*` call means the bearer token is valid but step 3 above
+(the bootstrap call) never completed — check the browser console on
+`landing-page` for the actual error.
+
+### 1g. Observability (OTel)
 
 `onix-bap`/`onix-bpp` each ship telemetry to their own companion collector
 sidecar — `otel-collector-bap`/`otel-collector-bpp` in `docker-compose.yml`,

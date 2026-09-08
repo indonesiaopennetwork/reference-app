@@ -21,6 +21,12 @@ WHERE resource_id = $1
 
 -- name: ListResourceStock :many
 -- Full stock listing for the dashboard, joined with the resource descriptor.
+-- provider_id: see dashboard.sql's ListContracts -- NULL bypasses for
+-- internal/ops use. resource_stock itself carries no provider_id (it's an
+-- intentionally shared counter -- see 027_provider_scoping.sql), so scoping
+-- goes through the joined resources row; a stock row with no matching
+-- resources row is excluded from any provider-scoped view since it can't
+-- be attributed to one.
 SELECT
     rs.resource_id,
     rs.bpp_id,
@@ -34,4 +40,5 @@ LEFT JOIN resources r
        ON r.id     = rs.resource_id
       AND r.bpp_id = rs.bpp_id
 WHERE rs.bpp_id = $1
+  AND (sqlc.narg('provider_id')::TEXT IS NULL OR r.provider_id = sqlc.narg('provider_id'))
 ORDER BY rs.updated_at DESC;

@@ -5,7 +5,7 @@ name: beckn-app
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:
-  # ─── Postgres (shared, two databases: bpp / bap) ──────────────────────────
+  # ─── Postgres (shared, three databases: bpp / bap / zitadel) ──────────────
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
@@ -23,6 +23,67 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    networks:
+      - beckn
+
+  # ─── Zitadel (seller login/registration identity provider) ────────────────
+  # Runs the classic hosted login UI (LOGINV2 explicitly disabled) so this is
+  # a single container -- Zitadel's newer "Login V2" architecture needs a
+  # second Next.js container plus a reverse proxy in front of both, which
+  # doesn't fit this project's per-service-own-port style. Login V1 is on a
+  # deprecation path upstream (removed in a future Zitadel major version) but
+  # fully supported today and documented by Zitadel itself as fine for local
+  # evaluation -- revisit if/when it's actually removed.
+  zitadel:
+    image: ghcr.io/zitadel/zitadel:latest
+    container_name: zitadel
+    restart: unless-stopped
+    user: "0"
+    command: start-from-init --masterkey "${ZITADEL_MASTERKEY}"
+    environment:
+      ZITADEL_PORT: 8080
+      ZITADEL_EXTERNALDOMAIN: localhost
+      ZITADEL_EXTERNALPORT: 8090
+      ZITADEL_EXTERNALSECURE: "false"
+      ZITADEL_TLS_ENABLED: "false"
+
+      ZITADEL_DATABASE_POSTGRES_DSN: postgres://postgres:postgres@postgres:5432/zitadel?sslmode=disable
+
+      # Classic hosted login UI at /ui/login, served directly by this
+      # container -- see the comment above the service.
+      ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_REQUIRED: "false"
+
+      ZITADEL_FIRSTINSTANCE_ORG_NAME: reference-app
+
+      # Human admin account, for debugging via Zitadel's own console
+      # (localhost:8090/ui/console) -- not used by any app code.
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME: ${ZITADEL_ADMIN_USERNAME}
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_EMAIL_ADDRESS: ${ZITADEL_ADMIN_EMAIL}
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_EMAIL_VERIFIED: "true"
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD: ${ZITADEL_ADMIN_PASSWORD}
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORDCHANGEREQUIRED: "false"
+
+      # Machine user + Personal Access Token, auto-created at first boot and
+      # written to ZITADEL_FIRSTINSTANCE_PATPATH inside the container (bind
+      # mounted below) -- scripts/setup-zitadel.sh reads it from there to
+      # drive Zitadel's own Management API with no manual console step.
+      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_USERNAME: automation
+      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_NAME: Reference App Automation
+      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_PAT_EXPIRATIONDATE: "2100-01-01T00:00:00Z"
+      ZITADEL_FIRSTINSTANCE_PATPATH: /machinekey/pat.txt
+    volumes:
+      - ./.zitadel-machinekey:/machinekey
+    ports:
+      - "8090:8080"
+    healthcheck:
+      test: [ "CMD", "/app/zitadel", "ready" ]
+      interval: 10s
+      timeout: 30s
+      retries: 12
+      start_period: 20s
+    depends_on:
+      postgres:
+        condition: service_healthy
     networks:
       - beckn
 
@@ -169,6 +230,8 @@ services:
         condition: service_healthy
       onix-bpp:
         condition: service_started
+      zitadel:
+        condition: service_healthy
     environment:
       APP_PORT: "8080"
       APP_ENV: development
@@ -196,6 +259,18 @@ services:
       # Same keypair as config/local-simple-bpp.yaml's keyManager — one registered identity.
       BPP_PRIVATE_KEY: ${BPP_PRIVATE_KEY}
       BPP_KEY_ID: ${BPP_KEY_ID}
+
+      # Seller login (see zitadel service above). ZITADEL_ISSUER must match
+      # Zitadel's configured ZITADEL_EXTERNALDOMAIN/PORT exactly -- it's both
+      # the "iss" claim on tokens AND the Host header Zitadel's own
+      # host-header-based instance resolution requires. ZITADEL_INTERNAL_URL
+      # is the address actually dialed (the docker-network hostname) --
+      # internal/auth.NewVerifier sends that request with a Host header of
+      # ZITADEL_ISSUER's host, so instance resolution still succeeds even
+      # though the two addresses differ.
+      ZITADEL_ISSUER: http://localhost:8090
+      ZITADEL_INTERNAL_URL: http://zitadel:8080
+      LANDING_PAGE_ORIGIN: http://localhost:3002
     ports:
       - "8080:8080"
     networks:
@@ -284,6 +359,9 @@ services:
       BPP_URL: http://bpp:8080
       NGINX_RESOLVER: "127.0.0.11"
       BAP_URL: ${VITE_BAP_URL}
+      # Read by the BROWSER (see src/auth.js) to redirect back to login on
+      # missing/expired sessions -- must be host-published, not internal.
+      LANDING_PAGE_URL: http://localhost:3002
     ports:
       - "3001:80"
     networks:
@@ -298,6 +376,12 @@ services:
     environment:
       BAP_URL: http://localhost:3000
       BPP_URL: http://localhost:3001
+      # All three below are read by the BROWSER (landing-page is a client-side
+      # SPA), so these must be host-published, browser-reachable addresses,
+      # not internal docker-network hostnames.
+      BPP_API_URL: http://localhost:8080
+      ZITADEL_ISSUER: http://localhost:8090
+      ZITADEL_CLIENT_ID: ${ZITADEL_CLIENT_ID}
     ports:
       - "3002:80"
     networks:

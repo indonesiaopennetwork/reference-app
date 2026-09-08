@@ -9,6 +9,8 @@ import (
 	"github.com/remiges-tech/alya/wscutils"
 	"github.com/remiges-tech/logharbour/logharbour"
 
+	"github.com/ion/winroom/bpp/internal/auth"
+	"github.com/ion/winroom/bpp/internal/authsvc"
 	"github.com/ion/winroom/bpp/internal/cancelsvc"
 	"github.com/ion/winroom/bpp/internal/catalog"
 	"github.com/ion/winroom/bpp/internal/config"
@@ -47,7 +49,7 @@ import (
 // Inbound CDS → BPP callback:
 //
 //	/beckn/catalog/on_publish → CDS notifies BPP of catalog indexing result
-func RegisterRoutes(svc *service.Service, cfg *config.Config) {
+func RegisterRoutes(svc *service.Service, cfg *config.Config, verifier *auth.Verifier) {
 	pool := svc.Database.(*pgxpool.Pool)
 
 	// Health check — outside Beckn namespace, used by load balancers / k8s probes
@@ -56,7 +58,8 @@ func RegisterRoutes(svc *service.Service, cfg *config.Config) {
 	// Provider-facing catalog publish API (simplified — no Beckn context required from provider)
 	v1 := svc.Router.Group("/api/v1")
 	registerProviderCatalogRoutes(svc, v1, pool, cfg)
-	registerDashboardRoutes(v1, pool, cfg, svc.LogHarbour)
+	registerAuthRoutes(v1, pool, cfg, verifier)
+	registerDashboardRoutes(v1, pool, cfg, svc.LogHarbour, verifier)
 
 	webhook := svc.Router.Group("/api/webhook")
 	registerTransactionRoutes(svc, webhook, pool, cfg)
@@ -145,33 +148,73 @@ func registerProviderCatalogRoutes(svc *service.Service, g *gin.RouterGroup, poo
 // Dashboard API  (GET /api/v1/dashboard/*, /api/v1/orders/*, etc.)
 // ---------------------------------------------------------------------------
 
-func registerDashboardRoutes(v1 *gin.RouterGroup, pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.Logger) {
+// registerDashboardRoutes wires the seller/admin dashboard API. Every route
+// here requires a valid Zitadel seller session (auth.RequireSeller) and is
+// scoped to that seller's own provider_id -- see internal/auth and each
+// handler's use of auth.ProviderIDFromContext.
+func registerDashboardRoutes(v1 *gin.RouterGroup, pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.Logger, verifier *auth.Verifier) {
 	h := dashboardsvc.NewHandler(pool, cfg, lh)
 
-	v1.GET("/dashboard/stats", h.HandleStats)
+	dash := v1.Group("")
+	dash.Use(auth.RequireSeller(verifier, pool))
 
-	v1.GET("/orders", h.HandleListOrders)
-	v1.GET("/orders/:id", h.HandleGetOrder)
+	dash.GET("/dashboard/stats", h.HandleStats)
 
-	inv := v1.Group("/inventory")
+	dash.GET("/orders", h.HandleListOrders)
+	dash.GET("/orders/:id", h.HandleGetOrder)
+
+	inv := dash.Group("/inventory")
 	inv.GET("/resources", h.HandleListResources)
 	inv.GET("/offers", h.HandleListOffers)
 	inv.GET("/stock", h.HandleListStock)
 	inv.GET("/items", h.HandleInventoryItems)
 
-	v1.GET("/messages", h.HandleListMessages)
-	v1.GET("/support-tickets", h.HandleListSupportTickets)
-	v1.GET("/ratings", h.HandleListRatings)
+	dash.GET("/messages", h.HandleListMessages)
+	dash.GET("/support-tickets", h.HandleListSupportTickets)
+	dash.GET("/ratings", h.HandleListRatings)
 
 	// Catalog management
-	v1.GET("/providers", h.HandleListProviders)
-	v1.GET("/catalogs", h.HandleListCatalogs)
-	v1.POST("/catalogs", h.HandleCreateCatalog)
-	v1.GET("/catalogs/:id", h.HandleGetCatalog)
-	v1.GET("/catalogs/:id/resources", h.HandleGetCatalogResources)
-	v1.POST("/catalogs/:id/products", h.HandleAddProduct)
-	v1.POST("/catalogs/:id/offers", h.HandleAddOffer)
-	v1.POST("/catalogs/:id/publish", h.HandlePublishCatalog)
+	dash.GET("/providers", h.HandleListProviders)
+	dash.GET("/catalogs", h.HandleListCatalogs)
+	dash.POST("/catalogs", h.HandleCreateCatalog)
+	dash.GET("/catalogs/:id", h.HandleGetCatalog)
+	dash.GET("/catalogs/:id/resources", h.HandleGetCatalogResources)
+	dash.POST("/catalogs/:id/products", h.HandleAddProduct)
+	dash.POST("/catalogs/:id/offers", h.HandleAddOffer)
+	dash.POST("/catalogs/:id/publish", h.HandlePublishCatalog)
+}
+
+// ---------------------------------------------------------------------------
+// Auth  (POST /api/v1/auth/bootstrap)
+// ---------------------------------------------------------------------------
+
+// registerAuthRoutes wires the one endpoint a valid-but-not-yet-registered
+// Zitadel identity must reach: bootstrapping its seller profile. Uses
+// auth.RequireToken (not RequireSeller), since RequireSeller would 403
+// before the users row this endpoint is responsible for creating exists.
+func registerAuthRoutes(v1 *gin.RouterGroup, pool *pgxpool.Pool, cfg *config.Config, verifier *auth.Verifier) {
+	h := authsvc.NewHandler(pool, cfg, verifier)
+	authGroup := v1.Group("/auth")
+	authGroup.Use(corsMiddleware(cfg.LandingPageOrigin))
+	authGroup.OPTIONS("/bootstrap", func(c *gin.Context) {}) // preflight; corsMiddleware itself replies + aborts
+	authGroup.Use(auth.RequireToken(verifier))
+	authGroup.POST("/bootstrap", h.HandleBootstrap)
+}
+
+// corsMiddleware allows exactly one origin (landing-page's) to call this
+// route group directly — every other frontend reaches this API through its
+// own same-origin nginx proxy and needs no CORS exception at all.
+func corsMiddleware(allowedOrigin string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("Access-Control-Allow-Origin", allowedOrigin)
+		c.Header("Access-Control-Allow-Methods", "POST, OPTIONS")
+		c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type")
+		if c.Request.Method == http.MethodOptions {
+			c.AbortWithStatus(http.StatusNoContent)
+			return
+		}
+		c.Next()
+	}
 }
 
 func registerBecknCatalogRoutes(svc *service.Service, g *gin.RouterGroup) {

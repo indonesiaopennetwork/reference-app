@@ -1,0 +1,32 @@
+// Consumes the access token landing-page hands off via a URL param (see
+// landing-page/src/App.jsx's "Enter as Seller" link) and stores it for
+// this app's own use. There's no login UI here at all -- landing-page is
+// the single entry point; a visit with no token, ever, redirects there.
+const TOKEN_KEY = 'bpp.accessToken'
+
+// Reads ?token= from the URL (if present), stores it, and strips it from
+// the URL bar via history.replaceState so it doesn't linger in the
+// address bar or browser history.
+export function captureTokenFromUrl() {
+  const params = new URLSearchParams(window.location.search)
+  const token = params.get('token')
+  if (!token) return
+  localStorage.setItem(TOKEN_KEY, token)
+  params.delete('token')
+  const query = params.toString()
+  const newUrl = window.location.pathname + (query ? `?${query}` : '') + window.location.hash
+  window.history.replaceState({}, '', newUrl)
+}
+
+export function getToken() {
+  return localStorage.getItem(TOKEN_KEY)
+}
+
+export function clearToken() {
+  localStorage.removeItem(TOKEN_KEY)
+}
+
+export function redirectToLogin() {
+  const url = window.__env__?.LANDING_PAGE_URL || import.meta.env.VITE_LANDING_PAGE_URL || 'http://localhost:3002'
+  window.location.href = url
+}

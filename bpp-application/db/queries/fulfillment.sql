@@ -63,6 +63,7 @@ INSERT INTO ratings (
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
 
 -- name: ListRatings :many
+-- provider_id: see dashboard.sql's ListContracts -- NULL bypasses for internal/ops use.
 SELECT
     r.id,
     r.contract_id,
@@ -77,6 +78,7 @@ SELECT
 FROM ratings r
 JOIN contracts c ON c.id = r.contract_id
 WHERE c.bpp_id = $1
+  AND (sqlc.narg('provider_id')::TEXT IS NULL OR c.provider_id = sqlc.narg('provider_id'))
 ORDER BY r.created_at DESC
 LIMIT  $2
 OFFSET $3;
@@ -84,7 +86,8 @@ OFFSET $3;
 -- name: CountRatings :one
 SELECT COUNT(*) FROM ratings r
 JOIN contracts c ON c.id = r.contract_id
-WHERE c.bpp_id = $1;
+WHERE c.bpp_id = $1
+  AND (sqlc.narg('provider_id')::TEXT IS NULL OR c.provider_id = sqlc.narg('provider_id'));
 
 -- ============================================================
 -- SUPPORT — persist support tickets
@@ -103,6 +106,10 @@ INSERT INTO support_tickets (
 RETURNING id;
 
 -- name: ListSupportTickets :many
+-- provider_id NULL (internal/ops use): unchanged behavior, includes standalone
+-- tickets with no contract_id. provider_id set (seller-scoped): standalone
+-- tickets are excluded -- there's no contract to resolve a provider from, so
+-- they can't be safely attributed to any one seller (see 015_support_tickets.sql).
 SELECT
     st.id,
     st.contract_id,
@@ -117,7 +124,11 @@ SELECT
     st.resolved_at
 FROM support_tickets st
 LEFT JOIN contracts c ON c.id = st.contract_id
-WHERE (c.bpp_id = $1 OR st.contract_id IS NULL)
+WHERE
+    CASE
+        WHEN sqlc.narg('provider_id')::TEXT IS NOT NULL THEN c.provider_id = sqlc.narg('provider_id')
+        ELSE (c.bpp_id = $1 OR st.contract_id IS NULL)
+    END
 ORDER BY st.created_at DESC
 LIMIT  $2
 OFFSET $3;
@@ -125,4 +136,8 @@ OFFSET $3;
 -- name: CountSupportTickets :one
 SELECT COUNT(*) FROM support_tickets st
 LEFT JOIN contracts c ON c.id = st.contract_id
-WHERE c.bpp_id = $1 OR st.contract_id IS NULL;
+WHERE
+    CASE
+        WHEN sqlc.narg('provider_id')::TEXT IS NOT NULL THEN c.provider_id = sqlc.narg('provider_id')
+        ELSE (c.bpp_id = $1 OR st.contract_id IS NULL)
+    END;
