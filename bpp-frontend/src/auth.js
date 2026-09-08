@@ -30,3 +30,12 @@ export function redirectToLogin() {
   const url = window.__env__?.LANDING_PAGE_URL || import.meta.env.VITE_LANDING_PAGE_URL || 'http://localhost:3002'
   window.location.href = url
 }
+
+// This app never talks to Zitadel directly (no id_token), so ending the SSO
+// session has to happen on landing-page -- it owns the OIDC client and its
+// own stored id_token. See landing-page/src/App.jsx's "/logout" route.
+export function logout() {
+  clearToken()
+  const base = window.__env__?.LANDING_PAGE_URL || import.meta.env.VITE_LANDING_PAGE_URL || 'http://localhost:3002'
+  window.location.href = `${base}/logout`
+}

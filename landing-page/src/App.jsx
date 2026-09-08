@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
+import { LogOut } from 'lucide-react'
 import { config } from './config.js'
-import { startLogin, handleCallback, getValidToken, clearToken } from './oidc.js'
+import { startLogin, handleCallback, getValidToken, clearToken, logout } from './oidc.js'
 
 async function bootstrap(token, businessName) {
   const res = await fetch(`${config.bppApiUrl}/api/v1/auth/bootstrap`, {
@@ -21,6 +22,11 @@ export default function App() {
   useEffect(() => {
     async function run() {
       try {
+        if (window.location.pathname === '/logout') {
+          logout() // navigates away; nothing after this runs
+          return
+        }
+
         if (window.location.pathname === '/callback') {
           await handleCallback()
           window.history.replaceState({}, '', '/')
@@ -133,7 +139,13 @@ function SellerProfileForm({ onSubmit }) {
 function Landing({ token }) {
   const sellerUrl = `${config.bppUrl}/?token=${encodeURIComponent(token)}`
   return (
-    <div className="min-h-screen flex items-center justify-center p-6">
+    <div className="relative min-h-screen flex items-center justify-center p-6">
+      <button
+        onClick={logout}
+        className="absolute top-6 right-6 flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-rose-400 transition-all bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 hover:border-rose-500/40"
+      >
+        <LogOut size={13} /> Log out
+      </button>
       <div className="max-w-xl w-full text-center">
         <p className="text-2xl md:text-3xl font-bold text-white tracking-tight">
           ION <span className="font-normal text-slate-400">Reference App</span>
