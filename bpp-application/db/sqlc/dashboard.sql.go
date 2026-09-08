@@ -15,23 +15,38 @@ import (
 
 const countContracts = `-- name: CountContracts :one
 SELECT COUNT(*) FROM contracts
-WHERE bpp_id = $1 AND deleted_at IS NULL
+WHERE bpp_id = $1
+  AND ($2::text IS NULL OR provider_id = $2)
+  AND deleted_at IS NULL
 `
 
-func (q *Queries) CountContracts(ctx context.Context, bppID string) (int64, error) {
-	row := q.db.QueryRow(ctx, countContracts, bppID)
+type CountContractsParams struct {
+	BppID      string  `json:"bpp_id"`
+	ProviderID *string `json:"provider_id"`
+}
+
+func (q *Queries) CountContracts(ctx context.Context, arg CountContractsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countContracts, arg.BppID, arg.ProviderID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
 }
 
 const countOffers = `-- name: CountOffers :one
-SELECT COUNT(*) FROM offers
-WHERE bpp_id = $1 AND deleted_at IS NULL
+SELECT COUNT(*) FROM offers o
+JOIN catalogs cat ON cat.id = o.catalog_id AND cat.bpp_id = o.bpp_id
+WHERE o.bpp_id = $1
+  AND ($2::text IS NULL OR COALESCE(o.provider_id, cat.provider_id) = $2)
+  AND o.deleted_at IS NULL
 `
 
-func (q *Queries) CountOffers(ctx context.Context, bppID string) (int64, error) {
-	row := q.db.QueryRow(ctx, countOffers, bppID)
+type CountOffersParams struct {
+	BppID      string  `json:"bpp_id"`
+	ProviderID *string `json:"provider_id"`
+}
+
+func (q *Queries) CountOffers(ctx context.Context, arg CountOffersParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countOffers, arg.BppID, arg.ProviderID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -39,11 +54,18 @@ func (q *Queries) CountOffers(ctx context.Context, bppID string) (int64, error) 
 
 const countResources = `-- name: CountResources :one
 SELECT COUNT(*) FROM resources
-WHERE bpp_id = $1 AND deleted_at IS NULL
+WHERE bpp_id = $1
+  AND ($2::text IS NULL OR provider_id = $2)
+  AND deleted_at IS NULL
 `
 
-func (q *Queries) CountResources(ctx context.Context, bppID string) (int64, error) {
-	row := q.db.QueryRow(ctx, countResources, bppID)
+type CountResourcesParams struct {
+	BppID      string  `json:"bpp_id"`
+	ProviderID *string `json:"provider_id"`
+}
+
+func (q *Queries) CountResources(ctx context.Context, arg CountResourcesParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countResources, arg.BppID, arg.ProviderID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -62,11 +84,13 @@ SELECT
 FROM contracts c
 WHERE c.id = $1
   AND c.bpp_id = $2
+  AND ($3::text IS NULL OR c.provider_id = $3)
 `
 
 type GetContractDetailParams struct {
-	ID    uuid.UUID `json:"id"`
-	BppID string    `json:"bpp_id"`
+	ID         uuid.UUID `json:"id"`
+	BppID      string    `json:"bpp_id"`
+	ProviderID *string   `json:"provider_id"`
 }
 
 type GetContractDetailRow struct {
@@ -81,7 +105,7 @@ type GetContractDetailRow struct {
 }
 
 func (q *Queries) GetContractDetail(ctx context.Context, arg GetContractDetailParams) (GetContractDetailRow, error) {
-	row := q.db.QueryRow(ctx, getContractDetail, arg.ID, arg.BppID)
+	row := q.db.QueryRow(ctx, getContractDetail, arg.ID, arg.BppID, arg.ProviderID)
 	var i GetContractDetailRow
 	err := row.Scan(
 		&i.ID,
@@ -105,8 +129,14 @@ SELECT
     COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '24 hours')    AS today_orders
 FROM contracts
 WHERE bpp_id = $1
+  AND ($2::text IS NULL OR provider_id = $2)
   AND deleted_at IS NULL
 `
+
+type GetDashboardStatsParams struct {
+	BppID      string  `json:"bpp_id"`
+	ProviderID *string `json:"provider_id"`
+}
 
 type GetDashboardStatsRow struct {
 	ActiveOrders  int64 `json:"active_orders"`
@@ -118,8 +148,8 @@ type GetDashboardStatsRow struct {
 // ============================================================
 // STATS
 // ============================================================
-func (q *Queries) GetDashboardStats(ctx context.Context, bppID string) (GetDashboardStatsRow, error) {
-	row := q.db.QueryRow(ctx, getDashboardStats, bppID)
+func (q *Queries) GetDashboardStats(ctx context.Context, arg GetDashboardStatsParams) (GetDashboardStatsRow, error) {
+	row := q.db.QueryRow(ctx, getDashboardStats, arg.BppID, arg.ProviderID)
 	var i GetDashboardStatsRow
 	err := row.Scan(&i.ActiveOrders, &i.PendingOrders, &i.TodayOrders)
 	return i, err
@@ -127,17 +157,28 @@ func (q *Queries) GetDashboardStats(ctx context.Context, bppID string) (GetDashb
 
 const getInventoryStats = `-- name: GetInventoryStats :one
 SELECT
-    (SELECT COUNT(*) FROM resources r2 WHERE r2.bpp_id = $1 AND r2.deleted_at IS NULL) AS resource_count,
-    (SELECT COUNT(*) FROM offers    o2 WHERE o2.bpp_id = $1 AND o2.deleted_at IS NULL) AS offer_count
+    (SELECT COUNT(*) FROM resources r2 WHERE r2.bpp_id = $1
+        AND ($2::text IS NULL OR r2.provider_id = $2)
+        AND r2.deleted_at IS NULL) AS resource_count,
+    (SELECT COUNT(*) FROM offers o2
+     JOIN catalogs cat2 ON cat2.id = o2.catalog_id AND cat2.bpp_id = o2.bpp_id
+     WHERE o2.bpp_id = $1
+        AND ($2::text IS NULL OR COALESCE(o2.provider_id, cat2.provider_id) = $2)
+        AND o2.deleted_at IS NULL) AS offer_count
 `
+
+type GetInventoryStatsParams struct {
+	BppID      string  `json:"bpp_id"`
+	ProviderID *string `json:"provider_id"`
+}
 
 type GetInventoryStatsRow struct {
 	ResourceCount int64 `json:"resource_count"`
 	OfferCount    int64 `json:"offer_count"`
 }
 
-func (q *Queries) GetInventoryStats(ctx context.Context, bppID string) (GetInventoryStatsRow, error) {
-	row := q.db.QueryRow(ctx, getInventoryStats, bppID)
+func (q *Queries) GetInventoryStats(ctx context.Context, arg GetInventoryStatsParams) (GetInventoryStatsRow, error) {
+	row := q.db.QueryRow(ctx, getInventoryStats, arg.BppID, arg.ProviderID)
 	var i GetInventoryStatsRow
 	err := row.Scan(&i.ResourceCount, &i.OfferCount)
 	return i, err
@@ -290,6 +331,7 @@ LEFT JOIN LATERAL (
     LIMIT 1
 ) co ON TRUE
 WHERE c.bpp_id = $1
+  AND ($4::text IS NULL OR c.provider_id = $4)
   AND c.deleted_at IS NULL
 ORDER BY c.created_at DESC
 LIMIT  $2
@@ -297,9 +339,10 @@ OFFSET $3
 `
 
 type ListContractsParams struct {
-	BppID  string `json:"bpp_id"`
-	Limit  int32  `json:"limit"`
-	Offset int32  `json:"offset"`
+	BppID      string  `json:"bpp_id"`
+	Limit      int32   `json:"limit"`
+	Offset     int32   `json:"offset"`
+	ProviderID *string `json:"provider_id"`
 }
 
 type ListContractsRow struct {
@@ -315,7 +358,7 @@ type ListContractsRow struct {
 // CONTRACTS / ORDERS
 // ============================================================
 func (q *Queries) ListContracts(ctx context.Context, arg ListContractsParams) ([]ListContractsRow, error) {
-	rows, err := q.db.Query(ctx, listContracts, arg.BppID, arg.Limit, arg.Offset)
+	rows, err := q.db.Query(ctx, listContracts, arg.BppID, arg.Limit, arg.Offset, arg.ProviderID)
 	if err != nil {
 		return nil, err
 	}
@@ -401,7 +444,9 @@ SELECT
     o.validity_end,
     o.created_at
 FROM offers o
+JOIN catalogs cat ON cat.id = o.catalog_id AND cat.bpp_id = o.bpp_id
 WHERE o.bpp_id = $1
+  AND ($4::text IS NULL OR COALESCE(o.provider_id, cat.provider_id) = $4)
   AND o.deleted_at IS NULL
 ORDER BY o.created_at DESC
 LIMIT  $2
@@ -409,9 +454,10 @@ OFFSET $3
 `
 
 type ListOffersParams struct {
-	BppID  string `json:"bpp_id"`
-	Limit  int32  `json:"limit"`
-	Offset int32  `json:"offset"`
+	BppID      string  `json:"bpp_id"`
+	Limit      int32   `json:"limit"`
+	Offset     int32   `json:"offset"`
+	ProviderID *string `json:"provider_id"`
 }
 
 type ListOffersRow struct {
@@ -429,7 +475,7 @@ type ListOffersRow struct {
 // OFFERS
 // ============================================================
 func (q *Queries) ListOffers(ctx context.Context, arg ListOffersParams) ([]ListOffersRow, error) {
-	rows, err := q.db.Query(ctx, listOffers, arg.BppID, arg.Limit, arg.Offset)
+	rows, err := q.db.Query(ctx, listOffers, arg.BppID, arg.Limit, arg.Offset, arg.ProviderID)
 	if err != nil {
 		return nil, err
 	}
@@ -527,6 +573,7 @@ SELECT
     r.created_at
 FROM resources r
 WHERE r.bpp_id = $1
+  AND ($4::text IS NULL OR r.provider_id = $4)
   AND r.deleted_at IS NULL
 ORDER BY r.created_at DESC
 LIMIT  $2
@@ -534,9 +581,10 @@ OFFSET $3
 `
 
 type ListResourcesParams struct {
-	BppID  string `json:"bpp_id"`
-	Limit  int32  `json:"limit"`
-	Offset int32  `json:"offset"`
+	BppID      string  `json:"bpp_id"`
+	Limit      int32   `json:"limit"`
+	Offset     int32   `json:"offset"`
+	ProviderID *string `json:"provider_id"`
 }
 
 type ListResourcesRow struct {
@@ -552,7 +600,7 @@ type ListResourcesRow struct {
 // RESOURCES
 // ============================================================
 func (q *Queries) ListResources(ctx context.Context, arg ListResourcesParams) ([]ListResourcesRow, error) {
-	rows, err := q.db.Query(ctx, listResources, arg.BppID, arg.Limit, arg.Offset)
+	rows, err := q.db.Query(ctx, listResources, arg.BppID, arg.Limit, arg.Offset, arg.ProviderID)
 	if err != nil {
 		return nil, err
 	}

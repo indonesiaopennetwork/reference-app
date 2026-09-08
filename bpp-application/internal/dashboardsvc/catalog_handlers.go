@@ -15,18 +15,35 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	dbsqlc "github.com/ion/winroom/bpp/db/sqlc"
+	"github.com/ion/winroom/bpp/internal/auth"
 	"github.com/ion/winroom/bpp/internal/catalog"
 )
 
+// catalogOwnedByProvider reports whether catalogID belongs to providerID
+// (and this bpp). Every handler below that mutates or reads a specific
+// catalog by ID must check this first -- catalogID always comes from the
+// URL, and this is the only thing standing between "the logged-in seller's
+// own catalog" and "any seller's catalog, if you know or guess its ID."
+func (h *Handler) catalogOwnedByProvider(ctx context.Context, catalogID, providerID string) (bool, error) {
+	var exists bool
+	err := h.pool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM catalogs WHERE id = $1 AND bpp_id = $2 AND provider_id = $3 AND deleted_at IS NULL)`,
+		catalogID, h.cfg.BppID, providerID,
+	).Scan(&exists)
+	return exists, err
+}
+
 // ---------------------------------------------------------------------------
 // GET /api/v1/catalogs
-// Query params: search (matches id / name / provider_id), provider_id (exact), page, limit
+// Query params: search (matches id / name / provider_id), page, limit.
+// Always scoped to the authenticated seller's own provider -- provider_id
+// is no longer a client-chosen filter (there's only ever one to choose).
 // ---------------------------------------------------------------------------
 
 func (h *Handler) HandleListCatalogs(c *gin.Context) {
 	page, limit := parsePagination(c)
 	search := c.DefaultQuery("search", "")
-	providerFilter := c.DefaultQuery("provider_id", "")
+	providerFilter := auth.ProviderIDFromContext(c)
 	ctx := c.Request.Context()
 
 	countSQL := `
@@ -138,11 +155,14 @@ func (h *Handler) HandleListCatalogs(c *gin.Context) {
 // GET /api/v1/providers  — for filter dropdown
 // ---------------------------------------------------------------------------
 
+// HandleListProviders returns only the authenticated seller's own provider
+// -- one row, always. (Kept as a list response for frontend compatibility;
+// there's nothing left to filter since a seller has exactly one provider.)
 func (h *Handler) HandleListProviders(c *gin.Context) {
 	ctx := c.Request.Context()
 	rows, err := h.pool.Query(ctx,
-		`SELECT id, descriptor_name FROM providers WHERE bpp_id = $1 AND deleted_at IS NULL ORDER BY descriptor_name`,
-		h.cfg.BppID)
+		`SELECT id, descriptor_name FROM providers WHERE bpp_id = $1 AND id = $2 AND deleted_at IS NULL ORDER BY descriptor_name`,
+		h.cfg.BppID, auth.ProviderIDFromContext(c))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -195,10 +215,36 @@ func (h *Handler) HandleCreateCatalog(c *gin.Context) {
 	}
 	ctx := c.Request.Context()
 	q := dbsqlc.New(h.pool)
+	providerID := auth.ProviderIDFromContext(c)
 
-	// Upsert provider first.
+	// UpsertCatalog below is a real INSERT ... ON CONFLICT DO UPDATE that
+	// happily overwrites provider_id on conflict -- without this check, any
+	// authenticated seller could "steal" another seller's existing catalog
+	// ID just by POSTing it again, instantly reassigning it to themselves.
+	if owned, err := h.catalogOwnedByProvider(ctx, req.ID, providerID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	} else if !owned {
+		var alreadyExists bool
+		if err := h.pool.QueryRow(ctx,
+			`SELECT EXISTS(SELECT 1 FROM catalogs WHERE id = $1 AND bpp_id = $2 AND deleted_at IS NULL)`,
+			req.ID, h.cfg.BppID,
+		).Scan(&alreadyExists); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if alreadyExists {
+			c.JSON(http.StatusConflict, gin.H{"error": "a catalog with this ID already exists"})
+			return
+		}
+	}
+
+	// Upsert provider -- always the caller's own, regardless of whatever
+	// provider info was submitted (a seller already has exactly one
+	// provider, created at registration; this just lets them update its
+	// display name via this form).
 	if err := q.UpsertProvider(ctx, dbsqlc.UpsertProviderParams{
-		ID:                   req.Provider.ID,
+		ID:                   providerID,
 		BppID:                h.cfg.BppID,
 		DescriptorName:       req.Provider.Descriptor.Name,
 		DescriptorDocs:       json.RawMessage(`[]`),
@@ -213,7 +259,7 @@ func (h *Handler) HandleCreateCatalog(c *gin.Context) {
 		ID:              req.ID,
 		BppID:           h.cfg.BppID,
 		BppUri:          h.cfg.BppURI,
-		ProviderID:      req.Provider.ID,
+		ProviderID:      providerID,
 		DescriptorName:  req.Descriptor.Name,
 		DescriptorShortDesc: strPtr(req.Descriptor.ShortDesc),
 		DescriptorLongDesc:  strPtr(req.Descriptor.LongDesc),
@@ -262,8 +308,8 @@ func (h *Handler) HandleGetCatalog(c *gin.Context) {
 		       c.network_published_at
 		FROM catalogs c
 		LEFT JOIN providers p ON p.id = c.provider_id AND p.bpp_id = c.bpp_id
-		WHERE c.id = $1 AND c.bpp_id = $2 AND c.deleted_at IS NULL`,
-		catalogID, h.cfg.BppID,
+		WHERE c.id = $1 AND c.bpp_id = $2 AND c.provider_id = $3 AND c.deleted_at IS NULL`,
+		catalogID, h.cfg.BppID, auth.ProviderIDFromContext(c),
 	).Scan(&cat.ID, &cat.Name, &sd, &cat.ProviderID, &cat.ProviderName,
 		&catType, &vs, &ve, &ca, &npAt)
 	if err != nil {
@@ -391,6 +437,15 @@ func (h *Handler) HandleAddProduct(c *gin.Context) {
 		return
 	}
 	ctx := c.Request.Context()
+	providerID := auth.ProviderIDFromContext(c)
+
+	if owned, err := h.catalogOwnedByProvider(ctx, catalogID, providerID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	} else if !owned {
+		c.JSON(http.StatusNotFound, gin.H{"error": "catalog not found"})
+		return
+	}
 
 	tx, err := h.pool.Begin(ctx)
 	if err != nil {
@@ -433,18 +488,21 @@ func (h *Handler) HandleAddProduct(c *gin.Context) {
 		return
 	}
 
-	// Upsert offer provider if provided.
+	// Upsert offer provider if provided -- forced to the caller's own
+	// provider regardless of what ID was submitted. UpsertProvider is an
+	// upsert keyed only on (id, bpp_id); trusting a client-supplied ID here
+	// would let any seller silently rename another seller's provider.
 	var offerProviderID *string
 	if req.Offer.Provider != nil {
 		if err := q.UpsertProvider(ctx, dbsqlc.UpsertProviderParams{
-			ID:             req.Offer.Provider.ID,
+			ID:             providerID,
 			BppID:          bppID,
 			DescriptorName: req.Offer.Provider.Descriptor.Name,
 		}); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "upsert offer provider: " + err.Error()})
 			return
 		}
-		offerProviderID = strPtr(req.Offer.Provider.ID)
+		offerProviderID = strPtr(providerID)
 	}
 
 	// Insert offer.
@@ -509,6 +567,14 @@ func (h *Handler) HandlePublishCatalog(c *gin.Context) {
 
 	if h.cfg.CDSPublishURL == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "CDS_PUBLISH_URL not configured"})
+		return
+	}
+
+	if owned, err := h.catalogOwnedByProvider(ctx, catalogID, auth.ProviderIDFromContext(c)); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	} else if !owned {
+		c.JSON(http.StatusNotFound, gin.H{"error": "catalog not found"})
 		return
 	}
 
@@ -778,10 +844,16 @@ func (h *Handler) HandlePublishCatalog(c *gin.Context) {
 // GET /api/v1/inventory/items  — resources grouped with catalog + provider info + optional filters
 // ---------------------------------------------------------------------------
 
+// HandleInventoryItems is always scoped to the authenticated seller's own
+// provider -- provider_id is no longer a client-chosen filter. catalog_id
+// stays client-choosable as a narrowing filter within that scope; a
+// catalog_id belonging to a different provider just yields zero rows
+// (the provider_id condition below still applies), not another seller's
+// data.
 func (h *Handler) HandleInventoryItems(c *gin.Context) {
 	page, limit   := parsePagination(c)
 	catalogFilter := c.DefaultQuery("catalog_id", "")
-	providerFilter := c.DefaultQuery("provider_id", "")
+	providerFilter := auth.ProviderIDFromContext(c)
 	search         := c.DefaultQuery("search", "")
 	ctx            := c.Request.Context()
 
@@ -866,8 +938,8 @@ func (h *Handler) HandleGetCatalogResources(c *gin.Context) {
 	ctx := c.Request.Context()
 	rows, err := h.pool.Query(ctx,
 		`SELECT id, descriptor_name FROM resources
-		 WHERE catalog_id = $1 AND bpp_id = $2 AND deleted_at IS NULL ORDER BY descriptor_name`,
-		catalogID, h.cfg.BppID)
+		 WHERE catalog_id = $1 AND bpp_id = $2 AND provider_id = $3 AND deleted_at IS NULL ORDER BY descriptor_name`,
+		catalogID, h.cfg.BppID, auth.ProviderIDFromContext(c))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -904,6 +976,15 @@ func (h *Handler) HandleAddOffer(c *gin.Context) {
 		return
 	}
 	ctx := c.Request.Context()
+	providerID := auth.ProviderIDFromContext(c)
+
+	if owned, err := h.catalogOwnedByProvider(ctx, catalogID, providerID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	} else if !owned {
+		c.JSON(http.StatusNotFound, gin.H{"error": "catalog not found"})
+		return
+	}
 
 	tx, err := h.pool.Begin(ctx)
 	if err != nil {
@@ -914,10 +995,12 @@ func (h *Handler) HandleAddOffer(c *gin.Context) {
 
 	qt := dbsqlc.New(tx)
 
+	// Forced to the caller's own provider regardless of what ID was
+	// submitted -- see the identical note in HandleAddProduct.
 	var offerProviderID *string
 	if req.Provider != nil && req.Provider.ID != "" {
 		if err := qt.UpsertProvider(ctx, dbsqlc.UpsertProviderParams{
-			ID:                   req.Provider.ID,
+			ID:                   providerID,
 			BppID:                h.cfg.BppID,
 			DescriptorName:       req.Provider.Descriptor.Name,
 			DescriptorDocs:       json.RawMessage(`[]`),
@@ -926,7 +1009,7 @@ func (h *Handler) HandleAddOffer(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "upsert provider: " + err.Error()})
 			return
 		}
-		offerProviderID = strPtr(req.Provider.ID)
+		offerProviderID = strPtr(providerID)
 	}
 
 	oAttrsCtx, oAttrsType := extractContextType(req.OfferAttributes)

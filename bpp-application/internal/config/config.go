@@ -51,6 +51,32 @@ type Config struct {
 	// BppKeyID is the Beckn signing key identifier in the format
 	// "<subscriberID>|<uniqueKeyID>|ed25519". Env: BPP_KEY_ID
 	BppKeyID string
+
+	// ZitadelIssuer is Zitadel's externally-configured issuer (its
+	// ZITADEL_EXTERNALDOMAIN/PORT, e.g. http://localhost:8090) -- this is
+	// the "iss" claim value tokens actually carry, and the Host header
+	// Zitadel's own instance-resolution needs on every request (it's
+	// host-header-based multi-tenancy; a mismatched Host means "instance
+	// not found" even from a request that reaches the right container).
+	// Env: ZITADEL_ISSUER
+	ZitadelIssuer string
+
+	// ZitadelInternalURL is the address this backend actually connects to
+	// (e.g. http://zitadel:8080 on the docker-compose network) when that
+	// differs from ZitadelIssuer -- the request still carries a Host
+	// header of ZitadelIssuer's host (see internal/auth.NewVerifier), so
+	// Zitadel resolves the same instance either way. Defaults to
+	// ZitadelIssuer when unset (e.g. running this binary outside Docker,
+	// where "the address to connect to" and "the externally-configured
+	// issuer" are the same host). Env: ZITADEL_INTERNAL_URL
+	ZitadelInternalURL string
+
+	// LandingPageOrigin is the origin (scheme://host[:port]) landing-page
+	// is served from — the only origin allowed to call POST
+	// /api/v1/auth/bootstrap directly (every other frontend route reaches
+	// this API through its own same-origin nginx proxy, needing no CORS
+	// exception). Env: LANDING_PAGE_ORIGIN
+	LandingPageOrigin string
 }
 
 // Load reads all config values from the environment and returns a validated Config.
@@ -78,6 +104,13 @@ func Load() (*Config, error) {
 
 		BppPrivateKey: os.Getenv("BPP_PRIVATE_KEY"),
 		BppKeyID:      os.Getenv("BPP_KEY_ID"),
+
+		ZitadelIssuer:      getEnv("ZITADEL_ISSUER", "http://localhost:8090"),
+		ZitadelInternalURL: os.Getenv("ZITADEL_INTERNAL_URL"),
+		LandingPageOrigin:  getEnv("LANDING_PAGE_ORIGIN", "http://localhost:3002"),
+	}
+	if cfg.ZitadelInternalURL == "" {
+		cfg.ZitadelInternalURL = cfg.ZitadelIssuer
 	}
 
 	if err := cfg.validate(); err != nil {

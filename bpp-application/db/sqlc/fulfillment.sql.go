@@ -52,10 +52,16 @@ const countRatings = `-- name: CountRatings :one
 SELECT COUNT(*) FROM ratings r
 JOIN contracts c ON c.id = r.contract_id
 WHERE c.bpp_id = $1
+  AND ($2::text IS NULL OR c.provider_id = $2)
 `
 
-func (q *Queries) CountRatings(ctx context.Context, bppID string) (int64, error) {
-	row := q.db.QueryRow(ctx, countRatings, bppID)
+type CountRatingsParams struct {
+	BppID      string  `json:"bpp_id"`
+	ProviderID *string `json:"provider_id"`
+}
+
+func (q *Queries) CountRatings(ctx context.Context, arg CountRatingsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countRatings, arg.BppID, arg.ProviderID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -64,11 +70,20 @@ func (q *Queries) CountRatings(ctx context.Context, bppID string) (int64, error)
 const countSupportTickets = `-- name: CountSupportTickets :one
 SELECT COUNT(*) FROM support_tickets st
 LEFT JOIN contracts c ON c.id = st.contract_id
-WHERE c.bpp_id = $1 OR st.contract_id IS NULL
+WHERE
+    CASE
+        WHEN $2::text IS NOT NULL THEN c.provider_id = $2
+        ELSE (c.bpp_id = $1 OR st.contract_id IS NULL)
+    END
 `
 
-func (q *Queries) CountSupportTickets(ctx context.Context, bppID string) (int64, error) {
-	row := q.db.QueryRow(ctx, countSupportTickets, bppID)
+type CountSupportTicketsParams struct {
+	BppID      string  `json:"bpp_id"`
+	ProviderID *string `json:"provider_id"`
+}
+
+func (q *Queries) CountSupportTickets(ctx context.Context, arg CountSupportTicketsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countSupportTickets, arg.BppID, arg.ProviderID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -263,15 +278,17 @@ SELECT
 FROM ratings r
 JOIN contracts c ON c.id = r.contract_id
 WHERE c.bpp_id = $1
+  AND ($4::text IS NULL OR c.provider_id = $4)
 ORDER BY r.created_at DESC
 LIMIT  $2
 OFFSET $3
 `
 
 type ListRatingsParams struct {
-	BppID  string `json:"bpp_id"`
-	Limit  int32  `json:"limit"`
-	Offset int32  `json:"offset"`
+	BppID      string  `json:"bpp_id"`
+	Limit      int32   `json:"limit"`
+	Offset     int32   `json:"offset"`
+	ProviderID *string `json:"provider_id"`
 }
 
 type ListRatingsRow struct {
@@ -288,7 +305,7 @@ type ListRatingsRow struct {
 }
 
 func (q *Queries) ListRatings(ctx context.Context, arg ListRatingsParams) ([]ListRatingsRow, error) {
-	rows, err := q.db.Query(ctx, listRatings, arg.BppID, arg.Limit, arg.Offset)
+	rows, err := q.db.Query(ctx, listRatings, arg.BppID, arg.Limit, arg.Offset, arg.ProviderID)
 	if err != nil {
 		return nil, err
 	}
@@ -333,16 +350,21 @@ SELECT
     st.resolved_at
 FROM support_tickets st
 LEFT JOIN contracts c ON c.id = st.contract_id
-WHERE (c.bpp_id = $1 OR st.contract_id IS NULL)
+WHERE
+    CASE
+        WHEN $4::text IS NOT NULL THEN c.provider_id = $4
+        ELSE (c.bpp_id = $1 OR st.contract_id IS NULL)
+    END
 ORDER BY st.created_at DESC
 LIMIT  $2
 OFFSET $3
 `
 
 type ListSupportTicketsParams struct {
-	BppID  string `json:"bpp_id"`
-	Limit  int32  `json:"limit"`
-	Offset int32  `json:"offset"`
+	BppID      string  `json:"bpp_id"`
+	Limit      int32   `json:"limit"`
+	Offset     int32   `json:"offset"`
+	ProviderID *string `json:"provider_id"`
 }
 
 type ListSupportTicketsRow struct {
@@ -360,7 +382,7 @@ type ListSupportTicketsRow struct {
 }
 
 func (q *Queries) ListSupportTickets(ctx context.Context, arg ListSupportTicketsParams) ([]ListSupportTicketsRow, error) {
-	rows, err := q.db.Query(ctx, listSupportTickets, arg.BppID, arg.Limit, arg.Offset)
+	rows, err := q.db.Query(ctx, listSupportTickets, arg.BppID, arg.Limit, arg.Offset, arg.ProviderID)
 	if err != nil {
 		return nil, err
 	}

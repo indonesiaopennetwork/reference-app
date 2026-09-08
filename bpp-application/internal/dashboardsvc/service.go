@@ -13,6 +13,7 @@ import (
 	"github.com/remiges-tech/logharbour/logharbour"
 
 	"github.com/ion/winroom/bpp/db/sqlc"
+	"github.com/ion/winroom/bpp/internal/auth"
 	"github.com/ion/winroom/bpp/internal/config"
 )
 
@@ -39,14 +40,15 @@ func (h *Handler) HandleStats(c *gin.Context) {
 	q := sqlc.New(h.pool)
 	ctx := c.Request.Context()
 	bppID := h.cfg.BppID
+	providerID := auth.ProviderIDFromContext(c)
 
-	orderStats, err := q.GetDashboardStats(ctx, bppID)
+	orderStats, err := q.GetDashboardStats(ctx, sqlc.GetDashboardStatsParams{BppID: bppID, ProviderID: &providerID})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	invStats, err := q.GetInventoryStats(ctx, bppID)
+	invStats, err := q.GetInventoryStats(ctx, sqlc.GetInventoryStatsParams{BppID: bppID, ProviderID: &providerID})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -64,7 +66,7 @@ func (h *Handler) HandleStats(c *gin.Context) {
 	}
 
 	// Stock summary — count out-of-stock and low-stock resources.
-	stockRows, err := q.ListResourceStock(ctx, bppID)
+	stockRows, err := q.ListResourceStock(ctx, sqlc.ListResourceStockParams{BppID: bppID, ProviderID: &providerID})
 	if err != nil {
 		// Non-fatal: stock table may not exist yet on older deployments.
 		stockRows = nil
@@ -99,17 +101,19 @@ func (h *Handler) HandleListOrders(c *gin.Context) {
 	page, limit := parsePagination(c)
 	q := sqlc.New(h.pool)
 	ctx := c.Request.Context()
+	providerID := auth.ProviderIDFromContext(c)
 
-	total, err := q.CountContracts(ctx, h.cfg.BppID)
+	total, err := q.CountContracts(ctx, sqlc.CountContractsParams{BppID: h.cfg.BppID, ProviderID: &providerID})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	rows, err := q.ListContracts(ctx, sqlc.ListContractsParams{
-		BppID:  h.cfg.BppID,
-		Limit:  int32(limit),
-		Offset: int32((page - 1) * limit),
+		BppID:      h.cfg.BppID,
+		Limit:      int32(limit),
+		Offset:     int32((page - 1) * limit),
+		ProviderID: &providerID,
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -139,8 +143,9 @@ func (h *Handler) HandleGetOrder(c *gin.Context) {
 
 	q := sqlc.New(h.pool)
 	ctx := c.Request.Context()
+	providerID := auth.ProviderIDFromContext(c)
 
-	contract, err := q.GetContractDetail(ctx, sqlc.GetContractDetailParams{ID: id, BppID: h.cfg.BppID})
+	contract, err := q.GetContractDetail(ctx, sqlc.GetContractDetailParams{ID: id, BppID: h.cfg.BppID, ProviderID: &providerID})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "order not found"})
@@ -178,17 +183,19 @@ func (h *Handler) HandleListResources(c *gin.Context) {
 	page, limit := parsePagination(c)
 	q := sqlc.New(h.pool)
 	ctx := c.Request.Context()
+	providerID := auth.ProviderIDFromContext(c)
 
-	total, err := q.CountResources(ctx, h.cfg.BppID)
+	total, err := q.CountResources(ctx, sqlc.CountResourcesParams{BppID: h.cfg.BppID, ProviderID: &providerID})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	rows, err := q.ListResources(ctx, sqlc.ListResourcesParams{
-		BppID:  h.cfg.BppID,
-		Limit:  int32(limit),
-		Offset: int32((page - 1) * limit),
+		BppID:      h.cfg.BppID,
+		Limit:      int32(limit),
+		Offset:     int32((page - 1) * limit),
+		ProviderID: &providerID,
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -212,17 +219,19 @@ func (h *Handler) HandleListOffers(c *gin.Context) {
 	page, limit := parsePagination(c)
 	q := sqlc.New(h.pool)
 	ctx := c.Request.Context()
+	providerID := auth.ProviderIDFromContext(c)
 
-	total, err := q.CountOffers(ctx, h.cfg.BppID)
+	total, err := q.CountOffers(ctx, sqlc.CountOffersParams{BppID: h.cfg.BppID, ProviderID: &providerID})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	rows, err := q.ListOffers(ctx, sqlc.ListOffersParams{
-		BppID:  h.cfg.BppID,
-		Limit:  int32(limit),
-		Offset: int32((page - 1) * limit),
+		BppID:      h.cfg.BppID,
+		Limit:      int32(limit),
+		Offset:     int32((page - 1) * limit),
+		ProviderID: &providerID,
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -271,7 +280,8 @@ func (h *Handler) HandleListMessages(c *gin.Context) {
 // belonging to this BPP, joined with their descriptor names.
 func (h *Handler) HandleListStock(c *gin.Context) {
 	q := sqlc.New(h.pool)
-	rows, err := q.ListResourceStock(c.Request.Context(), h.cfg.BppID)
+	providerID := auth.ProviderIDFromContext(c)
+	rows, err := q.ListResourceStock(c.Request.Context(), sqlc.ListResourceStockParams{BppID: h.cfg.BppID, ProviderID: &providerID})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -323,17 +333,19 @@ func (h *Handler) HandleListSupportTickets(c *gin.Context) {
 	page, limit := parsePagination(c)
 	q := sqlc.New(h.pool)
 	ctx := c.Request.Context()
+	providerID := auth.ProviderIDFromContext(c)
 
-	total, err := q.CountSupportTickets(ctx, h.cfg.BppID)
+	total, err := q.CountSupportTickets(ctx, sqlc.CountSupportTicketsParams{BppID: h.cfg.BppID, ProviderID: &providerID})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	rows, err := q.ListSupportTickets(ctx, sqlc.ListSupportTicketsParams{
-		BppID:  h.cfg.BppID,
-		Limit:  int32(limit),
-		Offset: int32((page - 1) * limit),
+		BppID:      h.cfg.BppID,
+		Limit:      int32(limit),
+		Offset:     int32((page - 1) * limit),
+		ProviderID: &providerID,
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -409,17 +421,19 @@ func (h *Handler) HandleListRatings(c *gin.Context) {
 	page, limit := parsePagination(c)
 	q := sqlc.New(h.pool)
 	ctx := c.Request.Context()
+	providerID := auth.ProviderIDFromContext(c)
 
-	total, err := q.CountRatings(ctx, h.cfg.BppID)
+	total, err := q.CountRatings(ctx, sqlc.CountRatingsParams{BppID: h.cfg.BppID, ProviderID: &providerID})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	rows, err := q.ListRatings(ctx, sqlc.ListRatingsParams{
-		BppID:  h.cfg.BppID,
-		Limit:  int32(limit),
-		Offset: int32((page - 1) * limit),
+		BppID:      h.cfg.BppID,
+		Limit:      int32(limit),
+		Offset:     int32((page - 1) * limit),
+		ProviderID: &providerID,
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

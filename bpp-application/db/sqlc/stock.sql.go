@@ -46,8 +46,14 @@ LEFT JOIN resources r
        ON r.id     = rs.resource_id
       AND r.bpp_id = rs.bpp_id
 WHERE rs.bpp_id = $1
+  AND ($2::text IS NULL OR r.provider_id = $2)
 ORDER BY rs.updated_at DESC
 `
+
+type ListResourceStockParams struct {
+	BppID      string  `json:"bpp_id"`
+	ProviderID *string `json:"provider_id"`
+}
 
 type ListResourceStockRow struct {
 	ResourceID     string             `json:"resource_id"`
@@ -60,8 +66,8 @@ type ListResourceStockRow struct {
 }
 
 // Full stock listing for the dashboard, joined with the resource descriptor.
-func (q *Queries) ListResourceStock(ctx context.Context, bppID string) ([]ListResourceStockRow, error) {
-	rows, err := q.db.Query(ctx, listResourceStock, bppID)
+func (q *Queries) ListResourceStock(ctx context.Context, arg ListResourceStockParams) ([]ListResourceStockRow, error) {
+	rows, err := q.db.Query(ctx, listResourceStock, arg.BppID, arg.ProviderID)
 	if err != nil {
 		return nil, err
 	}
