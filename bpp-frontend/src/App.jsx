@@ -7,9 +7,9 @@ import {
   Upload, Plus, Trash2, Eye, ArrowUpRight, Filter, Search,
   Activity, Zap, Store, Calendar, Tag, BarChart2, Inbox,
   ArrowRight, Circle, Star, Ticket, Ban, Wand2,
-  BookOpen, FolderOpen, Send, ArrowLeft, ExternalLink,
+  BookOpen, FolderOpen, Send, ArrowLeft, ExternalLink, LogOut,
 } from 'lucide-react'
-import { captureTokenFromUrl, getToken, clearToken, redirectToLogin } from './auth.js'
+import { captureTokenFromUrl, getToken, clearToken, redirectToLogin, logout } from './auth.js'
 
 const API_BASE = '/api/v1'
 const BRAND = 'linear-gradient(135deg,#00b8e6 0%,#1e2fa0 100%)'
@@ -210,6 +210,12 @@ function Sidebar({ active, onNav, open, onClose }) {
         >
           <ExternalLink size={13} /> Go to BAP APP
         </a>
+        <button
+          onClick={logout}
+          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-rose-400 transition-all bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 hover:border-rose-500/40"
+        >
+          <LogOut size={13} /> Log out
+        </button>
         <p className="text-[10px] text-slate-600 text-center">Beckn Protocol v2.0 · ION Retail</p>
       </div>
     </>
@@ -3169,6 +3175,10 @@ export default function App() {
   // here at all -- landing-page is the single entry point (see
   // src/auth.js); a visit with no token, ever, redirects there.
   useEffect(() => {
+    if (window.location.pathname === '/logout') {
+      clearToken() // loaded in a hidden iframe from landing-page's logout button
+      return
+    }
     captureTokenFromUrl()
     if (!getToken()) {
       redirectToLogin()

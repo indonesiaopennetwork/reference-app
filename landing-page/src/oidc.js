@@ -6,6 +6,7 @@ import { config } from './config.js'
 const REDIRECT_URI = `${window.location.origin}/callback`
 const STORAGE_TOKEN_KEY = 'landing.accessToken'
 const STORAGE_EXPIRES_KEY = 'landing.accessTokenExpiresAt'
+const STORAGE_IDTOKEN_KEY = 'landing.idToken'
 const SESSION_VERIFIER_KEY = 'landing.pkce.verifier'
 const SESSION_STATE_KEY = 'landing.pkce.state'
 
@@ -81,17 +82,50 @@ export async function handleCallback() {
   })
   if (!res.ok) throw new Error(`token exchange failed: ${res.status}`)
   const data = await res.json()
-  storeToken(data.access_token, data.expires_in)
+  storeToken(data.access_token, data.expires_in, data.id_token)
 }
 
-function storeToken(accessToken, expiresInSeconds) {
+function storeToken(accessToken, expiresInSeconds, idToken) {
   localStorage.setItem(STORAGE_TOKEN_KEY, accessToken)
   localStorage.setItem(STORAGE_EXPIRES_KEY, String(Date.now() + expiresInSeconds * 1000))
+  if (idToken) localStorage.setItem(STORAGE_IDTOKEN_KEY, idToken)
 }
 
 export function clearToken() {
   localStorage.removeItem(STORAGE_TOKEN_KEY)
   localStorage.removeItem(STORAGE_EXPIRES_KEY)
+  localStorage.removeItem(STORAGE_IDTOKEN_KEY)
+}
+
+// Ends the Zitadel SSO session via RP-initiated logout (not just this app's
+// local token) so a later login actually re-prompts for credentials instead
+// of silently re-authenticating off the browser's Zitadel session cookie.
+export function logout() {
+  const idToken = localStorage.getItem(STORAGE_IDTOKEN_KEY)
+  clearToken()
+
+  let done = false
+  function endSession() {
+    if (done) return
+    done = true
+    const params = new URLSearchParams({
+      client_id: config.zitadelClientId,
+      post_logout_redirect_uri: window.location.origin,
+    })
+    if (idToken) params.set('id_token_hint', idToken)
+    window.location.href = `${config.zitadelIssuer}/oidc/v1/end_session?${params}`
+  }
+
+  // bpp-frontend keeps its own copy of the access token in a separate
+  // origin's localStorage -- clear it too before ending the Zitadel
+  // session, otherwise a still-valid token there lets someone straight
+  // back into the seller dashboard without logging in again.
+  const iframe = document.createElement('iframe')
+  iframe.style.display = 'none'
+  iframe.src = `${config.bppUrl}/logout`
+  iframe.onload = endSession
+  document.body.appendChild(iframe)
+  setTimeout(endSession, 1500) // fallback if bpp-frontend is unreachable
 }
 
 // Returns the stored access token, or null if missing/expired. A 60s
