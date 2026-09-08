@@ -1,3 +1,7 @@
+# Rendered into config/local-simple-bpp.yaml by scripts/render-onix-config.sh,
+# which substitutes the ${...} placeholders below from the repo root .env.
+# Don't hand-edit the generated file's keyManager values -- edit .env and
+# re-run the script instead.
 appName: "onix-local"
 log:
   level: debug
@@ -61,12 +65,12 @@ modules:
         keyManager:
           id: simplekeymanager
           config:
-            networkParticipant: bpptest1.remiges.tech
-            keyId: REPLACE_WITH_YOUR_KEY_ID
-            signingPrivateKey: REPLACE_WITH_YOUR_SIGNING_PRIVATE_KEY
-            signingPublicKey: REPLACE_WITH_YOUR_SIGNING_PUBLIC_KEY
-            encrPrivateKey: REPLACE_WITH_YOUR_ENCR_PRIVATE_KEY
-            encrPublicKey: REPLACE_WITH_YOUR_ENCR_PUBLIC_KEY
+            networkParticipant: ${BPP_NETWORK_PARTICIPANT}
+            keyId: ${BPP_ONIX_KEY_ID}
+            signingPrivateKey: ${BPP_ONIX_SIGNING_PRIVATE_KEY}
+            signingPublicKey: ${BPP_ONIX_SIGNING_PUBLIC_KEY}
+            encrPrivateKey: ${BPP_ONIX_ENCR_PRIVATE_KEY}
+            encrPublicKey: ${BPP_ONIX_ENCR_PUBLIC_KEY}
         schemaValidator:
           id: schemav2validator
           config:
@@ -129,12 +133,12 @@ modules:
         keyManager:
           id: simplekeymanager
           config:
-            networkParticipant: bpptest1.remiges.tech
-            keyId: REPLACE_WITH_YOUR_KEY_ID
-            signingPrivateKey: REPLACE_WITH_YOUR_SIGNING_PRIVATE_KEY
-            signingPublicKey: REPLACE_WITH_YOUR_SIGNING_PUBLIC_KEY
-            encrPrivateKey: REPLACE_WITH_YOUR_ENCR_PRIVATE_KEY
-            encrPublicKey: REPLACE_WITH_YOUR_ENCR_PUBLIC_KEY
+            networkParticipant: ${BPP_NETWORK_PARTICIPANT}
+            keyId: ${BPP_ONIX_KEY_ID}
+            signingPrivateKey: ${BPP_ONIX_SIGNING_PRIVATE_KEY}
+            signingPublicKey: ${BPP_ONIX_SIGNING_PUBLIC_KEY}
+            encrPrivateKey: ${BPP_ONIX_ENCR_PRIVATE_KEY}
+            encrPublicKey: ${BPP_ONIX_ENCR_PUBLIC_KEY}
         schemaValidator:
           id: schemav2validator
           config:

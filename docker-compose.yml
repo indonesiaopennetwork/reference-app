@@ -144,6 +144,20 @@ services:
       - ./file-onboarding-and-catalog-publish/data/beckn:/beckn
     command: [ "./server", "--config=/app/config/catalog-publish.yaml" ]
 
+  # ─── Mock CDS (Local Only) ────────────────────────────────────────────────
+  mock-cds:
+    image: python:3.9-alpine
+    container_name: mock-cds
+    restart: unless-stopped
+    ports:
+      - "8086:8086"
+    networks:
+      - beckn
+    volumes:
+      - ./scripts/mock-cds.py:/app/mock-cds.py:ro
+      - ./file-onboarding-and-catalog-publish/data/beckn:/beckn:ro
+    command: [ "python", "-u", "/app/mock-cds.py" ]
+
   # ─── BPP Application ──────────────────────────────────────────────────────
   bpp:
     build:
@@ -167,12 +181,15 @@ services:
       DB_PASSWORD: ${DB_PASSWORD}
       DB_SSLMODE: disable
 
-      # Registered identity — must equal config/local-simple-bpp.yaml's networkParticipant.
+      # bpp's registered subscriber identity. Sourced from the git-ignored
+      # root .env file.
       BPP_ID: ${BPP_ID}
+      # Bare registered Subscriber URL, not the internal /bpp/receiver path —
+      # goes straight into context.bppUri (matches remiges-trade).
+      BPP_URI: http://onix-bpp:8082/bpp/receiver
       NETWORK_ID: ${NETWORK_ID}
-      # Signature-checked entry point other participants call back to —
-      # onix-bpp, not bpp itself. Fixed docker-compose topology.
-      BPP_URI: http://onix-bpp:8082
+
+      # BppCallerURL is the ONIX BPP caller base URL used for outbound on_* callbacks.
       BPP_CALLER_URL: http://onix-bpp:8082/bpp/caller
       CDS_PUBLISH_URL: http://onix-catalog-publish:8085/catalog/publish
 
@@ -207,17 +224,22 @@ services:
       DB_PASSWORD: ${DB_PASSWORD}
       DB_SSLMODE: disable
 
-      # Registered identity — must equal config/local-simple-bap.yaml's networkParticipant.
+      # bap's registered subscriber identity. Sourced from the git-ignored
+      # root .env file.
       BAP_ID: ${BAP_ID}
+      # Bare registered Subscriber URL, not the internal /bap/receiver path —
+      # goes straight into context.bapUri (matches remiges-trade).
+      BAP_URI: http://onix-bap:8081/bap/receiver
       NETWORK_ID: ${NETWORK_ID}
-      # Signature-checked entry point other participants call back to —
-      # onix-bap, not bap itself. Fixed docker-compose topology.
-      BAP_URI: http://onix-bap:8081
+
+      # BPP identity placed in context.bppId / context.bppUri -- same ${BPP_ID}
+      # as the bpp service above, so the two can never drift apart.
+      BPP_ID: ${BPP_ID}
+      BPP_URI: http://onix-bpp:8082/bpp/receiver
+
+      # ADAPTER_URL is the ONIX BAP adapter the BAP actually POSTs to.
       ADAPTER_URL: http://onix-bap:8081/bap/caller
 
-      # BPP counterpart identity, placed in context.bppId / context.bppUri.
-      BPP_ID: ${BPP_ID}
-      BPP_URI: http://onix-bpp:8082
 
       # onix-bap's own router has an independent discover target in
       # config/local-simple-routing-BAPCaller.yaml — this only controls bap's
@@ -242,7 +264,9 @@ services:
       - bap
     environment:
       BAP_URL: http://bap:8083
-      NGINX_RESOLVER: "127.0.0.11 8.8.8.8 8.8.4.4" # Docker's embedded DNS
+      # 127.0.0.11 is Docker's embedded DNS, resolves compose service names.
+      NGINX_RESOLVER: "127.0.0.11"
+      BPP_ADMIN_URL: ${VITE_BPP_ADMIN_URL}
     ports:
       - "3000:80"
     networks:
@@ -258,7 +282,8 @@ services:
       - bpp
     environment:
       BPP_URL: http://bpp:8080
-      NGINX_RESOLVER: "127.0.0.11 8.8.8.8 8.8.4.4"
+      NGINX_RESOLVER: "127.0.0.11"
+      BAP_URL: ${VITE_BAP_URL}
     ports:
       - "3001:80"
     networks:

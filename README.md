@@ -73,10 +73,7 @@ Chicken-and-egg: Terraform can't create the bucket it stores its own state
 in, so this is a one-time manual step.
 
 ```sh
-gcloud storage buckets create gs://<YOUR_PROJECT_ID>-tfstate \
-  --project=<YOUR_PROJECT_ID> --location=<YOUR_REGION> \
-  --uniform-bucket-level-access
-gcloud storage buckets update gs://<YOUR_PROJECT_ID>-tfstate --versioning
+task deploy:state-bucket PROJECT_ID=<YOUR_PROJECT_ID> REGION=<YOUR_REGION>
 ```
 
 ### 2. Create `terraform/terraform.tfvars`
@@ -102,12 +99,7 @@ Terraform computes that URL itself.
 ### 3. Bootstrap APIs, Artifact Registry, and empty secret containers
 
 ```sh
-cd terraform
-terraform init
-terraform plan -target=google_project_service.apis \
-  -target=google_artifact_registry_repository.repo \
-  -target=google_secret_manager_secret.this -out=bootstrap1.tfplan
-terraform apply bootstrap1.tfplan
+task deploy:bootstrap-apis
 ```
 
 ### 4. Seed secrets
@@ -128,10 +120,10 @@ PROJECT_ID=<YOUR_PROJECT_ID> \
   ../scripts/seed-secrets.sh
 ```
 
-### 5. Build and push all 11 images
+### 5. Build and push all 12 images
 
 ```sh
-PROJECT_ID=<YOUR_PROJECT_ID> REGION=<YOUR_REGION> ../scripts/build-and-push.sh
+task deploy:build-all PROJECT_ID=<YOUR_PROJECT_ID> REGION=<YOUR_REGION>
 ```
 
 ### 6. Create the network, Cloud SQL, and Redis
@@ -140,15 +132,7 @@ Cloud SQL private-IP creation is slow (budget 5–10 minutes), which is why
 it's sequenced as its own targeted apply:
 
 ```sh
-terraform plan -target=google_compute_network.vpc \
-  -target=google_compute_subnetwork.subnet \
-  -target=google_compute_global_address.psa_range \
-  -target=google_service_networking_connection.psa \
-  -target=google_sql_database_instance.postgres \
-  -target=google_redis_instance.redis \
-  -target=google_compute_subnetwork_iam_member.network_user \
-  -target=google_project_iam_member.cloud_sql_client -out=bootstrap2.tfplan
-terraform apply bootstrap2.tfplan
+task deploy:infra
 ```
 
 ### 7. First full apply — expect it to fail on `bap`/`bpp`
@@ -157,22 +141,19 @@ The databases have no schema yet, and both apps exit if a required startup
 query fails. This is normal for a first deploy:
 
 ```sh
-terraform plan -out=full.tfplan
-terraform apply full.tfplan
+task deploy:full-apply
 ```
 
 ### 8. Run migrations
 
 ```sh
-gcloud run jobs execute migrate-bap --project=<YOUR_PROJECT_ID> --region=<YOUR_REGION> --wait
-gcloud run jobs execute migrate-bpp --project=<YOUR_PROJECT_ID> --region=<YOUR_REGION> --wait
+task deploy:migrate
 ```
 
 ### 9. Re-apply
 
 ```sh
-terraform plan -out=full2.tfplan
-terraform apply full2.tfplan
+task deploy:full-apply
 ```
 
 `bap`/`bpp` should now start successfully against the real schema.
@@ -206,17 +187,14 @@ works without it, though `onix-catalog-publish`'s output has nowhere durable
 to go if you skip it) — but the underlying Terraform **resources are not
 conditional**, there's no flag to skip creating them. That means:
 
-**This will fail on a fresh deploy unless you change `dedi_domain`/
-`dedi_domain_www` to a domain you actually own and can verify.** The
-variable defaults point at a domain the original deployer of this repo
-controls, not you — `terraform apply` will try to create a domain mapping
-for it, which fails since you can't verify ownership of someone else's
-domain in Search Console. **Treat this as a second expected failure, the
-same way step 7 above already primes you for `bap`/`bpp` failing** — set
-`dedi_domain`/`dedi_domain_www` in `terraform.tfvars` to your own verified
-domain (following the steps below) before applying, or the `google_cloud_run_domain_mapping`
-resources will fail every time and you'll need to re-apply once they're set
-correctly, same shape as the bap/bpp dance.
+**`dedi_domain`/`dedi_domain_www` have no default** — same treatment as
+`bap_id`/`bpp_id`/`network_id`/`cds_discover_url` above, and for the same
+reason: a hardcoded default pointing at *some* domain is exactly how you'd
+end up silently deploying against a domain you don't control. `terraform
+plan` fails immediately and loudly ("no value for required variable") until
+you set both in `terraform.tfvars` to a domain you actually own and can
+verify — before that, there's no `apply`-time surprise to plan around, this
+is caught at `plan` time.
 
 **Prerequisite:** the domain must be a **verified domain** in
 [Search Console](https://search.google.com/search-console) under the same
@@ -225,8 +203,8 @@ Google account your `gcloud`/Terraform credentials use —
 
 **Deploy sequence:**
 
-1. Set `dedi_domain`/`dedi_domain_www` in `terraform.tfvars` if you're not
-   using the defaults.
+1. Set `dedi_domain`/`dedi_domain_www` in `terraform.tfvars` — required,
+   `terraform plan` fails without them.
 2. Build and push the `dedi-static-server` image — it's included in step 5
    above if you're deploying fresh. If you're adding this to an
    **already-running** deployment, build and push it explicitly before
@@ -301,18 +279,56 @@ point directly at `onix-bpp`'s/`onix-bap`'s raw Cloud Run URL, set by
 get that adapter to sign and send forged outbound messages impersonating
 this participant.
 
-**Open question, not yet resolved:** this section only changes what a
-subscriber's *registered* URL can look like — it doesn't touch `BAP_URI`/
-`BPP_URI` (the in-band `context.bapUri`/`context.bppUri` fields on outbound
-messages), which `terraform/cloud-run-wiring.tf` sets to `onix-bap`'s/
-`onix-bpp`'s raw URL, with an explicit comment warning against putting the
-receiver path there. Whether pointing `BAP_URI`/`BPP_URI` at this same
-domain+path is *also* safe depends on how `onix`'s caller module builds a
-callback URL from `context.bapUri`/`context.bppUri` internally — possibly
-appending `/bap/receiver/`(or `/bpp/receiver/`) unconditionally regardless of
-what's already in the value, which would double the path and break
-callbacks. This hasn't been verified against `onix`'s source, so treat it as
-untested rather than following the same pattern here.
+**Update:** `BAP_URI`/`BPP_URI` (the in-band `context.bapUri`/`context.bppUri`
+fields on outbound messages) now *do* point at this same domain+path —
+`terraform/cloud-run-wiring.tf` sets them to `https://${var.dedi_domain}/bap/receiver/`
+/ `.../bpp/receiver/`. This is required, not just cosmetic: other network
+participants POST callbacks to `{bapUri}/<action>` directly, and
+`bapTxnReceiver`/`bppTxnReceiver` only listen at `/bap/receiver/`/
+`/bpp/receiver/` (see `config/local-simple-bap.yaml`/`local-simple-bpp.yaml`)
+— a bare `bapUri` with no path would misroute every inbound callback.
+
+## Custom domains for bap, bap-frontend, bpp-frontend, and the landing page (optional)
+
+`terraform/domain-mapping.tf` also maps `bap` (`var.bap_domain`),
+`bap-frontend` (`var.bap_frontend_domain`), `bpp-frontend`
+(`var.bpp_frontend_domain`), and `landing-page` (`var.landing_page_domain`) to
+their own subdomains — same `google_cloud_run_domain_mapping` pattern,
+Search Console verification prerequisite, and **no-default treatment** as
+`dedi_domain` above: all four are required, `terraform plan` fails without
+them. Set all four in `terraform.tfvars` to subdomains you control before
+applying.
+
+`bpp` intentionally does **not** get its own separate domain — it shares
+`dedi-static-server`'s domain instead, via one more `location` block in
+`dedi-static-server/nginx.conf.template` (`/api/v1/` → `bpp`'s dashboard/
+provider-facing API, using the same envsubst'd-hostname proxy pattern as the
+`/bpp/receiver/`/`/bap/receiver/` blocks above). `bpp`'s other route group,
+`/api/webhook/*`, is reached internally by `onix-bpp` via `bpp`'s raw Cloud
+Run URL (`BPP_URL`, set by `cloud-run-wiring.tf`) and is deliberately not
+exposed on any public domain.
+
+`bap_frontend_domain`/`bpp_frontend_domain` do double duty beyond domain
+mapping: `terraform/cloud-run-bap-frontend.tf` also injects
+`bap_frontend_domain` into `bap-frontend`'s own container as `BPP_ADMIN_URL`,
+and `terraform/cloud-run-bpp-frontend.tf` injects `bpp_frontend_domain` into
+`bpp-frontend`'s container as `BAP_URL` — these back the "BPP APP" /
+"Go to BAP APP" cross-navigation buttons in each frontend's UI (locally,
+the same values come from `VITE_BPP_ADMIN_URL`/`VITE_BAP_URL` in `.env`).
+Note that `BAP_URL` as a container env var name is overloaded: on
+`bap-frontend` it's a *different* var pointing at the bap backend (nginx's
+reverse-proxy target, `var.bap_domain`), while on `bpp-frontend` it points at
+bap-frontend's own URL for the button — same name, different meaning
+depending on which service reads it.
+
+After applying, get the DNS records for the four new domains the same way as
+`dedi_domain`:
+```sh
+terraform output bap_domain_dns_records
+terraform output bap_frontend_domain_dns_records
+terraform output bpp_frontend_domain_dns_records
+terraform output landing_page_domain_dns_records
+```
 
 ## Redeploy after a change
 
@@ -334,29 +350,39 @@ then `terraform apply` as usual.
 Cloud Run pins each service to a specific image digest at deploy time, and
 every Cloud Run resource in this module has a `lifecycle { ignore_changes =
 [...] }` block on its image — so pushing a new image under the same
-`:latest` tag does nothing to an already-running service. Pushing under a
-new tag and passing that tag to `terraform apply` is what forces a redeploy:
+`:latest` tag does nothing to an already-running service. **A plain
+`terraform apply`, even with a new `image_tag`, does not force a redeploy
+either** — `ignore_changes` blocks that field regardless of where the new
+value comes from. What actually forces a new revision is
+`gcloud run services update --image=...` directly, bypassing Terraform for
+that one field — which is exactly what the per-service Task commands below
+do, so you never need to touch `image_tag` at all:
 
 ```sh
-PROJECT_ID=<YOUR_PROJECT_ID> REGION=<YOUR_REGION> ./scripts/build-and-push.sh "$(git rev-parse --short HEAD)"
-cd terraform
-terraform apply -var="image_tag=$(git rev-parse --short HEAD)"
+task redeploy:bap-frontend   # only rebuilds/redeploys bap-frontend
+task redeploy:bpp            # only rebuilds/redeploys bpp
+task redeploy:all            # rebuilds/redeploys every service (not the migrate jobs)
+```
+
+Every service has its own `redeploy:<service>` task (`task --list` shows
+them all) — see `Taskfile.yaml` for the full set, or run the equivalent
+commands by hand:
+```sh
+docker build -t <YOUR_REGION>-docker.pkg.dev/<YOUR_PROJECT_ID>/beckn-app/<service>:$(git rev-parse --short HEAD) <service-dir>/
+docker push <YOUR_REGION>-docker.pkg.dev/<YOUR_PROJECT_ID>/beckn-app/<service>:$(git rev-parse --short HEAD)
+gcloud run services update <service> --project=<YOUR_PROJECT_ID> --region=<YOUR_REGION> \
+  --container=<container-name> --image=<YOUR_REGION>-docker.pkg.dev/<YOUR_PROJECT_ID>/beckn-app/<service>:$(git rev-parse --short HEAD)
 ```
 
 ### Database migration added
 
-The migrate *jobs* have the same `ignore_changes` lifecycle, so the
-`image_tag` apply above won't touch them — update and re-run each job
+The migrate *jobs* have the same `ignore_changes` lifecycle, so
+`redeploy:all` above doesn't touch them — update and re-run each job
 explicitly:
 
 ```sh
-gcloud run jobs update migrate-bap --project=<YOUR_PROJECT_ID> --region=<YOUR_REGION> \
-  --image="<YOUR_REGION>-docker.pkg.dev/<YOUR_PROJECT_ID>/beckn-app/bap-application-migrate:$(git rev-parse --short HEAD)"
-gcloud run jobs execute migrate-bap --project=<YOUR_PROJECT_ID> --region=<YOUR_REGION> --wait
-
-gcloud run jobs update migrate-bpp --project=<YOUR_PROJECT_ID> --region=<YOUR_REGION> \
-  --image="<YOUR_REGION>-docker.pkg.dev/<YOUR_PROJECT_ID>/beckn-app/bpp-application-migrate:$(git rev-parse --short HEAD)"
-gcloud run jobs execute migrate-bpp --project=<YOUR_PROJECT_ID> --region=<YOUR_REGION> --wait
+task redeploy:migrate-bap
+task redeploy:migrate-bpp
 ```
 
 ### Terraform-only change (no new image)

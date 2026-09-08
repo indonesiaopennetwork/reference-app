@@ -34,6 +34,10 @@ section).
 ### 1a. Prerequisites
 
 - Docker + Docker Compose.
+- `envsubst` (from the `gettext`/`gettext-base` package — `apt install
+  gettext-base` on Debian/Ubuntu, `brew install gettext` on macOS). Used by
+  `scripts/render-onix-config.sh` in step 1b below to generate the onix
+  config files from `.env`.
 - A registered Beckn network identity for both `bap` and `bpp` — a
   subscriber ID, a `keyId`, and an Ed25519 keypair for signing (`signingPrivateKey`/
   `signingPublicKey`) plus an encryption keypair (`encrPrivateKey`/`encrPublicKey`),
@@ -43,33 +47,77 @@ section).
   be registered so other participants can verify your signatures. Ask
   whoever administers the network registry for a subscriber slot.
 
-### 1b. Config files you must create (all git-ignored, never committed)
+### 1b. Config files you must create (git-ignored, never committed)
 
 1. **`.env`** (repo root) — copy `.env.example`, fill in your registered
-   keys:
+   keys. This file is the single source for every `keyManager` field the
+   onix config files need — step 2 below generates them from it, nothing
+   is hand-copied:
    ```
+   NETWORK_ID=<the Beckn network both bap and bpp are registered on>
+
    BAP_PRIVATE_KEY=<your bap signingPrivateKey>
    BAP_KEY_ID=<bap subscriber id>|<bap keyId>|ed25519
+   BAP_ID=<bap subscriber id, same value as the subscriber-id segment of BAP_KEY_ID>
+   BAP_ONIX_KEY_ID=<bap keyId, same value as the keyId segment of BAP_KEY_ID>
+   BAP_ONIX_SIGNING_PRIVATE_KEY=<your bap signingPrivateKey, same value as BAP_PRIVATE_KEY>
+   BAP_ONIX_SIGNING_PUBLIC_KEY=<your bap signingPublicKey>
+   BAP_ONIX_ENCR_PRIVATE_KEY=<your bap encrPrivateKey>
+   BAP_ONIX_ENCR_PUBLIC_KEY=<your bap encrPublicKey>
+
    BPP_PRIVATE_KEY=<your bpp signingPrivateKey>
    BPP_KEY_ID=<bpp subscriber id>|<bpp keyId>|ed25519
+   BPP_ID=<bpp subscriber id, same value as the subscriber-id segment of BPP_KEY_ID>
+   BPP_ONIX_KEY_ID=<bpp keyId, same value as the keyId segment of BPP_KEY_ID>
+   BPP_ONIX_SIGNING_PRIVATE_KEY=<your bpp signingPrivateKey, same value as BPP_PRIVATE_KEY>
+   BPP_ONIX_SIGNING_PUBLIC_KEY=<your bpp signingPublicKey>
+   BPP_ONIX_ENCR_PRIVATE_KEY=<your bpp encrPrivateKey>
+   BPP_ONIX_ENCR_PUBLIC_KEY=<your bpp encrPublicKey>
    ```
+   Only `BAP_PRIVATE_KEY`/`BAP_KEY_ID` (and their bpp equivalents) are read
+   directly by the Go apps — the `*_ONIX_*` fields exist here purely so
+   step 2's script has one place to read every value from.
    **Important:** `BAP_PRIVATE_KEY`/`BAP_KEY_ID` must be the *same keypair
-   and subscriber identity* as whatever you put in `config/local-simple-bap.yaml`'s
-   `keyManager` block below — there's only one registered identity per side,
-   used for both the onix adapter's own signing and the app's direct CDS
-   calls. Same rule for bpp. (See `terraform/README.md`'s Gotcha #1 if you
-   want the full "why.")
+   and subscriber identity* as `BAP_ONIX_SIGNING_PRIVATE_KEY`/
+   `BAP_ONIX_KEY_ID` — there's only one registered identity per side, used
+   for both the onix adapter's own signing and the app's direct CDS calls;
+   they're separate `.env` fields only because the Go app and the onix
+   yaml consume the identity in different shapes. Same rule for bpp. (See
+   `terraform/README.md`'s Gotcha #1 if you want the full "why.")
 
-2. **`config/local-simple-bap.yaml`** and **`config/local-simple-bpp.yaml`**
-   — copy the `.example` versions next to them and fill in the same 5
-   `keyManager` fields (`networkParticipant`, `keyId`, `signingPrivateKey`,
-   `signingPublicKey`, `encrPrivateKey`, `encrPublicKey`) with your
-   registered identity, **twice each** — both the receiver and caller
-   modules in the file need the identical block.
+2. **Generate the onix config files** — run:
+   ```sh
+   ./scripts/render-onix-config.sh
+   ```
+   This renders `config/local-simple-bap.yaml`, `config/local-simple-bpp.yaml`,
+   and `config/catalog-publish.yaml` from their `.example` templates,
+   substituting every `keyManager` field (`networkParticipant`/`subscriberId`
+   — derived from `BAP_KEY_ID`/`BPP_KEY_ID` — plus `keyId`,
+   `signingPrivateKey`, `signingPublicKey`, `encrPrivateKey`,
+   `encrPublicKey` from their dedicated `*_ONIX_*` vars) from the `.env`
+   you just filled in — including both the receiver and caller modules in
+   the bap/bpp files, and
+   `catalog-publish.yaml`'s single module, which reuses the **same** bpp
+   identity (it's the same operator/key as `onix-bpp`, just named
+   `subscriberId` instead of `networkParticipant` — if the container still
+   fails config validation, check `docker logs onix-catalog-publish`; the
+   example file's own comment notes this name may need to change depending
+   on the deployed adapter build). `config/catalog-publish.yaml` is
+   required by `docker-compose.yml`'s `onix-catalog-publish` service —
+   without it that container fails to start.
 
-3. **`docker-compose.yml`**'s `BAP_ID`/`BPP_ID` env vars — these must equal
-   the same subscriber ID you used above. Edit them directly if your
-   registered identity isn't already what's there.
+   The script fails loudly (before you ever get to `docker compose up`) if
+   `.env` is missing or still has unfilled `REPLACE_WITH_*` placeholders.
+   Re-run it any time `.env`'s keys change — that's what keeps the
+   app-level signing key and the onix `keyManager` identity guaranteed
+   identical (Gotcha #1, above) instead of relying on careful hand-copying.
+
+3. **`docker-compose.yml`**'s `NETWORK_ID`/`BAP_ID`/`BPP_ID` env vars —
+   these are read straight from the `.env` fields above (Docker Compose
+   substitutes `${VAR}` in `docker-compose.yml` itself directly from
+   `.env`, no script needed). Nothing to hand-edit in `docker-compose.yml`
+   — just make sure `.env`'s `BAP_ID`/`BPP_ID` equal the subscriber ID in
+   `BAP_KEY_ID`/`BPP_KEY_ID` (the part before the first `|`).
 
 ### 1c. Bring it up
 
@@ -169,35 +217,11 @@ actually flows through.
 
 ## 2. Cloud deployment (Cloud Run)
 
-Full step-by-step is in [`terraform/README.md`](terraform/README.md) —
-including the exact bootstrap command sequence and the specific, real
-gotchas encountered getting this working (not hypothetical ones). Condensed
-version:
-
-1. Own (or get access to) a GCP project to deploy into, with a billing
-   account linked. Everything — Cloud Run, a new Cloud SQL Postgres
-   instance, a new Memorystore Redis instance, VPC/subnet — lives in this
-   one project. No second project, no Shared VPC.
-2. Create the Terraform state bucket, `terraform.tfvars` with your project
-   ID and network identity values (`bap_id`/`bpp_id`/`network_id`/
-   `cds_discover_url` — no defaults exist for these, by design), and
-   bootstrap APIs + Artifact Registry + empty secret containers. (There's no
-   `cds_publish_url` to supply — `bpp`'s `CDS_PUBLISH_URL` points at the
-   `onix-catalog-publish` Cloud Run service Terraform deploys itself, a
-   same-project service, not an external registry endpoint.)
-3. Seed secrets — same identity/key material as local dev's `.env` and
-   `config/local-simple-{bap,bpp}.yaml` if you want cloud and local to
-   represent the same registered participant, or a separate registered
-   identity if this deployment is meant to be a distinct participant
-   (recommended for a personal sandbox — keeps it isolated from any other
-   deployment's identity).
-4. Build and push all 9 images (6 services + `onix-catalog-publish` + 2
-   migrate-job images).
-5. Create the VPC/subnet, Private Services Access peering, Cloud SQL
-   instance, and Redis instance (Cloud SQL creation is slow — budget 5-10
-   minutes), then apply everything else. The very first full apply will
-   fail on `bap`/`bpp` — that's expected, run the migrate jobs and apply
-   again (see `terraform/README.md`'s bootstrap sequence for why).
+Out of scope for this file — this file only covers local development. See
+[README.md](README.md#deploy-to-your-fresh-gcp-project) for the full
+fresh-deploy walkthrough (Task commands, step by step), and
+[terraform/README.md](terraform/README.md) for the gotchas actually hit
+building this, verification, redeploying, and inspecting Cloud SQL.
 
 ## 3. Keeping local and cloud in sync
 
@@ -223,13 +247,17 @@ in sync" here mainly matters within the cloud track itself (e.g. after
 rotating this deployment's own keys), not necessarily between local and
 cloud.
 
-## 4. Known unresolved issue
+## 4. Resolved: registered-URL / receiver-path mismatch
 
-`select`/`init`/`confirm` currently fail in the cloud deployment (and would
-hit the same issue locally, if a registry-based routing lookup for `bpp_id`
-ever resolved to a bare, no-path URL): the network registry stores a bare
-Subscriber URL (no path), but other participants doing a registry lookup
-append the action name directly (`<url>/select`), which doesn't match the
-onix adapter's actual listening path (`/bpp/receiver/select`). Not yet
-decided how to resolve — options are documented in `terraform/README.md`'s
-Gotcha #8.
+Used to be a problem: the registered Subscriber URL needs to include the
+onix adapter's actual receiver path (`/bpp/receiver/`, `/bap/receiver/`), or
+another participant looking it up and appending an action name directly
+(`<url>/select`) would 404. Now fixed on both sides that mattered:
+- `context.bapUri`/`bppUri` on our own outbound messages already include the
+  receiver path (`terraform/cloud-run-wiring.tf`) — confirmed working via a
+  real `/select` → `/on_select` transaction.
+- The actual registered entry in
+  `dedi-onboarding-files/ion-scratch-registry.json` already has the path
+  baked in (`"url": "https://.../bpp/receiver/"`), not a bare URL.
+
+See `terraform/README.md`'s Gotcha #7 for the fuller writeup.
