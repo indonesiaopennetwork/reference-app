@@ -4,6 +4,7 @@
 # needs the API base path.
 cat > /usr/share/nginx/html/env-config.js <<EOF
 window.__env__ = {
-  API_BASE: "${API_BASE:-/api/v1}"
+  API_BASE: "${API_BASE:-/api/v1}",
+  BPP_ADMIN_URL: "${BPP_ADMIN_URL}"
 };
 EOF

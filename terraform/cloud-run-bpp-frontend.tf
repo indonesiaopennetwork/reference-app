@@ -31,11 +31,15 @@ resource "google_cloud_run_v2_service" "bpp_frontend" {
 
       env {
         name  = "BPP_URL"
-        value = google_cloud_run_v2_service.bpp.uri
+        value = "https://${var.dedi_domain}"
       }
       env {
         name  = "NGINX_RESOLVER"
         value = "8.8.8.8 8.8.4.4"
+      }
+      env {
+        name  = "BAP_URL"
+        value = "https://${var.bap_frontend_domain}"
       }
     }
   }

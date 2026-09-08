@@ -1,3 +1,7 @@
+# Rendered into config/catalog-publish.yaml by scripts/render-onix-config.sh,
+# which substitutes the ${...} placeholders below from the repo root .env.
+# Don't hand-edit the generated file's keyManager values -- edit .env and
+# re-run the script instead.
 appName: "onix-catalog-publish"
 log:
   level: debug
@@ -62,12 +66,12 @@ modules:
         keyManager:
           id: simplekeymanager
           config:
-            subscriberId: onix-bap-x7m2wmy7nq-et.a.run.app
-            keyId: 76EU91ME6AjAq2emEzHCJ2aNXgZAfRTF2VNRa3o6j6m7KPT7AdKmLc
-            signingPrivateKey: REMOVED
-            signingPublicKey: nHKQUR4dfE40eGnxP6phRvWiNzYRQuetJiybTtpndbs=
-            encrPrivateKey: REMOVED
-            encrPublicKey: nHKQUR4dfE40eGnxP6phRvWiNzYRQuetJiybTtpndbs=
+            subscriberId: ${BPP_NETWORK_PARTICIPANT}
+            keyId: ${BPP_ONIX_KEY_ID}
+            signingPrivateKey: ${BPP_ONIX_SIGNING_PRIVATE_KEY}
+            signingPublicKey: ${BPP_ONIX_SIGNING_PUBLIC_KEY}
+            encrPrivateKey: ${BPP_ONIX_ENCR_PRIVATE_KEY}
+            encrPublicKey: ${BPP_ONIX_ENCR_PUBLIC_KEY}
         catalogPublisher:
           id: catalogpublisher
           config:
