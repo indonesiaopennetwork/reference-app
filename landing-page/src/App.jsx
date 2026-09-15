@@ -137,6 +137,7 @@ function SellerProfileForm({ onSubmit }) {
 }
 
 function Landing({ token }) {
+  const buyerUrl = `${config.bapUrl}/?token=${encodeURIComponent(token)}`
   const sellerUrl = `${config.bppUrl}/?token=${encodeURIComponent(token)}`
   return (
     <div className="relative min-h-screen flex items-center justify-center p-6">
@@ -159,7 +160,7 @@ function Landing({ token }) {
           network protocol.
         </p>
         <div className="flex flex-wrap justify-center gap-4">
-          <a href={config.bapUrl} className="btn border-white/8 bg-white/3 hover:border-white/20 hover:bg-white/6">
+          <a href={buyerUrl} className="btn border-white/8 bg-white/3 hover:border-white/20 hover:bg-white/6">
             <span className="block mb-1.5 text-xs font-medium uppercase tracking-wider text-emerald-400">
               Buyer app (BAP)
             </span>

@@ -263,4 +263,5 @@ type Transaction struct {
 	Status        TransactionStatus  `json:"status"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	BuyerSubject  *string            `json:"buyer_subject"`
 }

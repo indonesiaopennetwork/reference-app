@@ -151,7 +151,13 @@ func (s *ClientService) Discover(ctx context.Context, req *ClientDiscoverRequest
 // BPP identity is taken from the first item's BppID/BppURI (populated from the
 // catalog discover response) so the request is routed to the BPP that owns the
 // resource. Server config values are used only as a fallback.
-func (s *ClientService) Select(ctx context.Context, req *ClientSelectRequest) (string, error) {
+//
+// buyerSubject is the requesting buyer's Zitadel subject, resolved by
+// internal/auth.OptionalAuth when a valid token was presented -- nil if
+// not (auth is a frontend-only gate here, so this is best-effort, not
+// required). It's recorded once on the transactions row so order history
+// can later be scoped to this buyer; see UpsertTransaction.
+func (s *ClientService) Select(ctx context.Context, req *ClientSelectRequest, buyerSubject *string) (string, error) {
 	txnID := uuid.New()
 	msgID := uuid.New()
 
@@ -189,6 +195,7 @@ func (s *ClientService) Select(ctx context.Context, req *ClientSelectRequest) (s
 		BppID:         &bppID,
 		BppUri:        &bppURI,
 		Status:        dbsqlc.TransactionStatusSELECTSENT,
+		BuyerSubject:  buyerSubject,
 	}); err != nil {
 		s.lh.WithModule("client_svc").Warn().Error(err).Log("upsert transaction failed")
 	}
@@ -800,7 +807,7 @@ func (s *ClientService) Support(ctx context.Context, req *ClientSupportRequest) 
 }
 
 // resolveBPP returns the BPP ID and URI for a transaction, falling back to server config.
-func (s *ClientService) resolveBPP(txn dbsqlc.Transaction) (bppID, bppURI string) {
+func (s *ClientService) resolveBPP(txn dbsqlc.GetTransactionRow) (bppID, bppURI string) {
 	bppID = s.cfg.BppID
 	bppURI = s.cfg.BppURI
 	if txn.BppID != nil && *txn.BppID != "" {
@@ -826,6 +833,40 @@ func (s *ClientService) GetStatus(ctx context.Context, txnIDStr string) (*Client
 	}
 
 	// Get latest snapshot if available
+	snapshot, _ := q.GetLatestContractSnapshot(ctx, txnID)
+
+	resp := &ClientStatusResponse{
+		TransactionID: txnIDStr,
+		Status:        string(txn.Status),
+		UpdatedAt:     txn.UpdatedAt.Time,
+	}
+
+	if snapshot.ID != [16]byte{} {
+		resp.Contract = snapshot.Contract
+	}
+
+	return resp, nil
+}
+
+// GetStatusForBuyer is GetStatus scoped to a specific buyer -- returns an
+// error (surfaced by the handler as 404) if the transaction doesn't belong
+// to buyerSubject, same as if it didn't exist, so a buyer can't view
+// another buyer's order by guessing/knowing its transaction UUID.
+func (s *ClientService) GetStatusForBuyer(ctx context.Context, txnIDStr, buyerSubject string) (*ClientStatusResponse, error) {
+	txnID, err := uuid.Parse(txnIDStr)
+	if err != nil {
+		return nil, err
+	}
+
+	q := dbsqlc.New(s.pool)
+	txn, err := q.GetTransactionForBuyer(ctx, dbsqlc.GetTransactionForBuyerParams{
+		TransactionID: txnID,
+		BuyerSubject:  &buyerSubject,
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	snapshot, _ := q.GetLatestContractSnapshot(ctx, txnID)
 
 	resp := &ClientStatusResponse{

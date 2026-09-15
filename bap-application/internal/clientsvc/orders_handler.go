@@ -8,9 +8,15 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/ion/winroom/bap/internal/auth"
 )
 
-// HandleGetOrder returns full details for a single order transaction.
+// HandleGetOrder returns full details for a single order transaction,
+// scoped to the requesting buyer (if one is resolved -- see
+// internal/auth.OptionalAuth). A transaction with no matching
+// buyer_subject is treated as not found, same as one that doesn't exist,
+// so a buyer can't view another buyer's order by guessing its UUID.
 // GET /api/v1/orders/:id
 func (h *ClientHandler) HandleGetOrder(c *gin.Context) {
 	txnID := c.Param("id")
@@ -18,7 +24,12 @@ func (h *ClientHandler) HandleGetOrder(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "id required"})
 		return
 	}
-	resp, err := h.svc.GetStatus(c.Request.Context(), txnID)
+	buyerSubject, hasBuyer := auth.SubjectFromContext(c)
+	if !hasBuyer {
+		c.JSON(http.StatusNotFound, gin.H{"error": "order not found"})
+		return
+	}
+	resp, err := h.svc.GetStatusForBuyer(c.Request.Context(), txnID, buyerSubject)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "order not found"})
 		return
@@ -64,10 +75,19 @@ func (h *ClientHandler) HandleGetOrder(c *gin.Context) {
 	})
 }
 
-// HandleListOrders returns paginated order history for the BAP.
+// HandleListOrders returns paginated order history, scoped to the
+// requesting buyer (if one is resolved -- see internal/auth.OptionalAuth).
+// A request with no resolvable buyer identity gets an empty page rather
+// than falling back to every order ever placed through this BAP.
 // GET /api/v1/orders?page=1&limit=20
 func (h *ClientHandler) HandleListOrders(c *gin.Context) {
 	ctx := c.Request.Context()
+
+	buyerSubject, hasBuyer := auth.SubjectFromContext(c)
+	if !hasBuyer {
+		c.JSON(http.StatusOK, gin.H{"items": []any{}, "total": 0, "page": 1, "limit": 20})
+		return
+	}
 
 	limit := 20
 	page := 1
@@ -100,10 +120,11 @@ func (h *ClientHandler) HandleListOrders(c *gin.Context) {
 		    ORDER BY created_at DESC
 		    LIMIT 1
 		) cs ON true
+		WHERE t.buyer_subject = $1
 		ORDER BY t.created_at DESC
-		LIMIT $1 OFFSET $2`
+		LIMIT $2 OFFSET $3`
 
-	rows, err := h.svc.pool.Query(ctx, q, limit, offset)
+	rows, err := h.svc.pool.Query(ctx, q, buyerSubject, limit, offset)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -202,7 +223,7 @@ func (h *ClientHandler) HandleListOrders(c *gin.Context) {
 	}
 
 	var total int64
-	if err := h.svc.pool.QueryRow(ctx, `SELECT COUNT(*) FROM transactions`).Scan(&total); err != nil {
+	if err := h.svc.pool.QueryRow(ctx, `SELECT COUNT(*) FROM transactions WHERE buyer_subject = $1`, buyerSubject).Scan(&total); err != nil {
 		total = int64(len(items))
 	}
 

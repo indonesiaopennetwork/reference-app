@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -13,6 +14,7 @@ import (
 	"github.com/remiges-tech/logharbour/logharbour"
 
 	dbsqlc "github.com/ion/winroom/bap/db/sqlc"
+	"github.com/ion/winroom/bap/internal/auth"
 	"github.com/ion/winroom/bap/internal/config"
 	"github.com/ion/winroom/bap/internal/server"
 )
@@ -61,6 +63,19 @@ func main() {
 	}
 	lh.WithModule("main").Log("BAP identity registered: " + cfg.BapID)
 
+	// --- Zitadel token verifier (buyer auth, optional) --------------------
+	// Unlike bpp-application, a failure here is not fatal: buyer login is a
+	// frontend-only gate (see bap-frontend/src/auth.js) and order-history
+	// scoping is best-effort, so BAP should keep serving traffic even if
+	// Zitadel is unreachable -- requests just won't resolve a buyer identity.
+	verifier, err := newAuthVerifierWithRetry(ctx, cfg.ZitadelIssuer, cfg.ZitadelInternalURL, 10, 3*time.Second)
+	if err != nil {
+		lh.WithModule("main").Warn().Error(err).Log("failed to reach Zitadel for token verification; continuing without buyer auth")
+		verifier = nil
+	} else {
+		lh.WithModule("main").Log("Zitadel token verifier ready")
+	}
+
 	// --- HTTP server ---
 	if cfg.IsProduction() {
 		gin.SetMode(gin.ReleaseMode)
@@ -69,7 +84,7 @@ func main() {
 	r := gin.New()
 	r.Use(gin.Recovery())
 
-	server.RegisterRoutes(r, pool, cfg, lh)
+	server.RegisterRoutes(r, pool, cfg, lh, verifier)
 
 	addr := fmt.Sprintf(":%s", cfg.AppPort)
 	lh.WithModule("main").Log("server listening on " + addr)
@@ -96,6 +111,23 @@ func registerBAPIdentity(ctx context.Context, pool *pgxpool.Pool, cfg *config.Co
 		BapUri:     cfg.BapURI,
 		NetworkIds: []string{cfg.NetworkID},
 	})
+}
+
+// newAuthVerifierWithRetry retries Zitadel's OIDC discovery fetch, since a
+// freshly-started Zitadel container can take longer to finish its
+// first-instance bootstrap than docker-compose's healthcheck-based
+// depends_on waits for.
+func newAuthVerifierWithRetry(ctx context.Context, issuer, internalURL string, attempts int, delay time.Duration) (*auth.Verifier, error) {
+	var lastErr error
+	for i := 0; i < attempts; i++ {
+		v, err := auth.NewVerifier(ctx, issuer, internalURL)
+		if err == nil {
+			return v, nil
+		}
+		lastErr = err
+		time.Sleep(delay)
+	}
+	return nil, lastErr
 }
 
 // logLevel maps the LOG_LEVEL env string to a logharbour priority constant.

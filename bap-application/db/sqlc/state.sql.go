@@ -82,10 +82,62 @@ FROM transactions
 WHERE transaction_id = $1
 `
 
+type GetTransactionRow struct {
+	TransactionID uuid.UUID          `json:"transaction_id"`
+	BapID         string             `json:"bap_id"`
+	NetworkID     *string            `json:"network_id"`
+	BppID         *string            `json:"bpp_id"`
+	BppUri        *string            `json:"bpp_uri"`
+	Status        TransactionStatus  `json:"status"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
 // Returns the transaction row for the given transaction UUID.
-func (q *Queries) GetTransaction(ctx context.Context, transactionID uuid.UUID) (Transaction, error) {
+func (q *Queries) GetTransaction(ctx context.Context, transactionID uuid.UUID) (GetTransactionRow, error) {
 	row := q.db.QueryRow(ctx, getTransaction, transactionID)
-	var i Transaction
+	var i GetTransactionRow
+	err := row.Scan(
+		&i.TransactionID,
+		&i.BapID,
+		&i.NetworkID,
+		&i.BppID,
+		&i.BppUri,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getTransactionForBuyer = `-- name: GetTransactionForBuyer :one
+SELECT transaction_id, bap_id, network_id, bpp_id, bpp_uri, status, created_at, updated_at
+FROM transactions
+WHERE transaction_id = $1
+  AND buyer_subject = $2
+`
+
+type GetTransactionForBuyerParams struct {
+	TransactionID uuid.UUID `json:"transaction_id"`
+	BuyerSubject  *string   `json:"buyer_subject"`
+}
+
+type GetTransactionForBuyerRow struct {
+	TransactionID uuid.UUID          `json:"transaction_id"`
+	BapID         string             `json:"bap_id"`
+	NetworkID     *string            `json:"network_id"`
+	BppID         *string            `json:"bpp_id"`
+	BppUri        *string            `json:"bpp_uri"`
+	Status        TransactionStatus  `json:"status"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+// Same as GetTransaction, but scoped to the given buyer_subject -- returns
+// no rows if the transaction belongs to someone else (or has no owner).
+func (q *Queries) GetTransactionForBuyer(ctx context.Context, arg GetTransactionForBuyerParams) (GetTransactionForBuyerRow, error) {
+	row := q.db.QueryRow(ctx, getTransactionForBuyer, arg.TransactionID, arg.BuyerSubject)
+	var i GetTransactionForBuyerRow
 	err := row.Scan(
 		&i.TransactionID,
 		&i.BapID,
@@ -196,8 +248,8 @@ func (q *Queries) UpsertContractSnapshot(ctx context.Context, arg UpsertContract
 
 const upsertTransaction = `-- name: UpsertTransaction :exec
 
-INSERT INTO transactions (transaction_id, bap_id, network_id, bpp_id, bpp_uri, status)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO transactions (transaction_id, bap_id, network_id, bpp_id, bpp_uri, status, buyer_subject)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 ON CONFLICT (transaction_id) DO UPDATE SET
     bpp_id     = EXCLUDED.bpp_id,
     bpp_uri    = EXCLUDED.bpp_uri,
@@ -212,10 +264,15 @@ type UpsertTransactionParams struct {
 	BppID         *string           `json:"bpp_id"`
 	BppUri        *string           `json:"bpp_uri"`
 	Status        TransactionStatus `json:"status"`
+	BuyerSubject  *string           `json:"buyer_subject"`
 }
 
 // Queries for persisting contract state received in on_* callbacks.
-// Creates or updates the transaction tracking row.
+// Creates or updates the transaction tracking row. buyer_subject is
+// deliberately excluded from the ON CONFLICT update, same as bap_id --
+// it's set once at creation (by Select, the only call site that has a
+// buyer identity to give it) and never clobbered by later lifecycle
+// upserts that don't.
 func (q *Queries) UpsertTransaction(ctx context.Context, arg UpsertTransactionParams) error {
 	_, err := q.db.Exec(ctx, upsertTransaction,
 		arg.TransactionID,
@@ -224,6 +281,7 @@ func (q *Queries) UpsertTransaction(ctx context.Context, arg UpsertTransactionPa
 		arg.BppID,
 		arg.BppUri,
 		arg.Status,
+		arg.BuyerSubject,
 	)
 	return err
 }

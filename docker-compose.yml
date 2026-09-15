@@ -287,6 +287,8 @@ services:
         condition: service_healthy
       onix-bap:
         condition: service_started
+      zitadel:
+        condition: service_healthy
     environment:
       APP_PORT: "8083"
       APP_ENV: development
@@ -324,6 +326,14 @@ services:
       # Same keypair as config/local-simple-bap.yaml's keyManager — one registered identity.
       BAP_PRIVATE_KEY: ${BAP_PRIVATE_KEY}
       BAP_KEY_ID: ${BAP_KEY_ID}
+
+      # Buyer login (see zitadel service above and bpp's ZITADEL_ISSUER
+      # comment for the full rationale) -- reuses the same Zitadel app that
+      # gates the seller flow. Unlike bpp, this is optional/best-effort: bap
+      # still serves traffic if Zitadel is unreachable, just without buyer
+      # identity resolution (see internal/auth.OptionalAuth).
+      ZITADEL_ISSUER: http://localhost:8090
+      ZITADEL_INTERNAL_URL: http://zitadel:8080
     ports:
       - "8083:8083"
     networks:
@@ -342,6 +352,9 @@ services:
       # 127.0.0.11 is Docker's embedded DNS, resolves compose service names.
       NGINX_RESOLVER: "127.0.0.11"
       BPP_ADMIN_URL: ${VITE_BPP_ADMIN_URL}
+      # Read by the BROWSER (see src/auth.js) to redirect back to login on
+      # missing/expired sessions -- must be host-published, not internal.
+      LANDING_PAGE_URL: http://localhost:3002
     ports:
       - "3000:80"
     networks:

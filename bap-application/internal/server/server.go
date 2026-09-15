@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/remiges-tech/logharbour/logharbour"
 
+	"github.com/ion/winroom/bap/internal/auth"
 	"github.com/ion/winroom/bap/internal/clientsvc"
 	"github.com/ion/winroom/bap/internal/config"
 	oncancelsvc "github.com/ion/winroom/bap/internal/on_cancel_svc"
@@ -19,8 +20,9 @@ import (
 	onupdatesvc "github.com/ion/winroom/bap/internal/on_update_svc"
 )
 
-// RegisterRoutes wires all BAP routes onto the given Gin engine.
-func RegisterRoutes(r *gin.Engine, pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.Logger) {
+// RegisterRoutes wires all BAP routes onto the given Gin engine. verifier
+// may be nil (Zitadel unreachable at startup) -- see internal/auth.OptionalAuth.
+func RegisterRoutes(r *gin.Engine, pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.Logger, verifier *auth.Verifier) {
 	// Health check
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
@@ -54,8 +56,11 @@ func RegisterRoutes(r *gin.Engine, pool *pgxpool.Pool, cfg *config.Config, lh *l
 		webhook.POST("/on_support", onSupportH.Handle)
 	}
 
-	// Client-facing APIs for the React frontend
+	// Client-facing APIs for the React frontend. OptionalAuth resolves a
+	// buyer identity from the bearer token when present, but never rejects
+	// a request for lacking one -- see internal/auth.
 	v1 := r.Group("/api/v1")
+	v1.Use(auth.OptionalAuth(verifier))
 	{
 		clientH := clientsvc.NewClientHandler(pool, cfg, lh)
 		v1.GET("/catalog", clientH.HandleCatalog)

@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/remiges-tech/logharbour/logharbour"
 
+	"github.com/ion/winroom/bap/internal/auth"
 	"github.com/ion/winroom/bap/internal/config"
 )
 
@@ -30,7 +31,12 @@ func (h *ClientHandler) HandleSelect(c *gin.Context) {
 		return
 	}
 
-	txnID, err := h.svc.Select(c.Request.Context(), &req)
+	var buyerSubject *string
+	if sub, ok := auth.SubjectFromContext(c); ok {
+		buyerSubject = &sub
+	}
+
+	txnID, err := h.svc.Select(c.Request.Context(), &req, buyerSubject)
 	if err != nil {
 		h.lh.WithModule("client_handler").Err().Error(err).Log("select failed")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
