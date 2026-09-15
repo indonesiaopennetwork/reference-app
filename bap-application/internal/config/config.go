@@ -47,6 +47,14 @@ type Config struct {
 	// BapKeyID is the Beckn signing key identifier in the format
 	// "<subscriberID>|<uniqueKeyID>|ed25519". Env: BAP_KEY_ID
 	BapKeyID string
+
+	// ZitadelIssuer/ZitadelInternalURL configure the optional buyer-token
+	// verifier (see internal/auth) -- the same Zitadel app that gates the
+	// seller flow in bpp-application. Unlike bpp, a missing/unreachable
+	// Zitadel here is not fatal: buyer auth is a non-blocking, best-effort
+	// identity resolution, not a hard requirement to serve traffic.
+	ZitadelIssuer      string
+	ZitadelInternalURL string
 }
 
 // Load reads all config values from the environment and returns a validated Config.
@@ -76,6 +84,13 @@ func Load() (*Config, error) {
 
 		BapPrivateKey: os.Getenv("BAP_PRIVATE_KEY"),
 		BapKeyID:      os.Getenv("BAP_KEY_ID"),
+
+		ZitadelIssuer:      getEnv("ZITADEL_ISSUER", "http://localhost:8090"),
+		ZitadelInternalURL: os.Getenv("ZITADEL_INTERNAL_URL"),
+	}
+
+	if cfg.ZitadelInternalURL == "" {
+		cfg.ZitadelInternalURL = cfg.ZitadelIssuer
 	}
 
 	if err := cfg.validate(); err != nil {

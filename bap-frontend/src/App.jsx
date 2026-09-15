@@ -7,12 +7,34 @@ import {
   Star, Info, Receipt, Store, MapPin, Calendar, Zap,
   User, Phone, Home, ChevronLeft, Banknote,
   Ban, MessageSquare, RefreshCw, ThumbsUp,
-  History, Wand2, ExternalLink, ChevronDown, ChevronUp,
+  History, Wand2, ExternalLink, ChevronDown, ChevronUp, LogOut,
 } from 'lucide-react';
+import { captureTokenFromUrl, getToken, clearToken, redirectToLogin, logout } from './auth.js';
 
 // BPP target, network ID, and BAP identity are all server-side config (BAP .env).
 // The frontend only needs the API base path.
 const API_BASE = '/api/v1';
+
+// Attaches the buyer's bearer token (if any) to every API call. Auth is a
+// frontend-only gate here (see App()'s authReady check) -- the backend
+// doesn't hard-reject a missing/invalid token, so a 401 should never
+// happen in normal use, but we still recover the same way bpp-frontend
+// does if it ever does.
+async function apiFetch(path, opts = {}) {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...opts,
+    headers: {
+      ...(opts.headers || {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+  if (res.status === 401) {
+    clearToken();
+    redirectToLogin();
+  }
+  return res;
+}
 
 /* ─────────────────────────── helpers ────────────────────────────────────── */
 
@@ -1003,7 +1025,7 @@ function OrderDetailPanel({ txnId, onBack }) {
 
   useEffect(() => {
     setLoading(true); setError(null);
-    fetch(`${API_BASE}/orders/${txnId}`)
+    apiFetch(`/orders/${txnId}`)
       .then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(e.error || 'Failed')))
       .then(d => { setDetail(d); setLoading(false); })
       .catch(e => { setError(String(e)); setLoading(false); });
@@ -1189,7 +1211,7 @@ function OrderHistoryDrawer({ open, onClose }) {
   const load = useCallback(async (p = 1) => {
     setLoading(true);
     try {
-      const r = await fetch(`${API_BASE}/orders?page=${p}&limit=${limit}`);
+      const r = await apiFetch(`/orders?page=${p}&limit=${limit}`);
       if (!r.ok) throw new Error(await r.text());
       const d = await r.json();
       setOrders(d.items || []);
@@ -1348,22 +1370,39 @@ export default function App() {
     streetAddress: '', addressLocality: '', addressRegion: '', postalCode: '', addressCountry: 'IN',
   });
   const debounceRef = useRef(null);
+  const [authReady, setAuthReady] = useState(false);
+
+  // Gate on a token before rendering anything real. There's no login UI
+  // here at all -- landing-page is the single entry point (see
+  // src/auth.js); a visit with no token, ever, redirects there.
+  useEffect(() => {
+    if (window.location.pathname === '/logout') {
+      clearToken(); // loaded in a hidden iframe from landing-page's logout button
+      return;
+    }
+    captureTokenFromUrl();
+    if (!getToken()) {
+      redirectToLogin();
+      return;
+    }
+    setAuthReady(true);
+  }, []);
 
   /* ── Discover ─────────────────────────────────────────────────────────── */
   const discover = useCallback((q = '') => {
     setIsSearching(true);
     setError(null);
-    const url = q.trim()
-      ? `${API_BASE}/discover?q=${encodeURIComponent(q.trim())}`
-      : `${API_BASE}/discover`;
-    fetch(url)
+    const path = q.trim()
+      ? `/discover?q=${encodeURIComponent(q.trim())}`
+      : `/discover`;
+    apiFetch(path)
       .then(r => { if (!r.ok) throw new Error(`Status ${r.status}`); return r.json(); })
       .then(d => { setCatalog(parseCatalogs(d)); setActiveCategory('All'); })
       .catch(e => { setError(e.message); setCatalog([]); })
       .finally(() => setIsSearching(false));
   }, []);
 
-  useEffect(() => { discover(); }, [discover]);
+  useEffect(() => { if (authReady) discover(); }, [authReady, discover]);
 
   const handleSearchChange = e => {
     const v = e.target.value;
@@ -1401,7 +1440,7 @@ export default function App() {
     const terminalStatuses = ['CONFIRMED', 'CANCELLED'];
     if (!transaction || terminalStatuses.includes(transaction.status)) return;
     const id = setInterval(() => {
-      fetch(`${API_BASE}/status/${transaction.id}`)
+      apiFetch(`/status/${transaction.id}`)
         .then(r => r.json())
         .then(d => {
           setTransaction(p => {
@@ -1420,7 +1459,7 @@ export default function App() {
   const handleSelectProduct = async (product) => {
     setIsLoading(true);
     try {
-      const r = await fetch(`${API_BASE}/select`, {
+      const r = await apiFetch(`/select`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           items: [{
@@ -1447,7 +1486,7 @@ export default function App() {
   const handleSelectCart = async () => {
     setIsLoading(true);
     try {
-      const r = await fetch(`${API_BASE}/select`, {
+      const r = await apiFetch(`/select`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           items: cart.map(i => ({
@@ -1477,7 +1516,7 @@ export default function App() {
     if (!transaction) return;
     setIsLoading(true);
     try {
-      await fetch(`${API_BASE}/init`, {
+      await apiFetch(`/init`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           transaction_id: transaction.id,
@@ -1503,7 +1542,7 @@ export default function App() {
     if (!transaction) return;
     setIsLoading(true);
     try {
-      await fetch(`${API_BASE}/confirm`, {
+      await apiFetch(`/confirm`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ transaction_id: transaction.id }),
       });
@@ -1516,7 +1555,7 @@ export default function App() {
   const handleRequestStatus = async () => {
     if (!transaction) return;
     try {
-      await fetch(`${API_BASE}/request-status`, {
+      await apiFetch(`/request-status`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ transaction_id: transaction.id }),
       });
@@ -1530,7 +1569,7 @@ export default function App() {
     if (!window.confirm('Cancel this order?')) return;
     setIsLoading(true);
     try {
-      const r = await fetch(`${API_BASE}/cancel`, {
+      const r = await apiFetch(`/cancel`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ transaction_id: transaction.id }),
       });
@@ -1556,7 +1595,7 @@ export default function App() {
       if (feedback && feedback.trim()) {
         ratingInput.feedbackFormSubmission = { data: { comment: feedback.trim() } };
       }
-      const r = await fetch(`${API_BASE}/rate`, {
+      const r = await apiFetch(`/rate`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           transaction_id: transaction.id,
@@ -1577,7 +1616,7 @@ export default function App() {
     if (!transaction) return;
     setIsLoading(true);
     try {
-      const r = await fetch(`${API_BASE}/support`, {
+      const r = await apiFetch(`/support`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           transaction_id: transaction.id,
@@ -1602,6 +1641,14 @@ export default function App() {
   };
 
   /* ── Render ───────────────────────────────────────────────────────────── */
+  if (!authReady) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <p className="text-slate-400 text-sm">Redirecting to login…</p>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen">
 
@@ -1643,6 +1690,14 @@ export default function App() {
             <ExternalLink className="w-4 h-4" />
             <span className="hidden sm:block">BPP APP</span>
           </a>
+
+          <button
+            onClick={logout}
+            className="shrink-0 flex items-center gap-2 px-3 py-2 rounded-xl transition-all text-sm font-medium text-rose-400 hover:text-rose-300 border border-rose-500/20 hover:border-rose-500/40 bg-rose-500/10"
+          >
+            <LogOut className="w-4 h-4" />
+            <span className="hidden sm:block">Log out</span>
+          </button>
 
           <button
             onClick={() => setIsOrdersOpen(true)}

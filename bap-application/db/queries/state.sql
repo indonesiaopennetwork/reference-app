@@ -1,9 +1,13 @@
 -- Queries for persisting contract state received in on_* callbacks.
 
 -- name: UpsertTransaction :exec
--- Creates or updates the transaction tracking row.
-INSERT INTO transactions (transaction_id, bap_id, network_id, bpp_id, bpp_uri, status)
-VALUES ($1, $2, $3, $4, $5, $6)
+-- Creates or updates the transaction tracking row. buyer_subject is
+-- deliberately excluded from the ON CONFLICT update, same as bap_id --
+-- it's set once at creation (by Select, the only call site that has a
+-- buyer identity to give it) and never clobbered by later lifecycle
+-- upserts that don't.
+INSERT INTO transactions (transaction_id, bap_id, network_id, bpp_id, bpp_uri, status, buyer_subject)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 ON CONFLICT (transaction_id) DO UPDATE SET
     bpp_id     = EXCLUDED.bpp_id,
     bpp_uri    = EXCLUDED.bpp_uri,
@@ -24,6 +28,14 @@ ON CONFLICT (transaction_id, action) DO UPDATE SET
 SELECT transaction_id, bap_id, network_id, bpp_id, bpp_uri, status, created_at, updated_at
 FROM transactions
 WHERE transaction_id = $1;
+
+-- name: GetTransactionForBuyer :one
+-- Same as GetTransaction, but scoped to the given buyer_subject -- returns
+-- no rows if the transaction belongs to someone else (or has no owner).
+SELECT transaction_id, bap_id, network_id, bpp_id, bpp_uri, status, created_at, updated_at
+FROM transactions
+WHERE transaction_id = $1
+  AND buyer_subject = $2;
 
 -- name: GetContractSnapshot :one
 -- Returns the most recent contract snapshot for a (transaction_id, action) pair.

@@ -116,16 +116,26 @@ export function logout() {
     window.location.href = `${config.zitadelIssuer}/oidc/v1/end_session?${params}`
   }
 
-  // bpp-frontend keeps its own copy of the access token in a separate
-  // origin's localStorage -- clear it too before ending the Zitadel
-  // session, otherwise a still-valid token there lets someone straight
-  // back into the seller dashboard without logging in again.
-  const iframe = document.createElement('iframe')
-  iframe.style.display = 'none'
-  iframe.src = `${config.bppUrl}/logout`
-  iframe.onload = endSession
-  document.body.appendChild(iframe)
-  setTimeout(endSession, 1500) // fallback if bpp-frontend is unreachable
+  // bap-frontend and bpp-frontend each keep their own copy of the access
+  // token in their own origin's localStorage -- clear both before ending
+  // the Zitadel session, otherwise a still-valid token there lets someone
+  // straight back into the buyer/seller app without logging in again.
+  let pending = 2
+  function onIframeSettled() {
+    pending -= 1
+    if (pending <= 0) endSession()
+  }
+  const bapIframe = document.createElement('iframe')
+  bapIframe.style.display = 'none'
+  bapIframe.src = `${config.bapUrl}/logout`
+  bapIframe.onload = onIframeSettled
+  document.body.appendChild(bapIframe)
+  const bppIframe = document.createElement('iframe')
+  bppIframe.style.display = 'none'
+  bppIframe.src = `${config.bppUrl}/logout`
+  bppIframe.onload = onIframeSettled
+  document.body.appendChild(bppIframe)
+  setTimeout(endSession, 1500) // fallback if bap-frontend/bpp-frontend are unreachable
 }
 
 // Returns the stored access token, or null if missing/expired. A 60s
