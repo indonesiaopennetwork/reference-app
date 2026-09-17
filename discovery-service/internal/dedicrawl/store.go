@@ -17,7 +17,7 @@ import (
 // cmd/discovery/main.go's wiring around it barely changes.
 type Store struct {
 	crawler         *Crawler
-	subscriberRefs  []string
+	indexURLs       []string
 	refreshInterval time.Duration
 	logger          *logharbour.Logger
 
@@ -25,12 +25,12 @@ type Store struct {
 	catalogs []beckn.Catalog
 }
 
-// NewStore builds a Store crawling every subscriberRef in subscriberRefs
-// via crawler. Call Refresh once synchronously before serving traffic (so
-// the first requests don't see an empty catalog if sources are
-// reachable), then Start in a goroutine to keep it updated.
-func NewStore(crawler *Crawler, subscriberRefs []string, refreshInterval time.Duration, logger *logharbour.Logger) *Store {
-	return &Store{crawler: crawler, subscriberRefs: subscriberRefs, refreshInterval: refreshInterval, logger: logger}
+// NewStore builds a Store crawling every URL in indexURLs via crawler.
+// Call Refresh once synchronously before serving traffic (so the first
+// requests don't see an empty catalog if sources are reachable), then
+// Start in a goroutine to keep it updated.
+func NewStore(crawler *Crawler, indexURLs []string, refreshInterval time.Duration, logger *logharbour.Logger) *Store {
+	return &Store{crawler: crawler, indexURLs: indexURLs, refreshInterval: refreshInterval, logger: logger}
 }
 
 // Catalogs returns a copy of the last successfully crawled catalog data
@@ -43,14 +43,14 @@ func (s *Store) Catalogs() []beckn.Catalog {
 	return catalogs
 }
 
-// Refresh crawls every configured subscriber and, only if at least one
-// succeeded, atomically replaces the cached catalogs. If every subscriber
+// Refresh crawls every configured index URL and, only if at least one
+// succeeded, atomically replaces the cached catalogs. If every index URL
 // failed, the previous snapshot is kept as-is (stale data is better than
-// no data) and the failure is logged by Crawler.CrawlAll's callers.
+// no data) and each individual failure is logged by Crawler.CrawlAll.
 func (s *Store) Refresh(ctx context.Context) {
-	catalogs, anySuccess := s.crawler.CrawlAll(ctx, s.subscriberRefs)
+	catalogs, anySuccess := s.crawler.CrawlAll(ctx, s.indexURLs)
 	if !anySuccess {
-		s.logger.Err().LogActivity("catalog crawl: all subscribers failed, keeping previous data", nil)
+		s.logger.Err().LogActivity("catalog crawl: all index urls failed, keeping previous data", nil)
 		return
 	}
 

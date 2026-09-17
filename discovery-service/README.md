@@ -44,11 +44,12 @@ sequenceDiagram
 ```
 
 A malformed `filters` expression is rejected with `400` at the `Ack`/response
-stage itself. `CatalogStore` is fed by `internal/catalogsource` (polling a
-BPP's dashboard API, or the embedded demo catalog if unconfigured); a
-catalog survives a query only if it passes every spatial constraint, then
-its resources are narrowed by `textSearch`/`filters`, and offers referencing
-a now-excluded resource are dropped.
+stage itself. `CatalogStore` is fed by `internal/dedicrawl` (crawling
+`CATALOG_INDEX_URLS`'s Provider Node catalog index/baseline/change files,
+or the embedded demo catalog if unconfigured); a catalog survives a query
+only if it passes every spatial constraint, then its resources are
+narrowed by `textSearch`/`filters`, and offers referencing a now-excluded
+resource are dropped.
 
 ## Quickstart
 

@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/remiges-tech/logharbour/logharbour"
-	"github.com/remiges-tushar/discovery-service/internal/catalogsource"
 	"github.com/remiges-tushar/discovery-service/internal/config"
+	"github.com/remiges-tushar/discovery-service/internal/dedicrawl"
 	"github.com/remiges-tushar/discovery-service/internal/dispatch"
 	"github.com/remiges-tushar/discovery-service/internal/handlers"
 	"github.com/remiges-tushar/discovery-service/internal/logging"
@@ -144,27 +144,27 @@ func buildSigner(cfg config.Config, logger *logharbour.Logger) dispatch.RequestS
 // stop function to cancel any background refresh goroutine it started
 // (call it during shutdown; safe to call even when nothing was started).
 //
-// With no CATALOG_SOURCE_URLS configured, it returns the zero-config
+// With no CATALOG_INDEX_URLS configured, it returns the zero-config
 // embedded demo catalog (service.EmbeddedCatalogStore), unchanged from
-// M1. Otherwise it builds a catalogsource.Store, does one synchronous
-// Refresh now (bounded by CatalogFetchTimeout per HTTP call) so the first
-// real requests already see fresh data if the configured sources are
+// M1. Otherwise it builds a dedicrawl.Store, does one synchronous Refresh
+// now (bounded by CatalogFetchTimeout per HTTP call) so the first real
+// requests already see fresh data if the configured index URLs are
 // reachable, then starts background polling at CatalogRefreshInterval —
-// see CONTEXT.md D17.
+// see CONTEXT.md D19.
 func buildCatalogStore(cfg config.Config, logger *logharbour.Logger) (service.CatalogStore, func()) {
-	if len(cfg.CatalogSourceURLs) == 0 {
+	if len(cfg.CatalogIndexURLs) == 0 {
 		return service.EmbeddedCatalogStore{}, func() {}
 	}
 
-	logger.LogActivity("catalog sources configured, polling for real catalog data", map[string]any{
-		"sources":         cfg.CatalogSourceURLs,
+	logger.LogActivity("catalog index urls configured, crawling for real catalog data", map[string]any{
+		"indexUrls":       cfg.CatalogIndexURLs,
 		"refreshInterval": cfg.CatalogRefreshInterval.String(),
 	})
 
-	source := catalogsource.NewHTTPSource(cfg.CatalogSourceURLs, &http.Client{Timeout: cfg.CatalogFetchTimeout}, logger)
-	store := catalogsource.NewStore(source, cfg.CatalogRefreshInterval, logger)
+	crawler := dedicrawl.NewCrawler(&http.Client{Timeout: cfg.CatalogFetchTimeout}, logger, nil, nil, 0)
+	store := dedicrawl.NewStore(crawler, cfg.CatalogIndexURLs, cfg.CatalogRefreshInterval, logger)
 
-	initialCtx, initialCancel := context.WithTimeout(context.Background(), cfg.CatalogFetchTimeout*time.Duration(len(cfg.CatalogSourceURLs)+1))
+	initialCtx, initialCancel := context.WithTimeout(context.Background(), cfg.CatalogFetchTimeout*time.Duration(len(cfg.CatalogIndexURLs)+1))
 	store.Refresh(initialCtx)
 	initialCancel()
 

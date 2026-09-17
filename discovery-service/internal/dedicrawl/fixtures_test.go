@@ -1,7 +1,8 @@
 package dedicrawl
 
 import (
-	"crypto/ed25519"
+	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -17,15 +18,6 @@ func testLogger() *logharbour.Logger {
 	return logharbour.NewLoggerWithFallback(ctx, "dedicrawl-test", logharbour.NewFallbackWriter(io.Discard, io.Discard))
 }
 
-func mustKeyPair(t *testing.T) (ed25519.PrivateKey, ed25519.PublicKey) {
-	t.Helper()
-	pub, priv, err := ed25519.GenerateKey(nil)
-	if err != nil {
-		t.Fatalf("generate key pair: %v", err)
-	}
-	return priv, pub
-}
-
 func sampleCatalog(id string) beckn.Catalog {
 	return beckn.Catalog{
 		ID:         id,
@@ -36,58 +28,31 @@ func sampleCatalog(id string) beckn.Catalog {
 	}
 }
 
-// signedCatalogFile builds a CatalogFile signed by priv and returns both
-// the struct and its raw JSON bytes (what a PN would actually serve).
-func signedCatalogFile(t *testing.T, priv ed25519.PrivateKey, file CatalogFile) (CatalogFile, []byte) {
+// marshalFile marshals v (a CatalogFile/CatalogChangeFile/CatalogIndex)
+// to raw JSON bytes, as a Provider Node would actually serve it — no
+// signing, since Crawler doesn't verify signatures (see CONTEXT.md D19).
+func marshalFile(t *testing.T, v any) []byte {
 	t.Helper()
-	file.Signature = ""
-	canon, err := CanonicalizeJCS(file)
+	raw, err := json.Marshal(v)
 	if err != nil {
-		t.Fatalf("canonicalize catalog file: %v", err)
+		t.Fatalf("marshal: %v", err)
 	}
-	file.Signature = signDetached(priv, canon)
-	raw, err := json.Marshal(file)
-	if err != nil {
-		t.Fatalf("marshal catalog file: %v", err)
-	}
-	return file, raw
+	return raw
 }
 
-func signedChangeFile(t *testing.T, priv ed25519.PrivateKey, change CatalogChangeFile) (CatalogChangeFile, []byte) {
+// gzipBytes compresses raw the same way a real Provider Node's .json.gz
+// catalog files are served.
+func gzipBytes(t *testing.T, raw []byte) []byte {
 	t.Helper()
-	change.Signature = ""
-	canon, err := CanonicalizeJCS(change)
-	if err != nil {
-		t.Fatalf("canonicalize change file: %v", err)
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	if _, err := gz.Write(raw); err != nil {
+		t.Fatalf("gzip write: %v", err)
 	}
-	change.Signature = signDetached(priv, canon)
-	raw, err := json.Marshal(change)
-	if err != nil {
-		t.Fatalf("marshal change file: %v", err)
+	if err := gz.Close(); err != nil {
+		t.Fatalf("gzip close: %v", err)
 	}
-	return change, raw
-}
-
-func signedIndexEntry(t *testing.T, priv ed25519.PrivateKey, entry IndexEntry) IndexEntry {
-	t.Helper()
-	entry.Signature = ""
-	canon, err := CanonicalizeJCS(entry)
-	if err != nil {
-		t.Fatalf("canonicalize index entry: %v", err)
-	}
-	entry.Signature = signDetached(priv, canon)
-	return entry
-}
-
-func digestedSubscriberRecord(t *testing.T, record SubscriberRecord) SubscriberRecord {
-	t.Helper()
-	record.Digest = ""
-	canon, err := CanonicalizeJCS(record)
-	if err != nil {
-		t.Fatalf("canonicalize subscriber record: %v", err)
-	}
-	record.Digest = Digest(canon)
-	return record
+	return buf.Bytes()
 }
 
 // fileServer serves a fixed set of URL-path -> raw-bytes pairs over HTTP,

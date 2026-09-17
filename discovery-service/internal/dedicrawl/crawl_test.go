@@ -5,26 +5,20 @@ import (
 	"testing"
 )
 
-// setup builds a full working fixture: a registry with one seeded
-// subscriber, one MASTER-less REGULAR catalog served as a signed
-// baseline CatalogFile, and a signed CatalogIndex pointing at it. It
-// returns the Crawler and the subscriberRef to crawl.
+// setup builds a full working fixture: one MASTER-less REGULAR catalog
+// served as a baseline CatalogFile, and a CatalogIndex pointing at it. It
+// returns the Crawler and the index URL to crawl.
 func setup(t *testing.T) (*Crawler, string) {
 	t.Helper()
-	registryPriv, _ := mustKeyPair(t)
-	subscriberPriv, subscriberPub := mustKeyPair(t)
 
-	file, rawFile := signedCatalogFile(t, subscriberPriv, CatalogFile{
-		CatalogID: "cat-1",
-		Version:   "v1",
-		Catalog:   sampleCatalog("cat-1"),
-	})
+	file := CatalogFile{CatalogID: "cat-1", Version: 1, Catalog: sampleCatalog("cat-1")}
+	rawFile := marshalFile(t, file)
 
 	srv := fileServer(t, map[string][]byte{"/catalog-v1.json": rawFile})
 
-	entry := signedIndexEntry(t, subscriberPriv, IndexEntry{
+	entry := IndexEntry{
 		CatalogID:    "cat-1",
-		EntryVersion: "v1",
+		EntryVersion: 1,
 		CatalogType:  CatalogTypeRegular,
 		IsActive:     true,
 		Baseline: FileRef{
@@ -33,182 +27,162 @@ func setup(t *testing.T) (*Crawler, string) {
 			Size:    int64(len(rawFile)),
 			Digest:  Digest(rawFile),
 		},
-	})
-	index := CatalogIndex{Entries: []IndexEntry{entry}}
-	rawIndex, err := json.Marshal(index)
-	if err != nil {
-		t.Fatalf("marshal index: %v", err)
 	}
+	rawIndex := marshalFile(t, CatalogIndex{NodeID: "pn-1", Catalogs: []IndexEntry{entry}})
 	indexSrv := fileServer(t, map[string][]byte{"/index.json": rawIndex})
 
-	record := digestedSubscriberRecord(t, SubscriberRecord{
-		SubscriberID:     "pn-1",
-		PublicKeyBase64:  "unused-here",
-		CatalogIndexURLs: []string{indexSrv.URL + "/index.json"},
-	})
-
-	registry := NewStubRegistry(registryPriv)
-	registry.Seed("pn-1", record, subscriberPub)
-
-	crawler := NewCrawler(registry, "", srv.Client(), testLogger(), nil, nil, 0.5)
-	return crawler, "pn-1"
+	crawler := NewCrawler(srv.Client(), testLogger(), nil, nil, 0.5)
+	return crawler, indexSrv.URL + "/index.json"
 }
 
-func TestCrawlSubscriber_IndexesAValidCatalog(t *testing.T) {
-	crawler, ref := setup(t)
+func TestCrawlAll_IndexesAValidCatalog(t *testing.T) {
+	crawler, indexURL := setup(t)
 
-	if err := crawler.CrawlSubscriber(t.Context(), ref); err != nil {
-		t.Fatalf("CrawlSubscriber: %v", err)
+	catalogs, anySuccess := crawler.CrawlAll(t.Context(), []string{indexURL})
+	if !anySuccess {
+		t.Fatal("expected anySuccess=true for a reachable, valid index")
 	}
-
-	got := crawler.cursor.snapshot()
-	if len(got) != 1 || got[0].ID != "cat-1" {
-		t.Fatalf("snapshot after crawl = %+v, want one catalog cat-1", got)
+	if len(catalogs) != 1 || catalogs[0].ID != "cat-1" {
+		t.Fatalf("snapshot after crawl = %+v, want one catalog cat-1", catalogs)
 	}
 }
 
-func TestCrawlSubscriber_UnknownSubscriberFails(t *testing.T) {
+func TestCrawlAll_UnreachableIndexURLFails(t *testing.T) {
 	crawler, _ := setup(t)
-	if err := crawler.CrawlSubscriber(t.Context(), "does-not-exist"); err == nil {
-		t.Fatal("expected an error for an unseeded subscriber ref")
+	_, anySuccess := crawler.CrawlAll(t.Context(), []string{"http://127.0.0.1:1/does-not-exist"})
+	if anySuccess {
+		t.Fatal("expected anySuccess=false for an unreachable index URL")
 	}
 }
 
 func TestApplyEntry_DiscardsOnDigestMismatch(t *testing.T) {
-	crawler, ref := setup(t)
+	crawler, indexURL := setup(t)
 
-	// Corrupt the crawler's view by re-seeding an index whose baseline
-	// digest doesn't match the served file, then crawl fresh.
-	subscriberPriv, subscriberPub := mustKeyPair(t)
-	file, rawFile := signedCatalogFile(t, subscriberPriv, CatalogFile{CatalogID: "cat-2", Version: "v1", Catalog: sampleCatalog("cat-2")})
+	// A second, independent fixture whose baseline digest doesn't match
+	// what's actually served.
+	file := CatalogFile{CatalogID: "cat-2", Version: 1, Catalog: sampleCatalog("cat-2")}
+	rawFile := marshalFile(t, file)
 	srv := fileServer(t, map[string][]byte{"/f.json": rawFile})
-	entry := signedIndexEntry(t, subscriberPriv, IndexEntry{
-		CatalogID: "cat-2", EntryVersion: "v1", CatalogType: CatalogTypeRegular, IsActive: true,
-		Baseline: FileRef{Version: file.Version, URL: srv.URL + "/f.json", Size: int64(len(rawFile)), Digest: "BLAKE2b-512=wrong"},
-	})
-	index := CatalogIndex{Entries: []IndexEntry{entry}}
-	rawIndex, _ := json.Marshal(index)
-	indexSrv := fileServer(t, map[string][]byte{"/idx.json": rawIndex})
-	record := digestedSubscriberRecord(t, SubscriberRecord{SubscriberID: "pn-2", CatalogIndexURLs: []string{indexSrv.URL + "/idx.json"}})
-
-	registryPriv, _ := mustKeyPair(t)
-	registry := NewStubRegistry(registryPriv)
-	registry.Seed("pn-2", record, subscriberPub)
-	badCrawler := NewCrawler(registry, "", srv.Client(), testLogger(), nil, nil, 0.5)
-
-	err := badCrawler.CrawlSubscriber(t.Context(), "pn-2")
-	if err == nil {
-		t.Fatal("expected crawl to report failure when the only entry has a digest mismatch")
+	entry := IndexEntry{
+		CatalogID: "cat-2", EntryVersion: 1, CatalogType: CatalogTypeRegular, IsActive: true,
+		Baseline: FileRef{Version: file.Version, URL: srv.URL + "/f.json", Size: int64(len(rawFile)), Digest: "sha-256:wrong"},
 	}
-	if got := badCrawler.cursor.snapshot(); len(got) != 0 {
-		t.Fatalf("expected nothing indexed after a digest mismatch, got %+v", got)
+	rawIndex := marshalFile(t, CatalogIndex{NodeID: "pn-2", Catalogs: []IndexEntry{entry}})
+	indexSrv := fileServer(t, map[string][]byte{"/idx.json": rawIndex})
+	badIndexURL := indexSrv.URL + "/idx.json"
+
+	badCrawler := NewCrawler(srv.Client(), testLogger(), nil, nil, 0.5)
+	catalogs, anySuccess := badCrawler.CrawlAll(t.Context(), []string{badIndexURL})
+	if !anySuccess {
+		t.Fatal("a fetchable-but-all-entries-discarded index should still count as a successful crawl")
+	}
+	if len(catalogs) != 0 {
+		t.Fatalf("expected nothing indexed after a digest mismatch, got %+v", catalogs)
 	}
 
 	// The original, valid fixture must still work independently.
-	if err := crawler.CrawlSubscriber(t.Context(), ref); err != nil {
-		t.Fatalf("valid crawler should be unaffected: %v", err)
+	catalogs, anySuccess = crawler.CrawlAll(t.Context(), []string{indexURL})
+	if !anySuccess || len(catalogs) != 1 {
+		t.Fatalf("valid crawler should be unaffected: catalogs=%+v anySuccess=%v", catalogs, anySuccess)
 	}
 }
 
-func TestApplyEntry_DiscardsOnBadSignature(t *testing.T) {
-	registryPriv, _ := mustKeyPair(t)
-	subscriberPriv, _ := mustKeyPair(t)
-	_, otherPub := mustKeyPair(t)
-
-	file, rawFile := signedCatalogFile(t, subscriberPriv, CatalogFile{CatalogID: "cat-3", Version: "v1", Catalog: sampleCatalog("cat-3")})
-	srv := fileServer(t, map[string][]byte{"/f.json": rawFile})
-	entry := signedIndexEntry(t, subscriberPriv, IndexEntry{
-		CatalogID: "cat-3", EntryVersion: "v1", CatalogType: CatalogTypeRegular, IsActive: true,
-		Baseline: FileRef{Version: file.Version, URL: srv.URL + "/f.json", Size: int64(len(rawFile)), Digest: Digest(rawFile)},
-	})
-	index := CatalogIndex{Entries: []IndexEntry{entry}}
-	rawIndex, _ := json.Marshal(index)
-	indexSrv := fileServer(t, map[string][]byte{"/idx.json": rawIndex})
-	record := digestedSubscriberRecord(t, SubscriberRecord{SubscriberID: "pn-3", CatalogIndexURLs: []string{indexSrv.URL + "/idx.json"}})
-
-	registry := NewStubRegistry(registryPriv)
-	// Seed with the WRONG public key so the entry's real signature fails verification.
-	registry.Seed("pn-3", record, otherPub)
-	crawler := NewCrawler(registry, "", srv.Client(), testLogger(), nil, nil, 0.5)
-
-	err := crawler.CrawlSubscriber(t.Context(), "pn-3")
-	if err == nil {
-		t.Fatal("expected crawl to report failure when the index entry signature doesn't verify")
-	}
-	if got := crawler.cursor.snapshot(); len(got) != 0 {
-		t.Fatalf("expected nothing indexed after a bad signature, got %+v", got)
-	}
-}
-
-func TestCrawlSubscriber_VersionUnchangedSkipsRefetch(t *testing.T) {
-	crawler, ref := setup(t)
-	if err := crawler.CrawlSubscriber(t.Context(), ref); err != nil {
-		t.Fatalf("first crawl: %v", err)
+func TestCrawlAll_VersionUnchangedSkipsRefetch(t *testing.T) {
+	crawler, indexURL := setup(t)
+	if _, anySuccess := crawler.CrawlAll(t.Context(), []string{indexURL}); !anySuccess {
+		t.Fatal("first crawl should succeed")
 	}
 	before, _ := crawler.cursor.get("cat-1")
 
-	if err := crawler.CrawlSubscriber(t.Context(), ref); err != nil {
-		t.Fatalf("second crawl: %v", err)
+	if _, anySuccess := crawler.CrawlAll(t.Context(), []string{indexURL}); !anySuccess {
+		t.Fatal("second crawl should succeed")
 	}
 	after, _ := crawler.cursor.get("cat-1")
 
 	if before.entryVersion != after.entryVersion {
-		t.Fatalf("entryVersion changed on a re-crawl with no version bump: %q -> %q", before.entryVersion, after.entryVersion)
+		t.Fatalf("entryVersion changed on a re-crawl with no version bump: %d -> %d", before.entryVersion, after.entryVersion)
 	}
 	if got := crawler.cursor.snapshot(); len(got) != 1 {
 		t.Fatalf("expected exactly one catalog after re-crawl, got %d", len(got))
 	}
 }
 
-func TestCrawlSubscriber_RetiredCatalogIsRemovedAndNeverResurrected(t *testing.T) {
-	registryPriv, _ := mustKeyPair(t)
-	subscriberPriv, subscriberPub := mustKeyPair(t)
-
-	file, rawFile := signedCatalogFile(t, subscriberPriv, CatalogFile{CatalogID: "cat-4", Version: "v1", Catalog: sampleCatalog("cat-4")})
+func TestCrawlAll_RetiredCatalogIsRemovedAndNeverResurrected(t *testing.T) {
+	file := CatalogFile{CatalogID: "cat-4", Version: 1, Catalog: sampleCatalog("cat-4")}
+	rawFile := marshalFile(t, file)
 	srv := fileServer(t, map[string][]byte{"/f.json": rawFile})
 	baseline := FileRef{Version: file.Version, URL: srv.URL + "/f.json", Size: int64(len(rawFile)), Digest: Digest(rawFile)}
 
-	activeEntry := signedIndexEntry(t, subscriberPriv, IndexEntry{
-		CatalogID: "cat-4", EntryVersion: "v1", CatalogType: CatalogTypeRegular, IsActive: true, Baseline: baseline,
-	})
-	rawIndex1, _ := json.Marshal(CatalogIndex{Entries: []IndexEntry{activeEntry}})
+	activeEntry := IndexEntry{CatalogID: "cat-4", EntryVersion: 1, CatalogType: CatalogTypeRegular, IsActive: true, Baseline: baseline}
+	rawIndex1 := marshalFile(t, CatalogIndex{NodeID: "pn-4", Catalogs: []IndexEntry{activeEntry}})
 
 	retiredAt := "2026-09-16T00:00:00Z"
-	retiredEntry := signedIndexEntry(t, subscriberPriv, IndexEntry{
-		CatalogID: "cat-4", EntryVersion: "v2", CatalogType: CatalogTypeRegular, IsActive: false, Baseline: baseline, RetiredAt: &retiredAt,
-	})
-	rawIndex2, _ := json.Marshal(CatalogIndex{Entries: []IndexEntry{retiredEntry}})
+	retiredEntry := IndexEntry{CatalogID: "cat-4", EntryVersion: 2, CatalogType: CatalogTypeRegular, IsActive: false, Baseline: baseline, RetiredAt: &retiredAt}
+	rawIndex2 := marshalFile(t, CatalogIndex{NodeID: "pn-4", Catalogs: []IndexEntry{retiredEntry}})
 
 	// Serve index1 first; we'll swap the handler after the first crawl.
-	var currentIndex []byte = rawIndex1
+	currentIndex := rawIndex1
 	indexSrv := fileServerDynamic(t, "/idx.json", func() []byte { return currentIndex })
+	indexURL := indexSrv.URL + "/idx.json"
 
-	record := digestedSubscriberRecord(t, SubscriberRecord{SubscriberID: "pn-4", CatalogIndexURLs: []string{indexSrv.URL + "/idx.json"}})
-	registry := NewStubRegistry(registryPriv)
-	registry.Seed("pn-4", record, subscriberPub)
-	crawler := NewCrawler(registry, "", srv.Client(), testLogger(), nil, nil, 0.5)
+	crawler := NewCrawler(srv.Client(), testLogger(), nil, nil, 0.5)
 
-	if err := crawler.CrawlSubscriber(t.Context(), "pn-4"); err != nil {
-		t.Fatalf("first crawl: %v", err)
-	}
-	if got := crawler.cursor.snapshot(); len(got) != 1 {
-		t.Fatalf("expected cat-4 active after first crawl, got %+v", got)
+	if catalogs, _ := crawler.CrawlAll(t.Context(), []string{indexURL}); len(catalogs) != 1 {
+		t.Fatalf("expected cat-4 active after first crawl, got %+v", catalogs)
 	}
 
 	currentIndex = rawIndex2
-	if err := crawler.CrawlSubscriber(t.Context(), "pn-4"); err != nil {
-		t.Fatalf("second crawl: %v", err)
-	}
-	if got := crawler.cursor.snapshot(); len(got) != 0 {
-		t.Fatalf("expected cat-4 removed after retirement, got %+v", got)
+	if catalogs, _ := crawler.CrawlAll(t.Context(), []string{indexURL}); len(catalogs) != 0 {
+		t.Fatalf("expected cat-4 removed after retirement, got %+v", catalogs)
 	}
 
 	// Reverting the index back to "active" must NOT resurrect it.
 	currentIndex = rawIndex1
-	if err := crawler.CrawlSubscriber(t.Context(), "pn-4"); err != nil {
-		t.Fatalf("third crawl: %v", err)
+	if catalogs, _ := crawler.CrawlAll(t.Context(), []string{indexURL}); len(catalogs) != 0 {
+		t.Fatalf("retired catalog was resurrected: %+v", catalogs)
 	}
-	if got := crawler.cursor.snapshot(); len(got) != 0 {
-		t.Fatalf("retired catalog was resurrected: %+v", got)
+}
+
+func TestCrawlAll_DecodesGzipCompressedFiles(t *testing.T) {
+	file := CatalogFile{CatalogID: "cat-7", Version: 1, Catalog: sampleCatalog("cat-7")}
+	rawFile := marshalFile(t, file)
+	gzFile := gzipBytes(t, rawFile)
+
+	srv := fileServer(t, map[string][]byte{"/catalog.json.gz": gzFile})
+	entry := IndexEntry{
+		CatalogID: "cat-7", EntryVersion: 1, CatalogType: CatalogTypeRegular, IsActive: true,
+		// Digest is over the DEcompressed content, per real observed
+		// catalog files (see CONTEXT.md D19) — not the gzip bytes.
+		Baseline: FileRef{Version: file.Version, URL: srv.URL + "/catalog.json.gz", Size: int64(len(gzFile)), Digest: Digest(rawFile)},
+	}
+	rawIndex := marshalFile(t, CatalogIndex{NodeID: "pn-7", Catalogs: []IndexEntry{entry}})
+	gzIndex := gzipBytes(t, rawIndex)
+	indexSrv := fileServer(t, map[string][]byte{"/index.json.gz": gzIndex})
+
+	crawler := NewCrawler(srv.Client(), testLogger(), nil, nil, 0.5)
+	catalogs, anySuccess := crawler.CrawlAll(t.Context(), []string{indexSrv.URL + "/index.json.gz"})
+	if !anySuccess || len(catalogs) != 1 || catalogs[0].ID != "cat-7" {
+		t.Fatalf("expected one gzip-decoded catalog cat-7, got catalogs=%+v anySuccess=%v", catalogs, anySuccess)
+	}
+}
+
+func TestCatalogIndex_ParsesRealObservedShape(t *testing.T) {
+	// Exact shape observed on a live, real catalog index (top-level
+	// "catalogs" key, numeric entryVersion, object signature) — see
+	// CONTEXT.md D19. A regression here means the index silently parses
+	// as empty instead of failing loudly.
+	raw := []byte(`{"nodeId":"sample-pn.example","next_update":"2026-10-01T08:18:04Z","catalogs":[{"catalogId":"cat-x","entryVersion":1,"catalogType":"REGULAR","isActive":true,"baseline":{"version":1,"url":"https://example/cat-x.json.gz","size":100,"digest":"sha-256:abc"},"signature":{"keyId":"key-1","value":"sig"}}]}`)
+	var index CatalogIndex
+	if err := json.Unmarshal(raw, &index); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(index.Catalogs) != 1 {
+		t.Fatalf("expected 1 catalog entry, got %d — top-level key mismatch?", len(index.Catalogs))
+	}
+	if index.Catalogs[0].EntryVersion != 1 {
+		t.Fatalf("entryVersion = %d, want 1", index.Catalogs[0].EntryVersion)
+	}
+	if index.Catalogs[0].Signature.KeyID != "key-1" || index.Catalogs[0].Signature.Value != "sig" {
+		t.Fatalf("signature = %+v, want keyId=key-1 value=sig", index.Catalogs[0].Signature)
 	}
 }
