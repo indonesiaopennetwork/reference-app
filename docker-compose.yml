@@ -205,12 +205,30 @@ services:
       - ./file-onboarding-and-catalog-publish/data/beckn:/beckn
     command: [ "./server", "--config=/app/config/catalog-publish.yaml" ]
 
+  # ─── Catalog file server ───────────────────────────────────────────────────
+  # onix-catalog-publish (above) writes real, signed catalog index/baseline/
+  # change files under file-onboarding-and-catalog-publish/data/beckn/, but
+  # only as a shared volume -- nothing serves that directory over HTTP
+  # (catalog-publish.yaml.example's own comment: "No reverse proxy serves
+  # this folder publicly yet"). discovery-service's internal/dedicrawl needs
+  # an HTTP URL to crawl, so this is that reverse proxy: a plain, read-only
+  # static file server over the same directory, internal-network-only.
+  catalog-files:
+    image: nginx:alpine
+    container_name: catalog-files
+    restart: unless-stopped
+    volumes:
+      - ./file-onboarding-and-catalog-publish/data/beckn:/usr/share/nginx/html:ro
+    networks:
+      - beckn
+
   # ─── Discovery Service ─────────────────────────────────────────────────────
   # Real Go /discover implementation (textSearch/filters/spatial intent
-  # matching) — replaces the old mock-cds Python stub. Polls bpp's own
-  # dashboard API for catalog data (internal/catalogsource, see its own
-  # CONTEXT.md D17); no persistent storage of its own. See
-  # discovery-service/README.md and CONTEXT.md for the full design.
+  # matching) — replaces the old mock-cds Python stub. Crawls real,
+  # signed Provider Node catalog index/baseline/change files
+  # (internal/dedicrawl, see its own CONTEXT.md D19); no persistent
+  # storage of its own. See discovery-service/README.md and CONTEXT.md
+  # for the full design.
   discovery-service:
     build:
       context: ./discovery-service
@@ -219,6 +237,8 @@ services:
     restart: unless-stopped
     depends_on:
       bpp:
+        condition: service_started
+      catalog-files:
         condition: service_started
     environment:
       PORT: "8087"
@@ -233,9 +253,15 @@ services:
       SIGNING_PRIVATE_KEY_BASE64: ${DS_SIGNING_PRIVATE_KEY_BASE64}
       SIGNING_KEY_ID: ${DS_SIGNING_KEY_ID}
 
-      # Polls bpp-application's own dashboard API for real catalog data —
-      # see discovery-service's own CONTEXT.md D17.
-      CATALOG_SOURCE_URLS: http://bpp:8080
+      # Crawls real, signed Provider Node catalog index/baseline/change
+      # files this reference-app's OWN bpp actually publishes — see
+      # discovery-service's own CONTEXT.md D19. bpp forwards every catalog
+      # publish to onix-catalog-publish (CDS_PUBLISH_URL below), which
+      # writes real index/baseline/change files under
+      # file-onboarding-and-catalog-publish/data/beckn/; catalog-files (an
+      # nginx static server over that same directory) is what makes that
+      # reachable over HTTP for this crawler.
+      CATALOG_INDEX_URLS: http://catalog-files/index/becknCatalogs.index.json
       CATALOG_REFRESH_INTERVAL_SECONDS: "10"
     ports:
       - "8087:8087"
