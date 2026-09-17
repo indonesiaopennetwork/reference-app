@@ -12,7 +12,7 @@ import (
 // RETIRED lifecycle transition (§10.1/§10.5) can never be reversed by a
 // later crawl that simply omits the entry.
 type cursorEntry struct {
-	entryVersion string
+	entryVersion int
 	isActive     bool
 	retired      bool
 	catalog      beckn.Catalog

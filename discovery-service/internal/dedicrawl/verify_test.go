@@ -2,43 +2,14 @@ package dedicrawl
 
 import "testing"
 
-func TestCanonicalizeJCS_IsDeterministicRegardlessOfFieldOrder(t *testing.T) {
-	type pair struct {
-		B int `json:"b"`
-		A int `json:"a"`
-	}
-	got1, err := CanonicalizeJCS(pair{B: 2, A: 1})
-	if err != nil {
-		t.Fatalf("canonicalize: %v", err)
-	}
-	got2, err := CanonicalizeJCS(map[string]int{"b": 2, "a": 1})
-	if err != nil {
-		t.Fatalf("canonicalize: %v", err)
-	}
-	if string(got1) != string(got2) {
-		t.Fatalf("canonical forms differ: %q vs %q", got1, got2)
-	}
-	if string(got1) != `{"a":1,"b":2}` {
-		t.Fatalf("unexpected canonical form: %q", got1)
-	}
-}
-
-func TestVerifyDetached_AcceptsValidSignatureRejectsTampered(t *testing.T) {
-	priv, pub := mustKeyPair(t)
-	content := []byte(`{"a":1}`)
-	sig := signDetached(priv, content)
-
-	if err := VerifyDetached(pub, content, sig); err != nil {
-		t.Fatalf("expected valid signature to verify, got %v", err)
-	}
-
-	if err := VerifyDetached(pub, []byte(`{"a":2}`), sig); err == nil {
-		t.Fatal("expected tampered content to fail verification")
-	}
-
-	_, otherPub := mustKeyPair(t)
-	if err := VerifyDetached(otherPub, content, sig); err == nil {
-		t.Fatal("expected signature from a different key to fail verification")
+func TestDigest_MatchesRealObservedFormat(t *testing.T) {
+	// "sha-256:" + hex(SHA-256(content)) — confirmed against a real,
+	// live catalog file's own declared digest (see CONTEXT.md D19), not
+	// derived from the spec's original (BLAKE2b-512) choice.
+	content := []byte("hello world")
+	want := "sha-256:b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+	if got := Digest(content); got != want {
+		t.Fatalf("Digest(%q) = %q, want %q", content, got, want)
 	}
 }
 

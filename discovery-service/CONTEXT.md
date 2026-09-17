@@ -699,6 +699,77 @@ that, not M3 itself.
   `-race` clean. Verified live against both a local run and the production
   container (`textSearch=aniket` correctly narrows 4 real catalogs to 1).
 
+**D19 — Replaced `internal/catalogsource` (D17) with `internal/dedicrawl`
+crawling real, directly-configured catalog index URLs (2026-09-17).** D17's
+approach (polling a BPP's internal dashboard API, `GET /api/v1/catalogs`)
+turned out architecturally wrong for real deployment, not just fragile: a
+consuming deployment added Zitadel seller-auth to that whole route group,
+and even with a valid token that endpoint is scoped to one logged-in
+seller's own catalogs — there's no way for it to ever return "every
+provider's published catalogs." The actually-correct model, confirmed
+against a real, live, reachable endpoint
+(`https://bpp-backend2.ion-ref-app.ayushmatha.in/index/becknCatalogs.index.json`)
+during this investigation, is exactly what `internal/dedicrawl` (built
+earlier, never wired in) already assumed: Provider Nodes publish signed,
+versioned catalog files as static, bucket/CDN-hosted objects — a real
+index file, its baseline/change files, no live app-server query at all.
+
+- **Confirmed by direct testing against real files, not guessed**: content
+  digest is `"sha-256:" + hex(SHA-256(decompressed content))` — matched
+  independently on two different real hosted catalogs. This is NOT what
+  the original spec-reading assumed (`BLAKE2b-512=` + base64) — `verify.go`
+  rewritten accordingly (`digestPrefix = "sha-256:"`, `crypto/sha256`
+  instead of `blake2b`). Files are also genuinely `.json.gz` — `crawl.go`'s
+  `fetchBytes` now auto-detects gzip's magic bytes and decompresses
+  transparently, since no `Content-Encoding` header announces it.
+- **Real shape also differs from what `types.go` originally assumed** (all
+  fixed to match the live file, verified by `TestCatalogIndex_ParsesRealObservedShape`):
+  index top-level key is `"catalogs"`, not `"entries"` (silently parsed as
+  empty before — the exact kind of bug that would hide this problem);
+  `entryVersion`/`version` are JSON numbers, not strings; `"signature"` is
+  an object (`{keyId, value[, canonicalization]}`), not a plain string.
+- **Signature verification is NOT implemented, and this is a known,
+  deliberate gap, not an oversight.** The real `keyId` values observed on
+  live index/catalog file signatures (`76EU84fDLE...`, CORD-network-style
+  identifiers) don't decode as a plain base64/base58 Ed25519 public key by
+  any means found during this investigation — a self-hosted registry file
+  at `https://<domain>/dedi/ion-scratch-registry.json` gave a JOSE-style
+  key that also failed to verify the catalog file's own signature under
+  standard JCS-canonicalized Ed25519. Without a known-correct decoding for
+  that keyId, there's no way to verify these signatures yet. Only each
+  file's content `Digest` is checked — this means a compromised or
+  malicious index URL's HTTPS endpoint could serve tampered-but-internally-
+  consistent data undetected. Revisit once the real signing scheme is
+  confirmed.
+- **No Registry/Manifest/SubscriberRecord resolution.** The earlier design
+  (and the abandoned D21 plan before it) assumed discovery-service would
+  resolve a subscriber's catalog index URL(s) via a live DeDi registry
+  lookup. No such registry integration exists in this codebase, and one
+  wasn't built for this change either — `CATALOG_INDEX_URLS` is a directly
+  configured list of index URLs instead (simplest path that's provably
+  correct today, per the live endpoint test above). `registry.go`,
+  `DediManifest`, and `SubscriberRecord` are deleted; `Crawler.CrawlAll`
+  takes `[]string` index URLs directly, no registry/subscriber-record
+  layer in between.
+- `internal/config`: `CatalogSourceURLs`/`CATALOG_SOURCE_URLS` renamed to
+  `CatalogIndexURLs`/`CATALOG_INDEX_URLS`; `main.go`'s `buildCatalogStore`
+  now builds a `dedicrawl.Crawler`/`Store` instead of
+  `catalogsource.HTTPSource`/`Store`. `internal/catalogsource` deleted
+  entirely (fully superseded, not kept alongside).
+- **Verified live**, not just against fixtures: a throwaway `cmd/` program
+  (removed after use) ran `dedicrawl.Crawler.CrawlAll` against the real
+  `bpp-backend2.ion-ref-app.ayushmatha.in` index URL above and correctly
+  returned one real catalog ("Ayu Outdoor Gear Store", 1 resource, 2
+  offers) — this is a genuine, live, third-party-hosted catalog, not a
+  test fixture.
+- Tests: `internal/dedicrawl`'s suite rewritten for the new shape (no more
+  signing/registry fixtures) plus new coverage: gzip decompression
+  (`TestCrawlAll_DecodesGzipCompressedFiles`) and the real observed index
+  shape (`TestCatalogIndex_ParsesRealObservedShape`). 112 tests across 12
+  packages pass, `-race` clean (down from 120/13 — `internal/catalogsource`
+  and its tests are gone; `internal/dedicrawl` gained tests but lost its
+  signature-focused ones, which no longer apply).
+
 ## 5. Milestone plan (TDD, step by step)
 
 1. **M1 — Contract skeleton — DONE, then hardened for concurrency

@@ -1,26 +1,24 @@
 package dedicrawl
 
 import (
-	"encoding/json"
 	"testing"
 
 	"github.com/remiges-tushar/discovery-service/internal/beckn"
 )
 
-func TestCrawlSubscriber_AppliesChangeFileChain(t *testing.T) {
-	registryPriv, _ := mustKeyPair(t)
-	subscriberPriv, subscriberPub := mustKeyPair(t)
-
+func TestCrawlAll_AppliesChangeFileChain(t *testing.T) {
 	baselineCatalog := sampleCatalog("cat-5")
-	file, rawFile := signedCatalogFile(t, subscriberPriv, CatalogFile{CatalogID: "cat-5", Version: "v1", Catalog: baselineCatalog})
+	file := CatalogFile{CatalogID: "cat-5", Version: 1, Catalog: baselineCatalog}
+	rawFile := marshalFile(t, file)
 
 	newResource := beckn.Resource{ID: "res-2", Descriptor: beckn.Descriptor{Name: "Resource Two"}}
-	change, rawChange := signedChangeFile(t, subscriberPriv, CatalogChangeFile{
+	change := CatalogChangeFile{
 		CatalogID:   "cat-5",
-		FromVersion: "v1",
-		ToVersion:   "v2",
+		FromVersion: 1,
+		ToVersion:   2,
 		Resources:   ResourceDelta{Upserts: []beckn.Resource{newResource}, Removals: []string{"res-1"}},
-	})
+	}
+	rawChange := marshalFile(t, change)
 
 	srv := fileServer(t, map[string][]byte{
 		"/baseline.json": rawFile,
@@ -30,94 +28,82 @@ func TestCrawlSubscriber_AppliesChangeFileChain(t *testing.T) {
 	baseline := FileRef{Version: file.Version, URL: srv.URL + "/baseline.json", Size: int64(len(rawFile)), Digest: Digest(rawFile)}
 	changeRef := ChangeRef{FromVersion: change.FromVersion, ToVersion: change.ToVersion, URL: srv.URL + "/change.json", Size: int64(len(rawChange)), Digest: Digest(rawChange)}
 
-	entryV1 := signedIndexEntry(t, subscriberPriv, IndexEntry{
-		CatalogID: "cat-5", EntryVersion: "v1", CatalogType: CatalogTypeRegular, IsActive: true, Baseline: baseline,
-	})
-	entryV2 := signedIndexEntry(t, subscriberPriv, IndexEntry{
-		CatalogID: "cat-5", EntryVersion: "v2", CatalogType: CatalogTypeRegular, IsActive: true,
+	entryV1 := IndexEntry{CatalogID: "cat-5", EntryVersion: 1, CatalogType: CatalogTypeRegular, IsActive: true, Baseline: baseline}
+	entryV2 := IndexEntry{
+		CatalogID: "cat-5", EntryVersion: 2, CatalogType: CatalogTypeRegular, IsActive: true,
 		Baseline: baseline, Changes: []ChangeRef{changeRef},
-	})
+	}
 
-	var currentIndex []byte
-	rawIndexV1, _ := json.Marshal(CatalogIndex{Entries: []IndexEntry{entryV1}})
-	rawIndexV2, _ := json.Marshal(CatalogIndex{Entries: []IndexEntry{entryV2}})
-	currentIndex = rawIndexV1
+	rawIndexV1 := marshalFile(t, CatalogIndex{NodeID: "pn-5", Catalogs: []IndexEntry{entryV1}})
+	rawIndexV2 := marshalFile(t, CatalogIndex{NodeID: "pn-5", Catalogs: []IndexEntry{entryV2}})
+	currentIndex := rawIndexV1
 	indexSrv := fileServerDynamic(t, "/idx.json", func() []byte { return currentIndex })
+	indexURL := indexSrv.URL + "/idx.json"
 
-	record := digestedSubscriberRecord(t, SubscriberRecord{SubscriberID: "pn-5", CatalogIndexURLs: []string{indexSrv.URL + "/idx.json"}})
-	registry := NewStubRegistry(registryPriv)
-	registry.Seed("pn-5", record, subscriberPub)
 	// High cutover fraction so a small change file is never treated as
 	// bigger than the baseline, keeping this test focused on chain
 	// application rather than the cutover rule (covered separately).
-	crawler := NewCrawler(registry, "", srv.Client(), testLogger(), nil, nil, 0.99)
+	crawler := NewCrawler(srv.Client(), testLogger(), nil, nil, 0.99)
 
-	if err := crawler.CrawlSubscriber(t.Context(), "pn-5"); err != nil {
-		t.Fatalf("baseline crawl: %v", err)
+	if _, anySuccess := crawler.CrawlAll(t.Context(), []string{indexURL}); !anySuccess {
+		t.Fatal("baseline crawl should succeed")
 	}
 
 	currentIndex = rawIndexV2
-	if err := crawler.CrawlSubscriber(t.Context(), "pn-5"); err != nil {
-		t.Fatalf("change-file crawl: %v", err)
+	catalogs, anySuccess := crawler.CrawlAll(t.Context(), []string{indexURL})
+	if !anySuccess {
+		t.Fatal("change-file crawl should succeed")
 	}
 
-	got := crawler.cursor.snapshot()
-	if len(got) != 1 {
-		t.Fatalf("expected exactly one catalog, got %+v", got)
+	if len(catalogs) != 1 {
+		t.Fatalf("expected exactly one catalog, got %+v", catalogs)
 	}
-	cat := got[0]
+	cat := catalogs[0]
 	if len(cat.Resources) != 1 || cat.Resources[0].ID != "res-2" {
 		t.Fatalf("expected res-1 removed and res-2 upserted, got resources %+v", cat.Resources)
 	}
 }
 
-func TestCrawlSubscriber_CutoverRuleFetchesBaselineWhenChangesTooLarge(t *testing.T) {
-	registryPriv, _ := mustKeyPair(t)
-	subscriberPriv, subscriberPub := mustKeyPair(t)
-
-	file, rawFile := signedCatalogFile(t, subscriberPriv, CatalogFile{CatalogID: "cat-6", Version: "v1", Catalog: sampleCatalog("cat-6")})
+func TestCrawlAll_CutoverRuleFetchesBaselineWhenChangesTooLarge(t *testing.T) {
+	file := CatalogFile{CatalogID: "cat-6", Version: 1, Catalog: sampleCatalog("cat-6")}
+	rawFile := marshalFile(t, file)
 	// An oversized change file's declared Size will exceed the cutover
 	// threshold even though its real byte length is small — Size is a
 	// declared index value, not independently re-measured by the crawler.
-	_, rawChange := signedChangeFile(t, subscriberPriv, CatalogChangeFile{
-		CatalogID: "cat-6", FromVersion: "v1", ToVersion: "v2",
-	})
+	rawChange := marshalFile(t, CatalogChangeFile{CatalogID: "cat-6", FromVersion: 1, ToVersion: 2})
 
 	srv := fileServer(t, map[string][]byte{"/baseline.json": rawFile, "/change.json": rawChange})
 	baseline := FileRef{Version: file.Version, URL: srv.URL + "/baseline.json", Size: 10, Digest: Digest(rawFile)}
-	changeRef := ChangeRef{FromVersion: "v1", ToVersion: "v2", URL: srv.URL + "/change.json", Size: 100, Digest: Digest(rawChange)}
+	changeRef := ChangeRef{FromVersion: 1, ToVersion: 2, URL: srv.URL + "/change.json", Size: 100, Digest: Digest(rawChange)}
 
-	entryV1 := signedIndexEntry(t, subscriberPriv, IndexEntry{CatalogID: "cat-6", EntryVersion: "v1", CatalogType: CatalogTypeRegular, IsActive: true, Baseline: baseline})
-	entryV2 := signedIndexEntry(t, subscriberPriv, IndexEntry{CatalogID: "cat-6", EntryVersion: "v2", CatalogType: CatalogTypeRegular, IsActive: true, Baseline: baseline, Changes: []ChangeRef{changeRef}})
+	entryV1 := IndexEntry{CatalogID: "cat-6", EntryVersion: 1, CatalogType: CatalogTypeRegular, IsActive: true, Baseline: baseline}
+	entryV2 := IndexEntry{CatalogID: "cat-6", EntryVersion: 2, CatalogType: CatalogTypeRegular, IsActive: true, Baseline: baseline, Changes: []ChangeRef{changeRef}}
 
-	var currentIndex []byte
-	rawIndexV1, _ := json.Marshal(CatalogIndex{Entries: []IndexEntry{entryV1}})
-	rawIndexV2, _ := json.Marshal(CatalogIndex{Entries: []IndexEntry{entryV2}})
-	currentIndex = rawIndexV1
+	rawIndexV1 := marshalFile(t, CatalogIndex{NodeID: "pn-6", Catalogs: []IndexEntry{entryV1}})
+	rawIndexV2 := marshalFile(t, CatalogIndex{NodeID: "pn-6", Catalogs: []IndexEntry{entryV2}})
+	currentIndex := rawIndexV1
 	indexSrv := fileServerDynamic(t, "/idx.json", func() []byte { return currentIndex })
+	indexURL := indexSrv.URL + "/idx.json"
 
-	record := digestedSubscriberRecord(t, SubscriberRecord{SubscriberID: "pn-6", CatalogIndexURLs: []string{indexSrv.URL + "/idx.json"}})
-	registry := NewStubRegistry(registryPriv)
-	registry.Seed("pn-6", record, subscriberPub)
 	// cutoverFraction=0.5: change Size (100) far exceeds 0.5*baseline Size (5) -> must fetch baseline.
-	crawler := NewCrawler(registry, "", srv.Client(), testLogger(), nil, nil, 0.5)
+	crawler := NewCrawler(srv.Client(), testLogger(), nil, nil, 0.5)
 
-	if err := crawler.CrawlSubscriber(t.Context(), "pn-6"); err != nil {
-		t.Fatalf("baseline crawl: %v", err)
+	if _, anySuccess := crawler.CrawlAll(t.Context(), []string{indexURL}); !anySuccess {
+		t.Fatal("baseline crawl should succeed")
 	}
 	currentIndex = rawIndexV2
-	if err := crawler.CrawlSubscriber(t.Context(), "pn-6"); err != nil {
-		t.Fatalf("cutover crawl: %v", err)
+	catalogs, anySuccess := crawler.CrawlAll(t.Context(), []string{indexURL})
+	if !anySuccess {
+		t.Fatal("cutover crawl should succeed")
 	}
 
-	got := crawler.cursor.snapshot()
-	if len(got) != 1 || got[0].ID != "cat-6" {
-		t.Fatalf("expected cat-6 present via baseline fallback, got %+v", got)
+	if len(catalogs) != 1 || catalogs[0].ID != "cat-6" {
+		t.Fatalf("expected cat-6 present via baseline fallback, got %+v", catalogs)
 	}
 	// The baseline (not the empty-delta change file) must have been used,
 	// so the original resource is still present.
-	if len(got[0].Resources) != 1 || got[0].Resources[0].ID != "res-1" {
-		t.Fatalf("expected baseline content (res-1 present), got resources %+v", got[0].Resources)
+	if len(catalogs[0].Resources) != 1 || catalogs[0].Resources[0].ID != "res-1" {
+		t.Fatalf("expected baseline content (res-1 present), got resources %+v", catalogs[0].Resources)
 	}
 }
 

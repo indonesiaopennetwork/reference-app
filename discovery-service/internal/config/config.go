@@ -128,20 +128,21 @@ type Config struct {
 	// (created→expires).
 	SigningValidity time.Duration
 
-	// CatalogSourceURLs is a list of BPP base URLs (e.g.
-	// "http://bpp-application:8080" in Docker, a Cloud Run URL in
-	// production) discovery-service polls for real catalog data — see
-	// CONTEXT.md D17. Each entry must expose the same dashboard-style
-	// GET /api/v1/catalogs and GET /api/v1/catalogs/{id} endpoints
-	// internal/catalogsource maps into beckn.Catalog. Empty by default:
-	// with no sources configured, the embedded demo catalog
-	// (data/catalog.json) is served instead, unchanged from M1.
-	CatalogSourceURLs []string
-	// CatalogRefreshInterval is how often each configured source is
-	// re-polled in the background after the initial fetch.
+	// CatalogIndexURLs is a list of Provider Node catalog index URLs
+	// (e.g. "https://bpp.example.com/index/becknCatalogs.index.json")
+	// discovery-service crawls for real catalog data — see CONTEXT.md
+	// D19 (internal/dedicrawl). Each entry must expose the real,
+	// spec-shaped index/baseline/change-file documents that package maps
+	// into beckn.Catalog (plain or gzip-compressed; digest-verified but
+	// NOT signature-verified — see internal/dedicrawl's package doc).
+	// Empty by default: with no sources configured, the embedded demo
+	// catalog (data/catalog.json) is served instead, unchanged from M1.
+	CatalogIndexURLs []string
+	// CatalogRefreshInterval is how often each configured index URL is
+	// re-crawled in the background after the initial fetch.
 	CatalogRefreshInterval time.Duration
-	// CatalogFetchTimeout bounds a single HTTP call (list or detail) to a
-	// catalog source.
+	// CatalogFetchTimeout bounds a single HTTP call (index, baseline, or
+	// change file) to a catalog source.
 	CatalogFetchTimeout time.Duration
 }
 
@@ -185,7 +186,7 @@ func Load() Config {
 		SigningKeyID:            getString("SIGNING_KEY_ID", defaultSigningKeyID),
 		SigningValidity:         getSeconds("SIGNING_VALIDITY_SECONDS", defaultSigningValidity),
 
-		CatalogSourceURLs:      getStringSlice("CATALOG_SOURCE_URLS"),
+		CatalogIndexURLs:       getStringSlice("CATALOG_INDEX_URLS"),
 		CatalogRefreshInterval: getSeconds("CATALOG_REFRESH_INTERVAL_SECONDS", defaultCatalogRefreshInterval),
 		CatalogFetchTimeout:    getSeconds("CATALOG_FETCH_TIMEOUT_SECONDS", defaultCatalogFetchTimeout),
 	}
