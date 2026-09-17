@@ -4,7 +4,7 @@
 
 terraform {
   backend "gcs" {
-    bucket = "ion-sandbox-001-tfstate"
+    bucket = "zitadel-502511-tfstate"
     prefix = "beckn-app"
   }
 }

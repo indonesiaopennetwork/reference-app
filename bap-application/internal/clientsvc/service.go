@@ -18,6 +18,7 @@ import (
 
 	dbsqlc "github.com/ion/winroom/bap/db/sqlc"
 	"github.com/ion/winroom/bap/internal/config"
+	"github.com/ion/winroom/bap/internal/httpclient"
 )
 
 type ClientService struct {
@@ -32,9 +33,7 @@ func NewClientService(pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.Log
 		pool: pool,
 		cfg:  cfg,
 		lh:   lh,
-		client: &http.Client{
-			Timeout: 10 * time.Second,
-		},
+		client: httpclient.New(10 * time.Second),
 	}
 }
 
