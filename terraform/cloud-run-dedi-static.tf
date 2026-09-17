@@ -54,17 +54,17 @@ resource "google_cloud_run_v2_service" "dedi_static" {
       }
 
       # server_name values for nginx's host-based virtual routing — see
-      # nginx.conf.template. dedi_domain/dedi_domain_www share one server
+      # nginx.conf.template. bpp_domain/bpp_domain_www share one server
       # block; bap_domain gets its own (it's a separate hub, routing
       # /bap/receiver/ to onix-bap and everything else to bap directly).
       env {
         name  = "DEDI_DOMAIN"
-        value = var.dedi_domain
+        value = var.bpp_domain
       }
 
       env {
         name  = "DEDI_DOMAIN_WWW"
-        value = var.dedi_domain_www
+        value = var.bpp_domain_www
       }
 
       env {

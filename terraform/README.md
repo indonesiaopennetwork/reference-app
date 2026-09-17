@@ -68,9 +68,9 @@ URLs and the new instances' addresses.
   `cloud-run-wiring.tf` (a `null_resource` + `gcloud run services update`)
   once every service's URL is known. This step re-runs on every
   `terraform apply` (deliberately — see Gotchas).
-- **Public access**: all six services plus `onix-catalog-publish` grant
-  `roles/run.invoker` to `allUsers` — no auth. Documented tradeoff, not an
-  oversight; see `iam-invoker.tf`.
+- **Public access**: every service (including `zitadel` and
+  `onix-catalog-publish`) grants `roles/run.invoker` to `allUsers` — no auth.
+  Documented tradeoff, not an oversight; see `iam-invoker.tf`.
 - **Network identity**: `BAP_ID`/`BPP_ID` (context.bapId/bppId in every
   outbound message) and the onix keyManager's `NETWORK_PARTICIPANT` share
   the *same* Terraform variable (`var.bap_id`/`var.bpp_id` — see
@@ -201,6 +201,16 @@ inspecting Cloud SQL.
     (`docker build`/`docker push` directly, or a full `build-and-push.sh`
     run) before applying it. Hit this adding `onix-catalog-publish` and
     `dedi-static-server`.
+
+## Zitadel-specific notes (design assumptions — verify at first apply, not yet confirmed in practice)
+
+Unlike the gotchas above, these are things `cloud-run-zitadel.tf` assumes rather than things already proven working end-to-end on a real deploy — call them out explicitly if you hit something different:
+
+- **Reuses the `trade` Postgres user/password for Zitadel's database** (both the regular *and* admin connection — see `ZITADEL_DATABASE_POSTGRES_USER_*`/`_ADMIN_*` env vars), rather than a dedicated user. Assumption: Cloud SQL Postgres users get the instance-wide `cloudsqlsuperuser` role, so `trade` should have sufficient DDL rights on the new `zitadel` database the same way it already does on `trade_bap`/`trade_bpp`. If Zitadel's own setup fails with a permissions error, run `ALTER DATABASE zitadel OWNER TO trade;` against the instance (Cloud SQL Studio, see "Inspecting the Cloud SQL instance" below) and re-apply.
+- **Discrete `ZITADEL_DATABASE_POSTGRES_*` env vars, not the single `ZITADEL_DATABASE_POSTGRES_DSN` docker-compose uses** — confirmed against Zitadel's own config key paths (`Database.postgres.Host`/`.User.Username`/`.User.Password`/`.User.SSL.Mode`, and the `.Admin.*` equivalents), necessary because Secret Manager injects one value per env var and Cloud Run can't compose a literal prefix + a secret reference into a single string.
+- **`--masterkeyFromEnv` instead of docker-compose's `--masterkey <value>` flag** — confirmed supported by running `--help` against the pinned image (`ghcr.io/zitadel/zitadel:v4.17.3` at the time this was written); reads `ZITADEL_MASTERKEY` as an env var instead, since Cloud Run can't inject a secret into a literal `args` string.
+- **No `ZITADEL_INTERNAL_URL` on `bap`/`bpp`** (unlike docker-compose) — every Cloud Run service in this deployment uses `INGRESS_TRAFFIC_ALL` and calls each other via their normal public `.uri`, so there's no docker-network-style "can't reach my own host-published port" problem to work around. `ZITADEL_ISSUER` alone is enough; both apps' `config.go` already default the internal URL to equal it when unset.
+- **The Cloud Run `startup_probe` on the zitadel container is a plain TCP check on port 8080**, not an HTTP health-endpoint check — simpler and safer than guessing at Zitadel's exact health-check path, but slower to detect a container that's listening but not actually healthy. Tighten this to an HTTP probe against Zitadel's readiness endpoint if that turns out to matter in practice.
 
 ## Verification
 

@@ -7,7 +7,13 @@ resource "google_cloud_run_v2_service" "bpp" {
   location            = var.region
   ingress             = "INGRESS_TRAFFIC_ALL"
   deletion_protection = false
-  depends_on          = [google_project_service.apis, google_compute_subnetwork_iam_member.network_user, google_secret_manager_secret_iam_member.accessor, google_sql_database_instance.postgres]
+  # google_secret_manager_secret_version.postgres_password is listed
+  # explicitly (not just implied by the DB_PASSWORD env block below, which
+  # references the secret CONTAINER, not this VERSION resource) so a
+  # targeted apply can't create this service before the password has a
+  # value -- see the longer comment on the same pattern in
+  # cloud-run-zitadel.tf.
+  depends_on = [google_project_service.apis, google_compute_subnetwork_iam_member.network_user, google_secret_manager_secret_iam_member.accessor, google_sql_database_instance.postgres, google_secret_manager_secret_version.postgres_password]
 
   template {
     service_account = google_service_account.cloud_run_sa.email
@@ -97,7 +103,21 @@ resource "google_cloud_run_v2_service" "bpp" {
       }
       env {
         name  = "CATALOG_BASE_URL"
-        value = "https://${var.dedi_domain}"
+        value = "https://${var.bpp_domain}"
+      }
+      env {
+        # Seller login (see bpp-application/internal/auth) -- no
+        # ZITADEL_INTERNAL_URL needed, unlike docker-compose: every Cloud
+        # Run service here is called via its normal public URL, config.go
+        # already defaults the internal URL to equal this when unset.
+        name  = "ZITADEL_ISSUER"
+        value = "https://${var.zitadel_domain}"
+      }
+      env {
+        # CORS exception on POST /api/v1/auth/bootstrap -- see
+        # bpp-application/internal/server/server.go's registerAuthRoutes.
+        name  = "LANDING_PAGE_ORIGIN"
+        value = "https://${var.landing_page_domain}"
       }
       env {
         name = "BPP_PRIVATE_KEY"

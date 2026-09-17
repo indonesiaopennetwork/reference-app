@@ -79,16 +79,20 @@ task deploy:state-bucket PROJECT_ID=<YOUR_PROJECT_ID> REGION=<YOUR_REGION>
 ### 2. Create `terraform/terraform.tfvars`
 
 Not committed (already git-ignored). At minimum, override `project_id` and
-supply the five identity variables that have no default:
+supply the five identity variables that have no default, plus the Zitadel
+admin account (the seven domain variables, including `zitadel_domain`, are
+covered separately below — see "Custom domains"):
 
 ```hcl
 # terraform/terraform.tfvars
-project_id       = "<YOUR_PROJECT_ID>"
-region           = "<YOUR_REGION>"
-bap_id           = "<your registered onix-bap identity>"
-bpp_id           = "<your registered onix-bpp identity>"
-network_id       = "<your registry's network id>"
-cds_discover_url = "<your registry's discover URL>"
+project_id             = "<YOUR_PROJECT_ID>"
+region                 = "<YOUR_REGION>"
+bap_id                 = "<your registered onix-bap identity>"
+bpp_id                 = "<your registered onix-bpp identity>"
+network_id             = "<your registry's network id>"
+cds_discover_url       = "<your registry's discover URL>"
+zitadel_admin_username = "admin"
+zitadel_admin_email    = "<your email>"
 ```
 
 There's no `cds_publish_url` to supply — `bpp`'s `CDS_PUBLISH_URL` points at
@@ -108,16 +112,16 @@ task deploy:bootstrap-apis
 Terraform generates itself). Use values for the identity you registered in
 the prerequisites — `BAP_PRIVATE_KEY`/`BAP_KEY_ID` **must** be the same
 keypair/identity as `BAP_ONIX_SIGNING_PRIVATE_KEY`/`BAP_ONIX_KEY_ID` (same
-rule for bpp) — there's exactly one registered identity per side:
+rule for bpp) — there's exactly one registered identity per side.
 
+Copy the example file and fill in your real values:
 ```sh
-PROJECT_ID=<YOUR_PROJECT_ID> \
-  BAP_PRIVATE_KEY=... BAP_KEY_ID=... BPP_PRIVATE_KEY=... BPP_KEY_ID=... \
-  BAP_ONIX_KEY_ID=... BAP_ONIX_SIGNING_PRIVATE_KEY=... BAP_ONIX_SIGNING_PUBLIC_KEY=... \
-  BAP_ONIX_ENCR_PRIVATE_KEY=... BAP_ONIX_ENCR_PUBLIC_KEY=... \
-  BPP_ONIX_KEY_ID=... BPP_ONIX_SIGNING_PRIVATE_KEY=... BPP_ONIX_SIGNING_PUBLIC_KEY=... \
-  BPP_ONIX_ENCR_PRIVATE_KEY=... BPP_ONIX_ENCR_PUBLIC_KEY=... \
-  ../scripts/seed-secrets.sh
+cp scripts/seed-secrets.env.example scripts/seed-secrets.env
+```
+Open `scripts/seed-secrets.env` and set all 14 values. This file is
+gitignored — never commit it with real values filled in. Then run:
+```sh
+task deploy:seed-secrets PROJECT_ID=<YOUR_PROJECT_ID>
 ```
 
 ### 5. Build and push all 12 images
@@ -134,6 +138,62 @@ it's sequenced as its own targeted apply:
 ```sh
 task deploy:infra
 ```
+
+### 6b. Bootstrap Zitadel
+
+`bap`/`bpp` both require a reachable Zitadel to start (see
+[terraform/cloud-run-zitadel.tf](terraform/cloud-run-zitadel.tf) — `bpp`
+treats an unreachable Zitadel as fatal, `bap` degrades gracefully but buyer
+login won't work), so this has to happen before step 7. `zitadel_domain`
+needs the same Search Console verification as the other custom domains —
+see "Custom domains" below.
+
+**1. Apply Zitadel — all three targets together.** The IAM invoker binding
+is easy to miss (it's a separate resource, not a dependency of the service
+or the domain mapping) but Zitadel is unreachable without it:
+```sh
+cd terraform
+terraform apply \
+  -target=google_cloud_run_v2_service.zitadel \
+  -target=google_cloud_run_domain_mapping.zitadel \
+  -target='google_cloud_run_v2_service_iam_member.public_invoker["zitadel"]'
+cd ..
+```
+
+**2. Wait for DNS + the managed TLS cert to be ready** (can take up to ~60
+min, same as the DeDi custom domain below). Poll until this prints `OK`:
+```sh
+curl -sf https://<your zitadel_domain>/.well-known/openid-configuration && echo OK
+```
+
+**3. Run the setup script**, passing `ZITADEL_ISSUER`/`LANDING_PAGE_URL`
+explicitly rather than letting it fall back to `terraform output` — targeted
+applies like step 1 above don't reliably populate every output (`terraform
+output zitadel_domain_url` can come back "not found" even after a
+successful apply), so passing these directly avoids a confusing detour:
+```sh
+PROJECT_ID=<YOUR_PROJECT_ID> \
+  ZITADEL_ISSUER=https://<your zitadel_domain> \
+  LANDING_PAGE_URL=https://<your landing_page_domain> \
+  ./scripts/setup-zitadel-cloud.sh
+```
+
+**4.** The script prints a `zitadel_client_id = "..."` line — put that in
+`terraform/terraform.tfvars` (it defaults to a non-working placeholder, so
+`landing-page`'s login link is broken until you do this).
+
+**Troubleshooting:**
+- *Setup script times out "waiting for Zitadel to be ready"* — almost
+  always the IAM invoker binding from step 1 wasn't actually applied.
+  Confirm directly with the `curl` command from step 2; a `403 Forbidden`
+  page from `Google Frontend` (not from Zitadel itself) confirms it, then
+  re-run step 1.
+- *Zitadel's own logs show `password authentication failed for user
+  "trade"`* — `google_sql_user.trade`'s password has drifted from what's in
+  the `postgres-password` secret (this can happen if `google_sql_user.trade`
+  was never applied before `random_password.postgres` got generated in a
+  targeted apply). Fix: `terraform apply -target=google_sql_user.trade` to
+  resync, then retry step 1.
 
 ### 7. First full apply — expect it to fail on `bap`/`bpp`
 
@@ -156,7 +216,14 @@ task deploy:migrate
 task deploy:full-apply
 ```
 
-`bap`/`bpp` should now start successfully against the real schema.
+`bap`/`bpp` should now start successfully against the real schema, and
+`landing-page` picks up the real `zitadel_client_id` from step 6b.
+
+**Next:** once `bap`/`bpp` are confirmed up, do the
+["Custom domain for DeDi discovery files"](#custom-domain-for-dedi-discovery-files-required-for-real-network-participation)
+section below — it's required for actually participating on the network,
+not optional, even though it has to come after this step (not before) for a
+real dependency reason explained there.
 
 For the full list of gotchas hit while building this deploy (secret
 propagation, image pinning, subnet sizing, and more), see
@@ -172,22 +239,36 @@ Open both URLs and confirm the SPA loads. Then seed some demo catalog data
 via [catalog-seed/](catalog-seed/) against the new `bpp_url` and try a
 discover flow end-to-end.
 
-## Custom domain for DeDi discovery files (optional)
+## Custom domain for DeDi discovery files (required for real network participation)
 
 `onix-catalog-publish` writes signed catalog files (`index/becknCatalogs.index.json`,
 `catalogs/*.json.gz`) to `outputRoot` on every "Publish to Network" click.
 `terraform/gcs-dedi-static.tf` and `terraform/cloud-run-dedi-static.tf` back
 that `outputRoot` with a public GCS bucket and a small nginx service
 (`dedi-static-server`), and `terraform/domain-mapping.tf` maps it onto a
-custom domain (`var.dedi_domain`/`var.dedi_domain_www`) so the discovery
+custom domain (`var.bpp_domain`/`var.bpp_domain_www`) so the discovery
 chain — `.well-known/dedi.index.json` → `dedi/ion-scratch-registry.json` →
 `index/becknCatalogs.index.json` → the catalog files themselves — is
-publicly reachable. The *feature* is optional (the rest of the deployment
-works without it, though `onix-catalog-publish`'s output has nowhere durable
-to go if you skip it) — but the underlying Terraform **resources are not
-conditional**, there's no flag to skip creating them. That means:
+publicly reachable. This is genuinely required, not optional, if you intend
+to actually transact on the network: other participants (and your own onix
+adapters' `dediregistry` plugin) resolve your registered identity through
+this self-hosted discovery chain, matching the "registered Beckn network
+identity" prerequisite at the top of this doc. The Terraform **resources
+are also not conditional** either way — there's no flag to skip creating
+them, so:
 
-**`dedi_domain`/`dedi_domain_www` have no default** — same treatment as
+**Why this section comes *after* step 9, not before it, even though it's a
+prerequisite conceptually:** `dedi-static-server`'s own config
+(`terraform/cloud-run-dedi-static.tf`) references `bap`/`bpp`/`onix-bap`/
+`onix-bpp`'s live Cloud Run URLs directly (`google_cloud_run_v2_service.bap.uri`
+etc.), so Terraform cannot create it until all four of those already exist
+with a real URL — which itself requires the DB schema to exist (step 8) and
+`bap`/`bpp` to have successfully started (step 9). This is a hard
+dependency in the Terraform graph, not a documentation-ordering choice —
+attempting this section before step 9 succeeds will just fail trying to
+resolve URLs for services that don't exist yet.
+
+**`bpp_domain`/`bpp_domain_www` have no default** — same treatment as
 `bap_id`/`bpp_id`/`network_id`/`cds_discover_url` above, and for the same
 reason: a hardcoded default pointing at *some* domain is exactly how you'd
 end up silently deploying against a domain you don't control. `terraform
@@ -203,7 +284,7 @@ Google account your `gcloud`/Terraform credentials use —
 
 **Deploy sequence:**
 
-1. Set `dedi_domain`/`dedi_domain_www` in `terraform.tfvars` — required,
+1. Set `bpp_domain`/`bpp_domain_www` in `terraform.tfvars` — required,
    `terraform plan` fails without them.
 2. Build and push the `dedi-static-server` image — it's included in step 5
    above if you're deploying fresh. If you're adding this to an
@@ -215,16 +296,19 @@ Google account your `gcloud`/Terraform credentials use —
    docker build -t <YOUR_REGION>-docker.pkg.dev/<YOUR_PROJECT_ID>/beckn-app/dedi-static-server:latest dedi-static-server/
    docker push <YOUR_REGION>-docker.pkg.dev/<YOUR_PROJECT_ID>/beckn-app/dedi-static-server:latest
    ```
-3. `terraform plan -out=dedi.tfplan && terraform apply dedi.tfplan`. If
-   `google_cloud_run_domain_mapping` fails with a region/availability error,
-   see the comment at the top of `terraform/domain-mapping.tf` — Cloud Run
-   domain mapping has historically had self-service limited to a subset of
-   regions.
+3. Create the bucket, `dedi-static-server`, and its two domain mappings:
+   ```sh
+   task deploy:dedi-static
+   ```
+   If `google_cloud_run_domain_mapping` fails with a region/availability
+   error, see the comment at the top of `terraform/domain-mapping.tf` —
+   Cloud Run domain mapping has historically had self-service limited to a
+   subset of regions.
 4. Get the DNS records and create them at your registrar (the one step I
    can't automate):
    ```sh
-   terraform output dedi_domain_dns_records
-   terraform output dedi_domain_www_dns_records
+   terraform output bpp_domain_dns_records
+   terraform output bpp_domain_www_dns_records
    ```
 5. Upload the two files that rarely change and aren't generated by anything
    in this repo. Put `dedi.index.json` and `ion-scratch-registry.json` in
@@ -281,23 +365,25 @@ this participant.
 
 **Update:** `BAP_URI`/`BPP_URI` (the in-band `context.bapUri`/`context.bppUri`
 fields on outbound messages) now *do* point at this same domain+path —
-`terraform/cloud-run-wiring.tf` sets them to `https://${var.dedi_domain}/bap/receiver/`
+`terraform/cloud-run-wiring.tf` sets them to `https://${var.bpp_domain}/bap/receiver/`
 / `.../bpp/receiver/`. This is required, not just cosmetic: other network
 participants POST callbacks to `{bapUri}/<action>` directly, and
 `bapTxnReceiver`/`bppTxnReceiver` only listen at `/bap/receiver/`/
 `/bpp/receiver/` (see `config/local-simple-bap.yaml`/`local-simple-bpp.yaml`)
 — a bare `bapUri` with no path would misroute every inbound callback.
 
-## Custom domains for bap, bap-frontend, bpp-frontend, and the landing page (optional)
+## Custom domains for bap, bap-frontend, bpp-frontend, landing page, and Zitadel (required)
 
 `terraform/domain-mapping.tf` also maps `bap` (`var.bap_domain`),
 `bap-frontend` (`var.bap_frontend_domain`), `bpp-frontend`
-(`var.bpp_frontend_domain`), and `landing-page` (`var.landing_page_domain`) to
-their own subdomains — same `google_cloud_run_domain_mapping` pattern,
-Search Console verification prerequisite, and **no-default treatment** as
-`dedi_domain` above: all four are required, `terraform plan` fails without
-them. Set all four in `terraform.tfvars` to subdomains you control before
-applying.
+(`var.bpp_frontend_domain`), `landing-page` (`var.landing_page_domain`), and
+`zitadel` (`var.zitadel_domain`) to their own subdomains — same
+`google_cloud_run_domain_mapping` pattern, Search Console verification
+prerequisite, and **no-default treatment** as `bpp_domain` above: all five
+are required, `terraform plan` fails without them (unlike the other four,
+`zitadel_domain` isn't really "optional" in practice — see step 6b above,
+`bpp` won't start without a working Zitadel). Set all five in
+`terraform.tfvars` to subdomains you control before applying.
 
 `bpp` intentionally does **not** get its own separate domain — it shares
 `dedi-static-server`'s domain instead, via one more `location` block in
@@ -321,13 +407,14 @@ reverse-proxy target, `var.bap_domain`), while on `bpp-frontend` it points at
 bap-frontend's own URL for the button — same name, different meaning
 depending on which service reads it.
 
-After applying, get the DNS records for the four new domains the same way as
-`dedi_domain`:
+After applying, get the DNS records for the five new domains the same way as
+`bpp_domain`:
 ```sh
 terraform output bap_domain_dns_records
 terraform output bap_frontend_domain_dns_records
 terraform output bpp_frontend_domain_dns_records
 terraform output landing_page_domain_dns_records
+terraform output zitadel_domain_dns_records
 ```
 
 ## Redeploy after a change
@@ -397,9 +484,10 @@ terraform apply redeploy.tfplan
 
 ### A secret value changed (key rotation, etc.)
 
-Reseed via `scripts/seed-secrets.sh`, then force a new revision on whatever
-service reads that secret — Secret Manager's `latest` doesn't propagate to
-an already-running instance. See
+Update the value in `scripts/seed-secrets.env` and reseed via
+`task deploy:seed-secrets PROJECT_ID=<YOUR_PROJECT_ID>`, then force a new
+revision on whatever service reads that secret — Secret Manager's `latest`
+doesn't propagate to an already-running instance. See
 [terraform/README.md's Gotcha #9](terraform/README.md#gotchas-actually-hit-doing-this-not-theoretical--each-one-broke-a-real-deploy).
 
 ## Keeping local and cloud in sync

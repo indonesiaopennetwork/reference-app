@@ -17,6 +17,7 @@ import (
 
 	dbsqlc "github.com/ion/winroom/bpp/db/sqlc"
 	"github.com/ion/winroom/bpp/internal/config"
+	"github.com/ion/winroom/bpp/internal/httpclient"
 )
 
 // defaultChannels is the BPP's configured support contact list returned to BAPs.
@@ -31,7 +32,7 @@ type Service struct {
 }
 
 func NewService(pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.Logger) *Service {
-	return &Service{pool: pool, cfg: cfg, lh: lh, httpClient: &http.Client{Timeout: 30 * time.Second}}
+	return &Service{pool: pool, cfg: cfg, lh: lh, httpClient: httpclient.New(30 * time.Second)}
 }
 
 // Process creates a support ticket in the DB and fires on_support to the BAP.

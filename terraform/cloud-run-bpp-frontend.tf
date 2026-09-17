@@ -31,7 +31,7 @@ resource "google_cloud_run_v2_service" "bpp_frontend" {
 
       env {
         name  = "BPP_URL"
-        value = "https://${var.dedi_domain}"
+        value = "https://${var.bpp_domain}"
       }
       env {
         name  = "NGINX_RESOLVER"
