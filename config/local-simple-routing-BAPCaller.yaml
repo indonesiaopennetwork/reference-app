@@ -13,6 +13,6 @@ routingRules:
   - version: "2.0.0"
     targetType: "url"
     target:
-      url: "http://mock-cds:8086/discover"
+      url: "http://discovery-service:8087"
     endpoints:
       - discover
