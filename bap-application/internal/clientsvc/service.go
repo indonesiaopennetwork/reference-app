@@ -40,6 +40,9 @@ func NewClientService(pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.Log
 // Discover sends a Beckn v2 `discover` action to the CDS and returns the raw JSON response.
 // Logs an OUTBOUND row to beckn_message_log capturing both the request and the CDS response.
 func (s *ClientService) Discover(ctx context.Context, req *ClientDiscoverRequest) (json.RawMessage, error) {
+	if s.cfg.CDSDiscoverURL == "" {
+		return json.RawMessage(`{"message":{"catalogs":[]}}`), nil
+	}
 
 	start := time.Now()
 	msgID := uuid.New()
@@ -71,7 +74,7 @@ func (s *ClientService) Discover(ctx context.Context, req *ClientDiscoverRequest
 		httpStatus int
 	)
 
-	discoverURL := s.cfg.BapCallerURL + "/discover"
+	discoverURL := s.cfg.CDSDiscoverURL
 
 	// Deferred block: DB log + logharbour ACK/ERR entry.
 	defer func() {
