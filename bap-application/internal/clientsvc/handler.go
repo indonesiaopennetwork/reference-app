@@ -103,7 +103,7 @@ func (h *ClientHandler) HandleStatus(c *gin.Context) {
 func (h *ClientHandler) HandleDiscover(c *gin.Context) {
 	q := c.Query("q")
 	if q == "" {
-		q = "coffee"
+		q = ""
 	}
 	req := ClientDiscoverRequest{TextSearch: q}
 
