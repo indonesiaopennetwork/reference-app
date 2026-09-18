@@ -26,7 +26,7 @@ type Service struct {
 }
 
 func NewService(pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.Logger) *Service {
-	return &Service{pool: pool, cfg: cfg, lh: lh, httpClient: &http.Client{Timeout: 30 * time.Second}}
+	return &Service{pool: pool, cfg: cfg, lh: lh, httpClient: &http.Client{Timeout: 60 * time.Second}}
 }
 
 // Process cancels the ACTIVE contract, restores stock, and fires on_cancel to the BAP.
