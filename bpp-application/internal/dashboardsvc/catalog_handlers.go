@@ -816,7 +816,7 @@ func (h *Handler) HandlePublishCatalog(c *gin.Context) {
 		httpReq.Header.Set("Authorization", authHeader)
 	}
 
-	httpClient := &http.Client{Timeout: 30 * time.Second}
+	httpClient := &http.Client{Timeout: 60 * time.Second}
 	resp, err := httpClient.Do(httpReq)
 	if err != nil {
 		callErr = fmt.Errorf("CDS call failed: %w", err)

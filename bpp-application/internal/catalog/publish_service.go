@@ -32,7 +32,7 @@ func NewPublishService(pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.Lo
 		pool:       pool,
 		cfg:        cfg,
 		lh:         lh,
-		httpClient: &http.Client{Timeout: 30 * time.Second},
+		httpClient: &http.Client{Timeout: 60 * time.Second},
 	}
 }
 

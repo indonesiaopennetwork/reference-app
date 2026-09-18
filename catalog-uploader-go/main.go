@@ -116,8 +116,8 @@ func main() {
 				"longDesc":  getValue("long_desc"),
 			},
 			"resourceAttributes": map[string]any{
-				"@type":    "RetailResource",
-				"@context": "https://raw.githubusercontent.com/beckn/local-retail/refs/heads/main/schema/RetailResource/v2.1/context.jsonld",
+				"@type":    "ion:IONTradeResource",
+				"@context": "https://schema.ion.id/release1/schema/extension/trade/TradeResource/v1/context.jsonld",
 				"identity": map[string]any{
 					"brand":         getValue("brand"),
 					"originCountry": getValue("origin_country"),
@@ -197,8 +197,8 @@ func main() {
 						"code": "ACTIVE",
 					},
 					"considerationAttributes": map[string]any{
-						"@type":       "RetailConsideration",
-						"@context":    "https://schema.beckn.io/RetailConsideration/v2.1/context.jsonld",
+						"@type":       "ion:IONTradeConsideration",
+						"@context":    "https://schema.ion.id/release1/schema/extension/trade/TradeConsideration/v1/context.jsonld",
 						"currency":    currency,
 						"totalAmount": price,
 						"breakup": []map[string]any{
@@ -217,8 +217,8 @@ func main() {
 				"endDate":   endDate,
 			},
 			"offerAttributes": map[string]any{
-				"@type":    "RetailOffer",
-				"@context": "https://raw.githubusercontent.com/beckn/local-retail/refs/heads/main/schema/RetailOffer/v2.1/context.jsonld",
+				"@type":    "ion:IONTradeOffer",
+				"@context": "https://schema.ion.id/release1/schema/extension/trade/TradeOffer/v1/context.jsonld",
 				"policies": map[string]any{
 					"returns": map[string]any{
 						"allowed": false,
