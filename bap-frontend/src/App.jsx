@@ -107,6 +107,8 @@ function parseCatalogs(data) {
         name: res.descriptor?.name || 'Unknown Product',
         shortDesc: res.descriptor?.shortDesc || '',
         longDesc: res.descriptor?.longDesc || '',
+        productHighlights: res.resourceAttributes?.productHighlights || '',
+        specifications: res.resourceAttributes?.specifications || '',
         category: cat.descriptor?.name || 'Retail',
         price,
         currency,
@@ -392,6 +394,18 @@ function ProductModal({ product, transaction, onClose, onSelect, onInit, onConfi
             )}
             {product.longDesc && product.longDesc !== product.shortDesc && (
               <p className="text-xs text-slate-500 mt-1 leading-relaxed">{product.longDesc}</p>
+            )}
+            {product.productHighlights && (
+              <div className="mt-4">
+                <h3 className="text-sm font-bold text-slate-200 mb-1.5">Keunggulan Produk (Product Highlights)</h3>
+                <div className="text-xs text-slate-400 leading-relaxed whitespace-pre-wrap">{product.productHighlights}</div>
+              </div>
+            )}
+            {product.specifications && (
+              <div className="mt-4">
+                <h3 className="text-sm font-bold text-slate-200 mb-1.5">Spesifikasi (Specifications)</h3>
+                <div className="text-xs text-slate-400 leading-relaxed whitespace-pre-wrap">{product.specifications}</div>
+              </div>
             )}
           </div>
 
