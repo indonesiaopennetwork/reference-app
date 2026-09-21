@@ -98,6 +98,18 @@ tasks:
       - terraform plan -target=google_project_service.apis -target=google_artifact_registry_repository.repo -target=google_secret_manager_secret.this -out=bootstrap1.tfplan
       - terraform apply bootstrap1.tfplan
 
+  deploy:seed-secrets:
+    desc: >-
+      Step 4: seed the 14 externally-sourced secrets from a local file (see
+      scripts/seed-secrets.env.example). Usage: task deploy:seed-secrets
+      PROJECT_ID=... [FILE=...]
+    vars:
+      FILE: '{{.FILE | default "scripts/seed-secrets.env"}}'
+    requires:
+      vars: [PROJECT_ID]
+    cmds:
+      - PROJECT_ID={{.PROJECT_ID}} ./scripts/seed-secrets.sh {{.FILE}}
+
   deploy:build-all:
     desc: "Step 5: build and push every image. Usage: task deploy:build-all PROJECT_ID=... REGION=..."
     requires:
@@ -111,6 +123,152 @@ tasks:
     cmds:
       - terraform plan -target=google_compute_network.vpc -target=google_compute_subnetwork.subnet -target=google_compute_global_address.psa_range -target=google_service_networking_connection.psa -target=google_sql_database_instance.postgres -target=google_redis_instance.redis -target=google_compute_subnetwork_iam_member.network_user -target=google_project_iam_member.cloud_sql_client -out=bootstrap2.tfplan
       - terraform apply bootstrap2.tfplan
+
+  deploy:zitadel-infra:
+    desc: "Step 6b.1: apply Zitadel — service, domain mapping, and IAM invoker binding together (the binding is easy to miss and Zitadel is unreachable without it)."
+    dir: terraform
+    cmds:
+      - terraform plan -target=google_cloud_run_v2_service.zitadel -target=google_cloud_run_domain_mapping.zitadel -target='google_cloud_run_v2_service_iam_member.public_invoker["zitadel"]' -out=zitadel.tfplan
+      - terraform apply zitadel.tfplan
+
+  deploy:wait-zitadel-dns:
+    desc: >-
+      Step 6b.2: poll Zitadel's custom domain until DNS + the managed TLS
+      cert are ready (can take up to ~60 min). Prints the DNS records to
+      create right away so there's something to act on immediately.
+    dir: terraform
+    vars:
+      ZITADEL_URL:
+        sh: terraform output -raw zitadel_domain_url
+    cmds:
+      - |
+        set -euo pipefail
+        echo "Create these DNS records now (if you haven't already):"
+        terraform output zitadel_domain_dns_records
+        echo ""
+        echo "Waiting for {{.ZITADEL_URL}}/.well-known/openid-configuration to become reachable (up to ~60 min)..."
+        for i in $(seq 1 120); do
+          if curl -sf "{{.ZITADEL_URL}}/.well-known/openid-configuration" >/dev/null 2>&1; then
+            echo "Zitadel domain is ready."
+            exit 0
+          fi
+          if [ $((i % 10)) -eq 0 ]; then
+            echo "Still waiting... ($((i * 30))s elapsed)"
+          fi
+          sleep 30
+        done
+        echo "ERROR: {{.ZITADEL_URL}} never became reachable after ~60 min. Check DNS propagation and the managed SSL cert status, then re-run: task deploy:wait-zitadel-dns" >&2
+        exit 1
+
+  deploy:setup-zitadel:
+    desc: >-
+      Step 6b.3: run scripts/setup-zitadel-cloud.sh and automatically patch
+      the resulting zitadel_client_id into terraform/terraform.tfvars (no
+      manual copy-paste), then re-apply so landing-page picks it up.
+    vars:
+      PROJECT_ID:
+        sh: cd terraform && terraform output -raw project_id
+    cmds:
+      - |
+        set -euo pipefail
+        OUTPUT="$(PROJECT_ID={{.PROJECT_ID}} ./scripts/setup-zitadel-cloud.sh)"
+        echo "$OUTPUT"
+        CLIENT_ID="$(echo "$OUTPUT" | grep -oE 'zitadel_client_id = "[^"]*"' | tail -n1)"
+        if [ -z "$CLIENT_ID" ]; then
+          echo "ERROR: could not find a zitadel_client_id line in setup-zitadel-cloud.sh's output." >&2
+          exit 1
+        fi
+        if grep -q '^zitadel_client_id' terraform/terraform.tfvars 2>/dev/null; then
+          sed -i.bak "s|^zitadel_client_id.*|$CLIENT_ID|" terraform/terraform.tfvars && rm -f terraform/terraform.tfvars.bak
+        else
+          printf '\n%s\n' "$CLIENT_ID" >> terraform/terraform.tfvars
+        fi
+        echo "Patched terraform/terraform.tfvars with: $CLIENT_ID"
+      - cd terraform && terraform plan -target=google_cloud_run_v2_service.landing_page -out=zitadel-client.tfplan && terraform apply zitadel-client.tfplan
+
+  deploy:full-apply-and-migrate:
+    desc: >-
+      Steps 7-9 chained: full apply (bap/bpp are expected to fail here — no
+      DB schema yet), run both migration jobs, then full apply again.
+    cmds:
+      - task: deploy:full-apply
+        ignore_error: true
+      - task: deploy:migrate
+      - task: deploy:full-apply
+
+  deploy:dedi-bucket:
+    desc: >-
+      Create the DeDi static-file bucket and its IAM bindings only -- unlike
+      dedi-static-server, the bucket has no dependency on bap/bpp/onix-bap/
+      onix-bpp, so this can run as early as right after bootstrap-apis.
+    dir: terraform
+    cmds:
+      - terraform plan -target=google_storage_bucket.dedi_static -target=google_storage_bucket_iam_member.dedi_static_public_read -target=google_storage_bucket_iam_member.dedi_static_writer -out=dedi-bucket.tfplan
+      - terraform apply dedi-bucket.tfplan
+
+  deploy:dedi-server:
+    desc: >-
+      Create dedi-static-server and its two custom domain mappings. Run
+      AFTER deploy:full-apply-and-migrate has succeeded -- its config
+      references bap/bpp/onix-bap/onix-bpp's live Cloud Run URLs directly,
+      so those must already exist. (The bucket itself is separate --
+      see deploy:dedi-bucket -- and can run much earlier.)
+    dir: terraform
+    cmds:
+      - terraform plan -target=google_cloud_run_v2_service.dedi_static -target=google_cloud_run_v2_service_iam_member.dedi_static_public_invoker -target=google_cloud_run_domain_mapping.dedi_apex -target=google_cloud_run_domain_mapping.dedi_www -out=dedi-server.tfplan
+      - terraform apply dedi-server.tfplan
+
+  deploy:phase1:
+    desc: >-
+      Minimum-steps deployment, part 1: runs bootstrap through bringing up
+      Zitadel, then prints the DNS record to create and stops -- that's the
+      one dependency nothing here can automate. Once you've created and
+      verified it, continue with deploy:phase2. Requires
+      deploy:state-bucket to have already run once, and
+      terraform/terraform.tfvars + scripts/seed-secrets.env +
+      dedi-onboarding-files/.env.local (plus a `task sign-dedi-files` run)
+      to already be filled in / done. Usage: task deploy:phase1
+      PROJECT_ID=... REGION=...
+    requires:
+      vars: [PROJECT_ID, REGION]
+    cmds:
+      - task: deploy:bootstrap-apis
+      - task: deploy:dedi-bucket
+      - task: deploy-dedi-files
+      - task: deploy:seed-secrets
+        vars: {PROJECT_ID: '{{.PROJECT_ID}}'}
+      - task: deploy:build-all
+        vars: {PROJECT_ID: '{{.PROJECT_ID}}', REGION: '{{.REGION}}'}
+      - task: deploy:infra
+      - task: deploy:zitadel-infra
+      - |
+        cd terraform
+        echo ""
+        echo "phase1 done. Create this DNS record now, then once it's verified, run: task deploy:phase2"
+        terraform output zitadel_domain_dns_records
+
+  deploy:phase2:
+    desc: >-
+      Minimum-steps deployment, part 2: run once Zitadel's DNS record from
+      deploy:phase1 is created and verified. Confirms Zitadel is actually
+      reachable, sets up its OIDC client, finishes the apply/migrate cycle,
+      and brings up dedi-static-server (making the discovery chain publicly
+      live).
+    cmds:
+      - task: deploy:wait-zitadel-dns
+      - task: deploy:setup-zitadel
+      - task: deploy:full-apply-and-migrate
+      - task: deploy:dedi-server
+      - |
+        cd terraform
+        echo ""
+        echo "Deployment complete. Also create these DNS records at your registrar (not required for the deployment itself, but these URLs won't resolve without them):"
+        terraform output bap_domain_dns_records
+        terraform output bap_frontend_domain_dns_records
+        terraform output bpp_frontend_domain_dns_records
+        terraform output landing_page_domain_dns_records
+        terraform output bpp_domain_dns_records
+        terraform output bpp_domain_www_dns_records
 
   deploy:full-apply:
     desc: "Steps 7 & 9: full terraform apply. Run this task twice — the first run is expected to fail on bap/bpp (no DB schema yet); run deploy:migrate in between."

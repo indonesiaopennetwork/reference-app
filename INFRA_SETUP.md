@@ -325,10 +325,10 @@ actually flows through.
 ## 2. Cloud deployment (Cloud Run)
 
 Out of scope for this file — this file only covers local development. See
-[README.md](README.md#deploy-to-your-fresh-gcp-project) for the full
-fresh-deploy walkthrough (Task commands, step by step), and
-[terraform/README.md](terraform/README.md) for the gotchas actually hit
-building this, verification, redeploying, and inspecting Cloud SQL.
+[terraform/README.md](terraform/README.md#deploy-to-your-fresh-gcp-project)
+for the full fresh-deploy walkthrough (Task commands, step by step), plus
+architecture notes, gotchas actually hit building this, verification,
+redeploying, and inspecting Cloud SQL.
 
 ## 3. Keeping local and cloud in sync
 

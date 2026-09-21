@@ -37,7 +37,7 @@ resource "null_resource" "wire_service_urls" {
       # path (bapTxnReceiver/bppTxnReceiver are mounted at /bap/receiver/ and
       # /bpp/receiver/ respectively, see config/local-simple-b*p.yaml).
       # BAP_URI uses bap_domain (its own hub, see domain-mapping.tf/
-      # nginx.conf.template) — BPP_URI uses dedi_domain, since bpp shares
+      # nginx.conf.template) — BPP_URI uses bpp_domain, since bpp shares
       # that hub instead of having its own domain. ADAPTER_URL/BPP_CALLER_URL
       # are the internal call target our own apps POST to directly (bare
       # Cloud Run URL + /bap/caller, no domain needed — service-to-service
@@ -55,11 +55,11 @@ resource "null_resource" "wire_service_urls" {
       gcloud run services update ${google_cloud_run_v2_service.bpp.name} \
         --project=${var.project_id} --region=${var.region} --quiet \
         --container=bpp \
-        --update-env-vars="BPP_URI=https://${var.dedi_domain}/bpp/receiver/,BPP_CALLER_URL=${google_cloud_run_v2_service.onix_bpp.uri}/bpp/caller"
+        --update-env-vars="BPP_URI=https://${var.bpp_domain}/bpp/receiver/,BPP_CALLER_URL=${google_cloud_run_v2_service.onix_bpp.uri}/bpp/caller"
 
       gcloud run services update ${google_cloud_run_v2_service.onix_bpp.name} \
         --project=${var.project_id} --region=${var.region} --quiet \
-        --update-env-vars="BPP_URL=https://${var.dedi_domain}"
+        --update-env-vars="BPP_URL=https://${var.bpp_domain}"
     EOT
   }
 

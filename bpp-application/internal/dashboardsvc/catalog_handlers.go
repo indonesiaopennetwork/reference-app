@@ -17,6 +17,7 @@ import (
 	dbsqlc "github.com/ion/winroom/bpp/db/sqlc"
 	"github.com/ion/winroom/bpp/internal/auth"
 	"github.com/ion/winroom/bpp/internal/catalog"
+	"github.com/ion/winroom/bpp/internal/httpclient"
 )
 
 // catalogOwnedByProvider reports whether catalogID belongs to providerID
@@ -816,7 +817,7 @@ func (h *Handler) HandlePublishCatalog(c *gin.Context) {
 		httpReq.Header.Set("Authorization", authHeader)
 	}
 
-	httpClient := &http.Client{Timeout: 60 * time.Second}
+	httpClient := httpclient.New(30 * time.Second)
 	resp, err := httpClient.Do(httpReq)
 	if err != nil {
 		callErr = fmt.Errorf("CDS call failed: %w", err)
