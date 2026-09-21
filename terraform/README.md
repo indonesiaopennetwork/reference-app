@@ -117,6 +117,47 @@ For the stack/architecture/request-flow overview, see [TECHNICAL_ARTIFACT.md](..
 All commands below run from the repo root unless noted, and `<YOUR_PROJECT_ID>`
 / `<YOUR_REGION>` are placeholders — pick real values and use them consistently.
 
+### Minimum-steps deployment
+
+True one-click isn't achievable — three things are externally gated and
+nothing here can automate them: a registered Beckn network identity, DNS
+records at your registrar, and Google Search Console domain verification.
+But everything *between* those inputs and a finished deployment can be
+chained, with exactly one unavoidable pause in the middle (Zitadel's domain
+has to actually be live — DNS propagated + managed SSL cert issued, up to
+~60 min — before `bap`/`bpp` will start; `bpp` treats an unreachable
+Zitadel as fatal). The minimum-steps path:
+
+1. `task deploy:state-bucket PROJECT_ID=<YOUR_PROJECT_ID> REGION=<YOUR_REGION>`
+   (one-time — see step 0/1 below first, editing `backend.tf`).
+2. Fill in `terraform/terraform.tfvars` (all variables, including all seven
+   domain variables — see step 2 below), `scripts/seed-secrets.env` (see
+   step 4 below), and `dedi-onboarding-files/.env.local` (see "Custom
+   domain for DeDi discovery files" below for the signing keys), then run
+   `task sign-dedi-files`. Pure input-gathering and local signing, nothing
+   cloud yet.
+3. `task deploy:phase1 PROJECT_ID=<YOUR_PROJECT_ID> REGION=<YOUR_REGION>` —
+   runs unattended through bootstrap, staging the already-signed DeDi files
+   in their bucket, secrets, images, infra, and bringing up Zitadel, then
+   prints the one DNS record to create and stops.
+4. Create and verify that DNS record yourself at your registrar.
+5. `task deploy:phase2 PROJECT_ID=<YOUR_PROJECT_ID> REGION=<YOUR_REGION>` —
+   confirms Zitadel's domain is actually live (polls up to ~60 min, since
+   the managed SSL cert can lag even after DNS resolves), then continues on
+   its own through Zitadel's OIDC setup, migrations, the final apply, and
+   bringing up `dedi-static-server`, then prints the DNS records for the 6
+   remaining domains (`bap`, `bap-frontend`, `bpp-frontend`,
+   `landing-page`, plus the DeDi pair) — **create these at your registrar
+   too**; none of them block the deployment itself, but without them those
+   URLs won't resolve. If `phase2` is interrupted during the wait, just
+   re-run it — every step both phases chain is idempotent, aside from
+   `deploy:state-bucket`, which already ran in step 1.
+
+The rest of this section is the detailed step-by-step `deploy:phase1`/
+`deploy:phase2` actually run under the hood — read it if you want manual
+control, need to resume from a specific point, or are debugging a failure
+in one phase.
+
 ### 0. Point Terraform state at your project
 
 `terraform/backend.tf` currently hardcodes a state bucket name for the
@@ -143,10 +184,9 @@ task deploy:state-bucket PROJECT_ID=<YOUR_PROJECT_ID> REGION=<YOUR_REGION>
 
 ### 2. Create `terraform/terraform.tfvars`
 
-Not committed (already git-ignored). At minimum, override `project_id` and
-supply the five identity variables that have no default, plus the Zitadel
-admin account (the seven domain variables, including `zitadel_domain`, are
-covered separately below — see "Custom domains"):
+Not committed (already git-ignored). Override `project_id` and supply the
+five identity variables that have no default, the Zitadel admin account,
+**and all seven domain variables** — set everything now, not later:
 
 ```hcl
 # terraform/terraform.tfvars
@@ -158,7 +198,28 @@ network_id             = "<your registry's network id>"
 cds_discover_url       = "<your registry's discover URL>"
 zitadel_admin_username = "admin"
 zitadel_admin_email    = "<your email>"
+
+# Domain mapping is mandatory, not an add-on for later — see "Custom
+# domains" below for what each one is for and the Search Console
+# verification each domain needs before its mapping resource will succeed.
+bpp_domain             = "<your bpp/dedi-discovery domain>"
+bpp_domain_www         = "<the www variant of the domain above>"
+bap_domain             = "<your bap backend domain>"
+bap_frontend_domain    = "<your buyer-app domain>"
+bpp_frontend_domain    = "<your seller-app domain>"
+landing_page_domain    = "<your landing-page domain>"
+zitadel_domain         = "<your zitadel domain>"
 ```
+
+**Why all seven, right now, even though the "Custom domains" sections
+appear much later in this doc:** none of the seven has a default in
+`variables.tf`, and Terraform resolves every declared root-module variable
+before it prunes the resource graph by `-target` — so even step 3 below
+(`deploy:bootstrap-apis`, a `-target`'d plan that doesn't touch any domain
+resource) fails immediately with "no value for required variable" if any of
+these seven are still unset. There's no step in this sequence where you can
+defer them — they have to be real values you own from the very first
+`terraform plan`.
 
 There's no `cds_publish_url` to supply — `bpp`'s `CDS_PUBLISH_URL` points at
 the `onix-catalog-publish` Cloud Run service this module deploys (a
@@ -346,50 +407,84 @@ Google account your `gcloud`/Terraform credentials use —
 
 **Deploy sequence:**
 
+The bucket (`deploy:dedi-bucket`) and the signing/upload steps have **no
+dependency on bap/bpp/onix-bap/onix-bpp** — only `dedi-static-server`
+itself (`deploy:dedi-server`) does, since its config references those four
+services' live Cloud Run URLs directly. So steps 1-4 below can happen
+early (well before step 9 of the main walkthrough — this is exactly what
+`deploy:phase1` does), while step 5 (`deploy:dedi-server`) genuinely can't
+run until after `deploy:full-apply-and-migrate` has succeeded, the same
+hard Terraform-graph dependency as before.
+
 1. Set `bpp_domain`/`bpp_domain_www` in `terraform.tfvars` — required,
    `terraform plan` fails without them.
-2. Build and push the `dedi-static-server` image — it's included in step 5
-   above if you're deploying fresh. If you're adding this to an
-   **already-running** deployment, build and push it explicitly before
-   applying, since there's no "build all images" checkpoint to fall back on
-   at that point:
+2. **Before signing anything**, set up your DeDi signing identity — copy
+   `dedi-onboarding-files/.env.local.example` to
+   `dedi-onboarding-files/.env.local` and fill in `DEDI_PUBLIC_KEY`/
+   `DEDI_PRIVATE_KEY` (a registered Ed25519 keypair for this discovery
+   chain). This is not optional: `Taskfile.yaml` auto-loads
+   `dedi-onboarding-files/.env.local` (`dotenv:` at the top of the file) and
+   `dedi-file-signer` needs both values to sign anything — without them,
+   `task sign-dedi-files` fails immediately rather than signing with a
+   placeholder. Put `dedi.index.json` and `ion-scratch-registry.json` (the
+   two files that rarely change and aren't generated by anything in this
+   repo) in `dedi-onboarding-files/`, then sign them:
+   ```sh
+   task sign-dedi-files
+   ```
+3. Create the bucket:
+   ```sh
+   task deploy:dedi-bucket
+   ```
+4. Upload the signed files — **requires step 3's bucket to already exist**,
+   `task deploy-dedi-files` reads the bucket name straight from
+   `terraform output -raw dedi_static_bucket`, which doesn't exist before
+   that:
+   ```sh
+   task deploy-dedi-files
+   ```
+5. Once `bap`/`bpp`/`onix-bap`/`onix-bpp` all exist with real URLs (i.e.
+   after `deploy:full-apply-and-migrate` has succeeded), build and push the
+   `dedi-static-server` image — included in the main walkthrough's step 5
+   if you're deploying fresh; if you're adding this to an
+   **already-running** deployment, build and push it explicitly first,
+   since there's no "build all images" checkpoint to fall back on at that
+   point:
    ```sh
    gcloud auth configure-docker <YOUR_REGION>-docker.pkg.dev --quiet
    docker build -t <YOUR_REGION>-docker.pkg.dev/<YOUR_PROJECT_ID>/beckn-app/dedi-static-server:latest dedi-static-server/
    docker push <YOUR_REGION>-docker.pkg.dev/<YOUR_PROJECT_ID>/beckn-app/dedi-static-server:latest
    ```
-3. Create the bucket, `dedi-static-server`, and its two domain mappings:
+   Then create `dedi-static-server` and its two domain mappings:
    ```sh
-   task deploy:dedi-static
+   task deploy:dedi-server
    ```
    If `google_cloud_run_domain_mapping` fails with a region/availability
-   error, see the comment at the top of `domain-mapping.tf` —
-   Cloud Run domain mapping has historically had self-service limited to a
-   subset of regions.
-4. Get the DNS records and create them at your registrar (the one step I
+   error, see the comment at the top of `domain-mapping.tf` — Cloud Run
+   domain mapping has historically had self-service limited to a subset of
+   regions.
+6. Get the DNS records and create them at your registrar (the one step I
    can't automate):
    ```sh
    terraform output bpp_domain_dns_records
    terraform output bpp_domain_www_dns_records
    ```
-5. Upload the two files that rarely change and aren't generated by anything
-   in this repo. Put `dedi.index.json` and `ion-scratch-registry.json` in
-   `dedi-onboarding-files/` (see `dedi-onboarding-files/.env.local.example`
-   for the signing keys), then re-sign and upload them:
-   ```sh
-   task sign-dedi-files
-   task deploy-dedi-files
-   ```
-6. Wait for the managed SSL cert (up to ~60 min after DNS propagates), then
+7. Wait for the managed SSL cert (up to ~60 min after DNS propagates), then
    `curl https://<your domain>/.well-known/dedi.index.json`.
 
-## Routing BPP/BAP receiver calls through the custom domain (optional)
+## Routing BPP/BAP receiver calls through the custom domain
 
-Builds on the section above — requires the custom domain already mapped to
-`dedi-static-server`. `dedi-static-server`'s nginx also reverse-proxies
-`/bpp/receiver/*` → `onix-bpp` and `/bap/receiver/*` → `onix-bap`, so a
-subscriber's registered URL can be `https://<your domain>/bpp/receiver/` (or
-`/bap/receiver/`) instead of `onix-bpp`'s/`onix-bap`'s raw `*.run.app` URL.
+**Not optional — this is unconditional in the current Terraform, not a
+toggle you can skip.** There's no `count`/`for_each`/feature-flag guarding
+any of it: `cloud-run-wiring.tf` always sets
+`BAP_URI=https://${var.bap_domain}/bap/receiver/` and
+`BPP_URI=https://${var.bpp_domain}/bpp/receiver/` on every apply, and
+`dedi-static-server`'s nginx config always proxies `/bpp/receiver/*` →
+`onix-bpp` and `/bap/receiver/*` → `onix-bap`. Builds on the section above
+— requires the custom domain already mapped to `dedi-static-server` — so a
+subscriber's registered URL is `https://<your domain>/bpp/receiver/` (or
+`/bap/receiver/`) rather than `onix-bpp`'s/`onix-bap`'s raw `*.run.app` URL,
+on every deployment of this repo, not just some of them.
 
 This also sidesteps the path mismatch in
 [Gotcha #7 below](#gotchas-actually-hit-doing-this-not-theoretical--each-one-broke-a-real-deploy):
