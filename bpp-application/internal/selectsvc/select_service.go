@@ -20,6 +20,7 @@ import (
 
 	dbsqlc "github.com/ion/winroom/bpp/db/sqlc"
 	"github.com/ion/winroom/bpp/internal/config"
+	"github.com/ion/winroom/bpp/internal/httpclient"
 )
 
 // SelectService handles the full /beckn/select flow:
@@ -39,7 +40,7 @@ func NewSelectService(pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.Log
 		pool:       pool,
 		cfg:        cfg,
 		lh:         lh,
-		httpClient: &http.Client{Timeout: 60 * time.Second},
+		httpClient: httpclient.New(30 * time.Second),
 	}
 }
 

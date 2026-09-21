@@ -40,6 +40,20 @@ resource "google_sql_database" "trade_bpp" {
   instance = google_sql_database_instance.postgres.name
 }
 
+# Zitadel gets its own database on the same instance, but reuses the trade
+# user below rather than a dedicated one — bap/bpp already prove that user
+# has sufficient DDL rights on this instance (their own tern migrations
+# create full schemas as trade), and Cloud SQL Postgres users are granted
+# the instance-wide cloudsqlsuperuser role, so this should extend cleanly to
+# a third database. Verify at first apply (see cloud-run-zitadel.tf); if
+# Zitadel's own schema setup fails with a permissions error, the fallback is
+# `ALTER DATABASE zitadel OWNER TO trade;` via Cloud SQL Studio.
+resource "google_sql_database" "zitadel" {
+  name     = var.db_name_zitadel
+  project  = var.project_id
+  instance = google_sql_database_instance.postgres.name
+}
+
 resource "random_password" "postgres" {
   length  = 32
   special = false
@@ -50,4 +64,25 @@ resource "google_sql_user" "trade" {
   project  = var.project_id
   instance = google_sql_database_instance.postgres.name
   password = random_password.postgres.result
+}
+
+# Self-generated, like postgres above — see secrets.tf's
+# google_secret_manager_secret_version resources for where these land.
+resource "random_password" "zitadel_masterkey" {
+  length  = 32
+  special = false
+}
+
+# Unlike postgres/masterkey above, this one IS validated -- Zitadel's
+# default password complexity policy rejects
+# ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD unless it has at least one of
+# each character class. min_* guarantees that deterministically rather
+# than leaving it to chance across 32 random characters.
+resource "random_password" "zitadel_admin_password" {
+  length      = 32
+  special     = true
+  min_lower   = 1
+  min_upper   = 1
+  min_numeric = 1
+  min_special = 1
 }

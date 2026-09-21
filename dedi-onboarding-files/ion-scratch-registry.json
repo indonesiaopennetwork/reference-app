@@ -1,14 +1,14 @@
 {
   "dedi_version": "0.1",
-  "namespace": "ion-ref-app.ayushmatha.in",
+  "namespace": "bpp-backend2.ion-ref-app.ayushmatha.in",
   "next_update": "2028-08-18T04:20:00Z",
   "proof": {
     "verification_method": "key-1",
     "canonicalization": "JCS",
-    "jws": "eyJhbGciOiJFZERTQSIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il19..I-ThT6kJeKEObfuC9klDfggvwctWCjvgadlh06XCMlLzExVRdYdEi8RKw6k-LfefbVopsABXYn72I6_uj1g7BA"
+    "jws": "eyJhbGciOiJFZERTQSIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il19..QL0LpUILrqKpK5JqfRenBVp-IcQOZflxhthDlWk4Eu5zWHo-Rx_n6nvsypqmb_9r_sth0s-0cYqCQpVq_a6mCg"
   },
   "publisher": {
-    "domain": "ion-ref-app.ayushmatha.in",
+    "domain": "bpp-backend2.ion-ref-app.ayushmatha.in",
     "key": {
       "crv": "Ed25519",
       "kid": "key-1",
@@ -24,26 +24,26 @@
         ],
         "encr_public_key": "nNrqM6oH1Hhvq8c8D9I40Zd3aPNmLqx8+CYiAlTbhoY=",
         "signing_public_key": "nNrqM6oH1Hhvq8c8D9I40Zd3aPNmLqx8+CYiAlTbhoY=",
-        "subscriber_id": "sample-pn.ion-ref-app.ayushmatha.in",
+        "subscriber_id": "sample-pn.bpp-backend2.ion-ref-app.ayushmatha.in",
         "type": "BPP",
-        "url": "https://ion-ref-app.ayushmatha.in/bpp/receiver/"
+        "url": "https://bpp-backend2.ion-ref-app.ayushmatha.in/bpp/receiver/"
       },
       "meta": {
         "catalog_index_urls": [
           {
-            "url": "https://ion-ref-app.ayushmatha.in/index/becknCatalogs.index.json"
+            "url": "https://bpp-backend2.ion-ref-app.ayushmatha.in/index/becknCatalogs.index.json"
           }
         ]
       },
-      "record_name": "sample-pn-ayushmatha-in"
+      "record_name": "sample-pn-ion-ref-app-ayushmatha-in"
     }
   ],
   "registry": {
     "name": "ion-scratch-registry",
     "schema": "https://raw.githubusercontent.com/LF-Decentralized-Trust-labs/decentralized-directory-protocol/main/schemas/beckn_subscriber.json",
     "state": "live",
-    "updated_at": "2026-08-18T06:41:00Z"
+    "updated_at": "2026-09-16T13:50:41Z"
   },
-  "source_url": "https://ion-ref-app.ayushmatha.in/dedi/ion-scratch-registry.json",
+  "source_url": "https://bpp-backend2.ion-ref-app.ayushmatha.in/dedi/ion-scratch-registry.json",
   "type": "dedi-file"
 }

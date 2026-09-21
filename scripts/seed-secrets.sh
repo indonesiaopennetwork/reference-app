@@ -8,16 +8,50 @@
 # and BEFORE the full `terraform apply` — Cloud Run revisions fail to deploy
 # if the secret they reference has no version yet.
 #
-# Usage: PROJECT_ID=remiges-trade ./scripts/seed-secrets.sh
+# Usage:
+#   PROJECT_ID=remiges-trade ./scripts/seed-secrets.sh
+#   PROJECT_ID=remiges-trade ./scripts/seed-secrets.sh scripts/seed-secrets.env
+#
+# The second form sources KEY=value lines from a file first (see
+# scripts/seed-secrets.env.example) instead of requiring every value to
+# already be exported in your shell -- handy for repeated runs (redeploys,
+# key rotation) so you don't have to reconstruct one long command each time.
 #
 # This script is committed to a PUBLIC repo — unlike some reference setups,
 # it intentionally has NO baked-in secret defaults. Every value below is
-# required via env var and the script fails loudly if any is unset. Source
-# the real values from your own local, git-ignored secret store (this
-# session's config/local-simple-{bap,bpp}.yaml + root .env hold the current
-# sandbox values, if you're seeding a deployment meant to mirror local dev).
+# required (via env var, or from the file above) and the script fails
+# loudly if any is unset. Source the real values from your own local,
+# git-ignored secret store (this session's config/local-simple-{bap,bpp}.yaml
+# + root .env hold the current sandbox values, if you're seeding a
+# deployment meant to mirror local dev).
 
 set -euo pipefail
+
+if [ "$#" -gt 0 ]; then
+  secrets_file="$1"
+  [ -f "$secrets_file" ] || { echo "ERROR: secrets file not found: $secrets_file" >&2; exit 1; }
+  # Deliberately NOT `source`d -- several of these values contain characters
+  # a shell would otherwise interpret (BAP_KEY_ID/BPP_KEY_ID are literally
+  # "subscriberId|keyId|ed25519"). Read as plain KEY=value lines and export
+  # each value as one literal string instead, so nothing in it is ever
+  # parsed as shell syntax. Do NOT quote values in the file itself --
+  # quotes would be taken literally and seeded into Secret Manager along
+  # with the value.
+  #
+  # Split with parameter expansion on the whole line, NOT `read -r key
+  # value` with IFS='=' -- read's word-splitting drops a trailing empty
+  # field, which silently strips the "=" padding base64 values (private
+  # keys) routinely end with.
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      ''|'#'*) continue ;;
+    esac
+    key="${line%%=*}"
+    value="${line#*=}"
+    [ "$key" = "$line" ] && continue # no "=" on this line -- skip malformed
+    export "$key=$value"
+  done <"$secrets_file"
+fi
 
 PROJECT_ID="${PROJECT_ID:?set PROJECT_ID}"
 
