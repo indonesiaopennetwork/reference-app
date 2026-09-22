@@ -66,6 +66,16 @@ Three prior-art repos were scanned to ground this design:
    only marks them deprecated"* — confirming source #1 above
    (`beckn.yaml`) is still the correct, unmodified ground truth for the
    Ack's required `signature` (`CounterSignature`) field; see D23.
+   Cross-checked the same file on the `main` branch too
+   ([github.com/beckn/protocol-specifications-v2/blob/main/docs/Catalog_Publishing_and_Discovery.md](https://github.com/beckn/protocol-specifications-v2/blob/main/docs/Catalog_Publishing_and_Discovery.md))
+   — same conclusion, plus one more pointer: its own "Acknowledgements"
+   section (the RFC's credits/prior-work list, *not* about the Ack
+   protocol message — easy to conflate given the name) explicitly defers
+   Ack **authentication** specifically to **NFH-007 — Authentication and
+   Trust**, a document not yet reviewed here. If NFH ever documents an
+   Ack shape that diverges from plain `beckn.yaml`, NFH-007 is the most
+   likely place it would live — worth checking before assuming D23's
+   `beckn.yaml`-only basis is the final word.
 
 ## 4. Decision log
 
