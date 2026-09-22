@@ -17,3 +17,14 @@ func WriteJSON(w http.ResponseWriter, status int, v any) {
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
 }
+
+// WriteJSONBytes writes body — already-marshaled JSON — as the response.
+// For callers that need to compute something over the exact response
+// bytes (e.g. a signature) before they're written: WriteJSON's own
+// internal streaming json.Encoder never exposes those bytes, since it
+// encodes directly to w.
+func WriteJSONBytes(w http.ResponseWriter, status int, body []byte) {
+	w.Header().Set("Content-Type", constants.ContentTypeJSON)
+	w.WriteHeader(status)
+	_, _ = w.Write(body)
+}
