@@ -16,6 +16,7 @@ import (
 
 	dbsqlc "github.com/ion/winroom/bpp/db/sqlc"
 	"github.com/ion/winroom/bpp/internal/config"
+	"github.com/ion/winroom/bpp/internal/httpclient"
 )
 
 type Service struct {
@@ -26,7 +27,7 @@ type Service struct {
 }
 
 func NewService(pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.Logger) *Service {
-	return &Service{pool: pool, cfg: cfg, lh: lh, httpClient: &http.Client{Timeout: 30 * time.Second}}
+	return &Service{pool: pool, cfg: cfg, lh: lh, httpClient: httpclient.New(30 * time.Second)}
 }
 
 // Process applies the partial contract update and fires on_update to the BAP.

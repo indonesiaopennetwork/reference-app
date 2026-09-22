@@ -1018,6 +1018,7 @@ function InventoryPage({ initialTab = 'products' }) {
 
 const EMPTY_RESOURCE = () => ({
   id: '', name: '', short_desc: '', long_desc: '', stock_quantity: '',
+  product_highlights: '', specifications: '',
   media_url: '',
   // identity
   brand: '', origin_country: 'IN',
@@ -1036,7 +1037,7 @@ const EMPTY_OFFER = () => ({
   id: '', name: '', short_desc: '', resource_ids: '', price: '', currency: 'INR',
   validity_start: '', validity_end: '',
   // offer attributes
-  offer_context: 'https://raw.githubusercontent.com/beckn/local-retail/refs/heads/main/schema/RetailOffer/v2.1/context.jsonld',
+  offer_context: 'https://schema.ion.id/release1/schema/extension/trade/TradeOffer/v1/context.jsonld',
   // policies
   returns_allowed: true, returns_window: 'P7D', returns_method: 'SELLER_PICKUP',
   cancel_allowed: true, cancel_window: 'PT2H', cancel_event: 'BEFORE_PACKING',
@@ -1181,12 +1182,14 @@ function buildResourceAttrs(r) {
   const hasIdentity = r.brand || r.origin_country
   const hasPhysical = r.weight_value || r.volume_value || r.dim_length || r.color || r.material || r.finish
   const hasPkg = r.mfr_name || r.common_name || r.net_qty_value
-  if (!hasIdentity && !hasPhysical && !hasPkg) return undefined
+  if (!hasIdentity && !hasPhysical && !hasPkg && !r.product_highlights && !r.specifications) return undefined
 
   const attrs = {
-    '@context': 'https://raw.githubusercontent.com/beckn/local-retail/refs/heads/main/schema/RetailResource/v2.1/context.jsonld',
-    '@type': 'RetailResource',
+    '@context': 'https://schema.ion.id/release1/schema/extension/trade/TradeResource/v1/context.jsonld',
+    '@type': 'ion:IONTradeResource',
   }
+  if (r.product_highlights) attrs.productHighlights = r.product_highlights
+  if (r.specifications) attrs.specifications = r.specifications
   if (hasIdentity) {
     attrs.identity = {}
     if (r.brand) attrs.identity.brand = r.brand
@@ -1225,7 +1228,7 @@ function buildOfferAttrs(o) {
 
   if (!hasPolicies && !hasPayment && !hasServiceability && !hasContext) return undefined
 
-  const attrs = { '@type': 'RetailOffer' }
+  const attrs = { '@type': 'ion:IONTradeOffer' }
   if (hasContext) attrs['@context'] = o.offer_context
 
   if (hasPolicies) {
@@ -1331,8 +1334,8 @@ function PublishPage({ onNav }) {
               considerations: [{
                 id: `${o.id}-price`, status: { code: 'ACTIVE', name: 'ACTIVE' },
                 considerationAttributes: {
-                  '@context': 'https://schema.beckn.io/RetailConsideration/v2.1/context.jsonld',
-                  '@type': 'RetailConsideration',
+                  '@context': 'https://schema.ion.id/release1/schema/extension/trade/TradeConsideration/v1/context.jsonld',
+                  '@type': 'ion:IONTradeConsideration',
                   currency: o.currency,
                   breakup: [{ title: o.name || o.id, amount: Number(o.price), type: 'BASE_PRICE' }],
                   totalAmount: Number(o.price),
@@ -1375,7 +1378,7 @@ function PublishPage({ onNav }) {
               className={`flex items-center gap-2 text-xs font-semibold transition-all ${i < step ? 'cursor-pointer' : 'cursor-default'
                 }`}>
               <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold transition-all ${i < step ? 'bg-emerald-500 text-white' :
-                  i === step ? 'text-white' : 'bg-slate-800 text-slate-500'
+                i === step ? 'text-white' : 'bg-slate-800 text-slate-500'
                 }`}
                 style={i === step ? { background: BRAND } : {}}>
                 {i < step ? <CheckCircle2 size={14} /> : i + 1}
@@ -1466,8 +1469,20 @@ function PublishPage({ onNav }) {
                       <input className={inputCls} value={r.short_desc} onChange={e => setResourceField(i, 'short_desc', e.target.value)} placeholder="500ml insulated flask" />
                     </div>
                     <div><label className={labelCls}>Long Description</label>
-                      <input className={inputCls} value={r.long_desc} onChange={e => setResourceField(i, 'long_desc', e.target.value)} placeholder="Full product description…" />
+                      <textarea className={inputCls} rows="2" value={r.long_desc} onChange={e => setResourceField(i, 'long_desc', e.target.value)} placeholder="Full product description…" />
                     </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+                    <div><label className={labelCls}>Product Highlights</label>
+                      <textarea className={inputCls} rows="3" value={r.product_highlights} onChange={e => setResourceField(i, 'product_highlights', e.target.value)} placeholder="List highlights separated by newlines..." />
+                    </div>
+                    <div><label className={labelCls}>Specifications</label>
+                      <textarea className={inputCls} rows="3" value={r.specifications} onChange={e => setResourceField(i, 'specifications', e.target.value)} placeholder="List specifications separated by newlines..." />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
                     <div><label className={labelCls}>Stock Quantity <span className="text-slate-600 font-normal">(blank = unlimited)</span></label>
                       <input className={inputCls} type="number" min="0" value={r.stock_quantity} onChange={e => setResourceField(i, 'stock_quantity', e.target.value)} placeholder="e.g. 50" />
                     </div>
@@ -1748,8 +1763,8 @@ function PublishPage({ onNav }) {
                             <button key={day} type="button"
                               onClick={() => toggleDay(i, day)}
                               className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition-all ${o.timing_days.includes(day)
-                                  ? 'text-white border-cyan-500/40'
-                                  : 'text-slate-500 border-white/[0.08] hover:border-white/20'
+                                ? 'text-white border-cyan-500/40'
+                                : 'text-slate-500 border-white/[0.08] hover:border-white/20'
                                 }`}
                               style={o.timing_days.includes(day) ? { background: 'rgba(0,184,230,0.15)' } : {}}>
                               {day}
@@ -2645,16 +2660,16 @@ const DAYS_OF_WEEK = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN']
 
 const PRODUCT_AUTOFILL_POOL = [
   {
-    res: { id: 'item-keripik-singkong', name: 'Keripik Singkong Balado (Spicy Cassava Chips)', short_desc: 'Crispy cassava chips with balado seasoning', stock_quantity: '50', media_url: 'https://images.unsplash.com/photo-1621939514649-280e2ee25f60?w=400', brand: 'Chitato', origin_country: 'ID', weight_value: '150', weight_unit: 'G', color: 'Golden', material: 'Cassava' },
-    off: { id: 'offer-keripik-singkong', name: 'Keripik Singkong Balado', price: '25000', currency: 'IDR', cod_available: true, returns_allowed: true, returns_window: 'P7D', returns_method: 'SELLER_PICKUP', cancel_allowed: true, cancel_window: 'PT2H', cancel_event: 'BEFORE_PACKING', replace_allowed: false, max_distance: '20', timing_days: ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'], timing_start: '09:00', timing_end: '21:00', offer_context: 'https://raw.githubusercontent.com/beckn/local-retail/refs/heads/main/schema/RetailOffer/v2.1/context.jsonld' }
+    res: { id: 'item-keripik-singkong', name: 'Keripik Singkong Balado (Spicy Cassava Chips)', short_desc: 'Crispy cassava chips with balado seasoning', long_desc: 'Keripik singkong renyah dengan bumbu balado khas Minang yang pedas manis. (Crispy cassava chips with authentic Minang sweet and spicy balado seasoning.)', product_highlights: '- Terbuat dari singkong segar pilihan (Made from fresh selected cassava)\n- Bumbu balado asli minang (Authentic Minang balado seasoning)\n- Tanpa pengawet buatan (No artificial preservatives)', specifications: '- Berat Bersih (Net Weight): 150g\n- Kemasan (Packaging): Plastik Ziplock (Ziplock Plastic)\n- Bahan Utama (Main Ingredient): Singkong, Cabai (Cassava, Chili)', stock_quantity: '50', media_url: 'https://images.unsplash.com/photo-1621939514649-280e2ee25f60?w=400', brand: 'Chitato', origin_country: 'ID', weight_value: '150', weight_unit: 'G', color: 'Golden', material: 'Cassava' },
+    off: { id: 'offer-keripik-singkong', name: 'Keripik Singkong Balado', price: '25000', currency: 'IDR', cod_available: true, returns_allowed: true, returns_window: 'P7D', returns_method: 'SELLER_PICKUP', cancel_allowed: true, cancel_window: 'PT2H', cancel_event: 'BEFORE_PACKING', replace_allowed: false, max_distance: '20', timing_days: ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'], timing_start: '09:00', timing_end: '21:00', offer_context: 'https://schema.ion.id/release1/schema/extension/trade/TradeOffer/v1/context.jsonld' }
   },
   {
-    res: { id: 'item-bolu-pisang', name: 'Bolu Pisang Cokelat (Chocolate Banana Cake)', short_desc: 'Soft banana cake with chocolate chips', stock_quantity: '30', media_url: 'https://images.unsplash.com/photo-1578985545062-69928b1d9587?w=400', brand: 'HomeMade', origin_country: 'ID', weight_value: '400', weight_unit: 'G', color: 'Brown', material: 'Flour' },
-    off: { id: 'offer-bolu-pisang', name: 'Bolu Pisang Cokelat', price: '45000', currency: 'IDR', cod_available: true, returns_allowed: false, cancel_allowed: true, cancel_window: 'PT1H', cancel_event: 'BEFORE_PACKING', replace_allowed: false, max_distance: '10', timing_days: ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'], timing_start: '08:00', timing_end: '18:00', offer_context: 'https://raw.githubusercontent.com/beckn/local-retail/refs/heads/main/schema/RetailOffer/v2.1/context.jsonld' }
+    res: { id: 'item-bolu-pisang', name: 'Bolu Pisang Cokelat (Chocolate Banana Cake)', short_desc: 'Soft banana cake with chocolate chips', long_desc: 'Bolu pisang panggang yang lembut dipadukan dengan taburan cokelat lezat di atasnya. (Soft baked banana cake topped with delicious chocolate chips.)', product_highlights: '- Dibuat dengan pisang ambon segar (Made with fresh Ambon bananas)\n- Tekstur lembut dan lumer di mulut (Soft texture that melts in the mouth)\n- Taburan cokelat premium (Premium chocolate chips)', specifications: '- Berat Bersih (Net Weight): 400g\n- Kemasan (Packaging): Kardus Makanan (Food Box)\n- Bahan Utama (Main Ingredient): Tepung, Pisang, Cokelat (Flour, Banana, Chocolate)', stock_quantity: '30', media_url: 'https://images.unsplash.com/photo-1578985545062-69928b1d9587?w=400', brand: 'HomeMade', origin_country: 'ID', weight_value: '400', weight_unit: 'G', color: 'Brown', material: 'Flour' },
+    off: { id: 'offer-bolu-pisang', name: 'Bolu Pisang Cokelat', price: '45000', currency: 'IDR', cod_available: true, returns_allowed: false, cancel_allowed: true, cancel_window: 'PT1H', cancel_event: 'BEFORE_PACKING', replace_allowed: false, max_distance: '10', timing_days: ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'], timing_start: '08:00', timing_end: '18:00', offer_context: 'https://schema.ion.id/release1/schema/extension/trade/TradeOffer/v1/context.jsonld' }
   },
   {
-    res: { id: 'item-teh-botol', name: 'Teh Botol Sosro (Bottled Jasmine Tea)', short_desc: 'Ready-to-drink jasmine tea', stock_quantity: '200', media_url: 'https://images.unsplash.com/photo-1556679343-c7306c1976bc?w=400', brand: 'Sosro', origin_country: 'ID', weight_value: '350', weight_unit: 'ML', color: 'Amber', material: 'PET Bottle' },
-    off: { id: 'offer-teh-botol', name: 'Teh Botol Sosro', price: '5000', currency: 'IDR', cod_available: true, returns_allowed: false, cancel_allowed: true, cancel_window: 'PT30M', cancel_event: 'BEFORE_PACKING', replace_allowed: false, max_distance: '15', timing_days: ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'], timing_start: '07:00', timing_end: '22:00', offer_context: 'https://raw.githubusercontent.com/beckn/local-retail/refs/heads/main/schema/RetailOffer/v2.1/context.jsonld' }
+    res: { id: 'item-teh-botol', name: 'Teh Botol Sosro (Bottled Jasmine Tea)', short_desc: 'Ready-to-drink jasmine tea', long_desc: 'Minuman teh melati siap saji legendaris Indonesia yang menyegarkan dahaga. (Legendary Indonesian ready-to-drink jasmine tea that is very refreshing.)', product_highlights: '- Terbuat dari daun teh melati asli (Made from real jasmine tea leaves)\n- Proses penyeduhan higienis (Hygienic brewing process)\n- Menyegarkan dahaga (Refreshing thirst quencher)', specifications: '- Isi Bersih (Net Volume): 350ml\n- Kemasan (Packaging): Botol Plastik PET (PET Plastic Bottle)\n- Bahan Utama (Main Ingredient): Air, Ekstrak Teh (Water, Tea Extract)', stock_quantity: '200', media_url: 'https://images.unsplash.com/photo-1556679343-c7306c1976bc?w=400', brand: 'Sosro', origin_country: 'ID', weight_value: '350', weight_unit: 'ML', color: 'Amber', material: 'PET Bottle' },
+    off: { id: 'offer-teh-botol', name: 'Teh Botol Sosro', price: '5000', currency: 'IDR', cod_available: true, returns_allowed: false, cancel_allowed: true, cancel_window: 'PT30M', cancel_event: 'BEFORE_PACKING', replace_allowed: false, max_distance: '15', timing_days: ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'], timing_start: '07:00', timing_end: '22:00', offer_context: 'https://schema.ion.id/release1/schema/extension/trade/TradeOffer/v1/context.jsonld' }
   },
 ]
 let _productFillIdx = 0
@@ -2924,8 +2939,20 @@ function AddProductPage({ onNav, catalogId }) {
               <input className={inputCls} value={res.short_desc} onChange={e => rSet('short_desc', e.target.value)} placeholder="500ml insulated flask" />
             </div>
             <div><label className={labelCls}>Long Description</label>
-              <input className={inputCls} value={res.long_desc} onChange={e => rSet('long_desc', e.target.value)} placeholder="Full description…" />
+              <textarea className={inputCls} rows="2" value={res.long_desc} onChange={e => rSet('long_desc', e.target.value)} placeholder="Full description…" />
             </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+            <div><label className={labelCls}>Product Highlights</label>
+              <textarea className={inputCls} rows="3" value={res.product_highlights} onChange={e => rSet('product_highlights', e.target.value)} placeholder="List highlights separated by newlines..." />
+            </div>
+            <div><label className={labelCls}>Specifications</label>
+              <textarea className={inputCls} rows="3" value={res.specifications} onChange={e => rSet('specifications', e.target.value)} placeholder="List specifications separated by newlines..." />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
             <div><label className={labelCls}>Stock Quantity <span className="text-slate-600 font-normal">(blank = unlimited)</span></label>
               <input className={inputCls} type="number" min="0" value={res.stock_quantity} onChange={e => rSet('stock_quantity', e.target.value)} placeholder="50" />
             </div>
@@ -3072,8 +3099,8 @@ function AddOfferPage({ onNav, catalogId, preselectedResourceId }) {
           id: `${off.id}-price`,
           status: { code: 'ACTIVE', name: 'ACTIVE' },
           considerationAttributes: {
-            '@context': 'https://schema.beckn.io/RetailConsideration/v2.1/context.jsonld',
-            '@type': 'RetailConsideration',
+            '@context': 'https://schema.ion.id/release1/schema/extension/trade/TradeConsideration/v1/context.jsonld',
+            '@type': 'ion:IONTradeConsideration',
             currency: off.currency,
             breakup: [{ title: off.name || off.id, amount: Number(off.price), type: 'BASE_PRICE' }],
             totalAmount: Number(off.price),

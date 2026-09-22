@@ -16,6 +16,7 @@ import (
 
 	dbsqlc "github.com/ion/winroom/bpp/db/sqlc"
 	"github.com/ion/winroom/bpp/internal/config"
+	"github.com/ion/winroom/bpp/internal/httpclient"
 )
 
 // PublishService saves catalog data to the database, forwards it to the CDS,
@@ -32,7 +33,7 @@ func NewPublishService(pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.Lo
 		pool:       pool,
 		cfg:        cfg,
 		lh:         lh,
-		httpClient: &http.Client{Timeout: 30 * time.Second},
+		httpClient: httpclient.New(30 * time.Second),
 	}
 }
 

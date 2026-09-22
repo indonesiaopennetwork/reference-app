@@ -1,411 +1,68 @@
-# beckn-app
+# ION Reference App
 
-A reference implementation of a buyer (BAP) and seller (BPP) application on
-the Beckn protocol, plus the Beckn network adapters (onix) that sign, route,
-and validate their traffic.
+A reference implementation for a **Network Participant (NP)** on
+**ION (Indonesia Open Network)** — covering both roles an NP can take on the
+network: **BAP** (buyer-side) and **BPP** (seller-side). It demonstrates a
+complete, working integration end-to-end: registration, signed
+network-protocol messaging via the Beckn network adapters (`onix`), and both
+the buyer and seller applications built on top of it.
 
-| Service | What it is | Local port | Source |
-|---|---|---|---|
-| `bap` | Buyer-side app (Go) | 8083 | `bap-application/` |
-| `bpp` | Seller-side app (Go) | 8080 | `bpp-application/` |
-| `bap-frontend` | Buyer web UI | 3000 | `bap-frontend/` |
-| `bpp-frontend` | Seller/admin web UI | 3001 | `bpp-frontend/` |
-| `onix-bap` | Beckn network adapter for bap | 8081 | `onix-bap/` |
-| `onix-bpp` | Beckn network adapter for bpp | 8082 | `onix-bpp/` |
+For background on ION itself, see
+[github.com/indonesiaopennetwork](https://github.com/indonesiaopennetwork).
 
-Plus Postgres and two Redis instances (Docker Compose locally; a dedicated
-Cloud SQL instance and a dedicated Memorystore instance in the cloud).
+## What you can do with it
+
+### Register as a Network Participant
+
+- **Self-service registration/login via OIDC (Zitadel)** — no manual
+  approval needed; you're active as soon as you complete the login flow.
+- **One identity works for either role, or both** — there's no separate
+  signup for buying versus selling.
+
+### As a BAP (buyer)
+
+- **Search a seller's published catalog** — results come from a live
+  discover call against the network, not a local cache.
+- **Select items and check out with billing details** — this kicks off the
+  select → init → confirm order lifecycle with the seller.
+- **Track an order through to confirmation** — status updates arrive
+  asynchronously as the seller's app responds.
+- **View order history and any past order's detail** — every order shown is
+  scoped to your own logged-in identity.
+- **Cancel an order** — a cancellation request is sent to the seller the
+  same way the original order was.
+- **Rate a completed order** — feedback is recorded against that
+  transaction once it's marked complete.
+
+### As a BPP (seller)
+
+- **Overview** — stats and insights at a glance: active orders, pending
+  orders, and today's order volume in one view.
+- **Catalogs** — build and publish your catalog to the network; this is
+  what makes you discoverable to other participants searching for products.
+- **Inventory** — manage your resources and offers, including what you're
+  selling and at what price.
+- **Orders** — manage incoming contracts and respond to buyer actions,
+  scoped to your own seller profile.
+
+See [TECHNICAL_ARTIFACT.md](TECHNICAL_ARTIFACT.md) for exactly how a request
+moves through the system for each of these.
+
+| Service | What it is | Source |
+|---|---|---|
+| `bap` | Buyer-side backend (Go) | `bap-application/` |
+| `bpp` | Seller-side backend (Go) | `bpp-application/` |
+| `bap-frontend` | Buyer web UI | `bap-frontend/` |
+| `bpp-frontend` | Seller/admin dashboard | `bpp-frontend/` |
+| `landing-page` | Entry point + NP registration/login | `landing-page/` |
+| `onix-bap` / `onix-bpp` | Beckn network adapters — sign, route, and validate traffic for `bap`/`bpp` | `onix-bap/`, `onix-bpp/` |
 
 ## Docs map
 
+- **Stack, architecture, and request flow** (what's built with what, how a
+  request moves from `bap-frontend` through to the network and back) →
+  [TECHNICAL_ARTIFACT.md](TECHNICAL_ARTIFACT.md)
 - **Local development** (Docker Compose, fastest way to get a working
   end-to-end system) → [INFRA_SETUP.md](INFRA_SETUP.md#1-local-development-docker-compose)
-- **Deploy to your own fresh GCP project** → this README, below
-- **Cloud deploy reference** (every gotcha hit building this, verification,
-  redeploys, inspecting Cloud SQL) → [terraform/README.md](terraform/README.md)
-
-## Prerequisites
-
-Before touching Terraform, make sure you have:
-
-- A GCP project with a **billing account linked**. A brand-new project has
-  none by default, and the first bootstrap step fails immediately without one.
-- `gcloud` authenticated with Owner (or equivalent) on that project, plus
-  Application Default Credentials configured (separate credential store from
-  `gcloud auth login`):
-  ```sh
-  gcloud auth application-default login
-  gcloud auth application-default set-quota-project <YOUR_PROJECT_ID>
-  ```
-- `terraform >= 1.5` and `docker` installed locally.
-- **A registered Beckn network identity for both `bap` and `bpp`** — a
-  subscriber ID, a `keyId`, an Ed25519 signing keypair, and an encryption
-  keypair for each side, registered against the Beckn network registry you're
-  deploying against. **You cannot generate these yourself** — they must
-  actually be registered so other participants can verify your signatures.
-  Ask whoever administers that network registry for a subscriber slot. This
-  is why five Terraform variables below have no default: `terraform plan`
-  will refuse to run until you supply real values.
-
-## Deploy to your fresh GCP project
-
-All commands below run from the repo root unless noted, and `<YOUR_PROJECT_ID>`
-/ `<YOUR_REGION>` are placeholders — pick real values and use them consistently.
-
-### 0. Point Terraform state at your project
-
-`terraform/backend.tf` currently hardcodes a state bucket name for the
-project this repo was built against. Edit it before running `terraform init`:
-
-```hcl
-# terraform/backend.tf
-terraform {
-  backend "gcs" {
-    bucket = "<YOUR_PROJECT_ID>-tfstate"   # was: ion-sandbox-001-tfstate
-    prefix = "beckn-app"
-  }
-}
-```
-
-### 1. Create the state bucket
-
-Chicken-and-egg: Terraform can't create the bucket it stores its own state
-in, so this is a one-time manual step.
-
-```sh
-task deploy:state-bucket PROJECT_ID=<YOUR_PROJECT_ID> REGION=<YOUR_REGION>
-```
-
-### 2. Create `terraform/terraform.tfvars`
-
-Not committed (already git-ignored). At minimum, override `project_id` and
-supply the five identity variables that have no default:
-
-```hcl
-# terraform/terraform.tfvars
-project_id       = "<YOUR_PROJECT_ID>"
-region           = "<YOUR_REGION>"
-bap_id           = "<your registered onix-bap identity>"
-bpp_id           = "<your registered onix-bpp identity>"
-network_id       = "<your registry's network id>"
-cds_discover_url = "<your registry's discover URL>"
-```
-
-There's no `cds_publish_url` to supply — `bpp`'s `CDS_PUBLISH_URL` points at
-the `onix-catalog-publish` Cloud Run service this module deploys (a
-same-project, same-operator service, not an external registry endpoint), and
-Terraform computes that URL itself.
-
-### 3. Bootstrap APIs, Artifact Registry, and empty secret containers
-
-```sh
-task deploy:bootstrap-apis
-```
-
-### 4. Seed secrets
-
-14 secrets are seeded outside Terraform (`postgres-password` is the only one
-Terraform generates itself). Use values for the identity you registered in
-the prerequisites — `BAP_PRIVATE_KEY`/`BAP_KEY_ID` **must** be the same
-keypair/identity as `BAP_ONIX_SIGNING_PRIVATE_KEY`/`BAP_ONIX_KEY_ID` (same
-rule for bpp) — there's exactly one registered identity per side:
-
-```sh
-PROJECT_ID=<YOUR_PROJECT_ID> \
-  BAP_PRIVATE_KEY=... BAP_KEY_ID=... BPP_PRIVATE_KEY=... BPP_KEY_ID=... \
-  BAP_ONIX_KEY_ID=... BAP_ONIX_SIGNING_PRIVATE_KEY=... BAP_ONIX_SIGNING_PUBLIC_KEY=... \
-  BAP_ONIX_ENCR_PRIVATE_KEY=... BAP_ONIX_ENCR_PUBLIC_KEY=... \
-  BPP_ONIX_KEY_ID=... BPP_ONIX_SIGNING_PRIVATE_KEY=... BPP_ONIX_SIGNING_PUBLIC_KEY=... \
-  BPP_ONIX_ENCR_PRIVATE_KEY=... BPP_ONIX_ENCR_PUBLIC_KEY=... \
-  ../scripts/seed-secrets.sh
-```
-
-### 5. Build and push all 12 images
-
-```sh
-task deploy:build-all PROJECT_ID=<YOUR_PROJECT_ID> REGION=<YOUR_REGION>
-```
-
-### 6. Create the network, Cloud SQL, and Redis
-
-Cloud SQL private-IP creation is slow (budget 5–10 minutes), which is why
-it's sequenced as its own targeted apply:
-
-```sh
-task deploy:infra
-```
-
-### 7. First full apply — expect it to fail on `bap`/`bpp`
-
-The databases have no schema yet, and both apps exit if a required startup
-query fails. This is normal for a first deploy:
-
-```sh
-task deploy:full-apply
-```
-
-### 8. Run migrations
-
-```sh
-task deploy:migrate
-```
-
-### 9. Re-apply
-
-```sh
-task deploy:full-apply
-```
-
-`bap`/`bpp` should now start successfully against the real schema.
-
-For the full list of gotchas hit while building this deploy (secret
-propagation, image pinning, subnet sizing, and more), see
-[terraform/README.md](terraform/README.md#gotchas-actually-hit-doing-this-not-theoretical--each-one-broke-a-real-deploy).
-
-## Verify the deployment
-
-```sh
-terraform output bap_frontend_url bpp_frontend_url
-```
-
-Open both URLs and confirm the SPA loads. Then seed some demo catalog data
-via [catalog-seed/](catalog-seed/) against the new `bpp_url` and try a
-discover flow end-to-end.
-
-## Custom domain for DeDi discovery files (optional)
-
-`onix-catalog-publish` writes signed catalog files (`index/becknCatalogs.index.json`,
-`catalogs/*.json.gz`) to `outputRoot` on every "Publish to Network" click.
-`terraform/gcs-dedi-static.tf` and `terraform/cloud-run-dedi-static.tf` back
-that `outputRoot` with a public GCS bucket and a small nginx service
-(`dedi-static-server`), and `terraform/domain-mapping.tf` maps it onto a
-custom domain (`var.dedi_domain`/`var.dedi_domain_www`) so the discovery
-chain — `.well-known/dedi.index.json` → `dedi/ion-scratch-registry.json` →
-`index/becknCatalogs.index.json` → the catalog files themselves — is
-publicly reachable. The *feature* is optional (the rest of the deployment
-works without it, though `onix-catalog-publish`'s output has nowhere durable
-to go if you skip it) — but the underlying Terraform **resources are not
-conditional**, there's no flag to skip creating them. That means:
-
-**`dedi_domain`/`dedi_domain_www` have no default** — same treatment as
-`bap_id`/`bpp_id`/`network_id`/`cds_discover_url` above, and for the same
-reason: a hardcoded default pointing at *some* domain is exactly how you'd
-end up silently deploying against a domain you don't control. `terraform
-plan` fails immediately and loudly ("no value for required variable") until
-you set both in `terraform.tfvars` to a domain you actually own and can
-verify — before that, there's no `apply`-time surprise to plan around, this
-is caught at `plan` time.
-
-**Prerequisite:** the domain must be a **verified domain** in
-[Search Console](https://search.google.com/search-console) under the same
-Google account your `gcloud`/Terraform credentials use —
-`google_cloud_run_domain_mapping` fails until that's done.
-
-**Deploy sequence:**
-
-1. Set `dedi_domain`/`dedi_domain_www` in `terraform.tfvars` — required,
-   `terraform plan` fails without them.
-2. Build and push the `dedi-static-server` image — it's included in step 5
-   above if you're deploying fresh. If you're adding this to an
-   **already-running** deployment, build and push it explicitly before
-   applying, since there's no "build all images" checkpoint to fall back on
-   at that point:
-   ```sh
-   gcloud auth configure-docker <YOUR_REGION>-docker.pkg.dev --quiet
-   docker build -t <YOUR_REGION>-docker.pkg.dev/<YOUR_PROJECT_ID>/beckn-app/dedi-static-server:latest dedi-static-server/
-   docker push <YOUR_REGION>-docker.pkg.dev/<YOUR_PROJECT_ID>/beckn-app/dedi-static-server:latest
-   ```
-3. `terraform plan -out=dedi.tfplan && terraform apply dedi.tfplan`. If
-   `google_cloud_run_domain_mapping` fails with a region/availability error,
-   see the comment at the top of `terraform/domain-mapping.tf` — Cloud Run
-   domain mapping has historically had self-service limited to a subset of
-   regions.
-4. Get the DNS records and create them at your registrar (the one step I
-   can't automate):
-   ```sh
-   terraform output dedi_domain_dns_records
-   terraform output dedi_domain_www_dns_records
-   ```
-5. Upload the two files that rarely change and aren't generated by anything
-   in this repo. Put `dedi.index.json` and `ion-scratch-registry.json` in
-   `dedi-onboarding-files/` (see `dedi-onboarding-files/.env.local.example`
-   for the signing keys), then re-sign and upload them:
-   ```sh
-   task sign-dedi-files
-   task deploy-dedi-files
-   ```
-6. Wait for the managed SSL cert (up to ~60 min after DNS propagates), then
-   `curl https://<your domain>/.well-known/dedi.index.json`.
-
-## Routing BPP/BAP receiver calls through the custom domain (optional)
-
-Builds on the section above — requires the custom domain already mapped to
-`dedi-static-server`. `dedi-static-server`'s nginx also reverse-proxies
-`/bpp/receiver/*` → `onix-bpp` and `/bap/receiver/*` → `onix-bap`, so a
-subscriber's registered URL can be `https://<your domain>/bpp/receiver/` (or
-`/bap/receiver/`) instead of `onix-bpp`'s/`onix-bap`'s raw `*.run.app` URL.
-
-This also sidesteps the path mismatch in
-[terraform/README.md's Gotcha #7](terraform/README.md#gotchas-actually-hit-doing-this-not-theoretical--each-one-broke-a-real-deploy):
-other participants append `/<action>` directly to whatever URL is
-registered, and `onix`'s receiver modules default to listening at
-`/bpp/receiver/`/`/bap/receiver/` — baking that same suffix into the
-*registered* URL itself makes `<registered-url>/<action>` land correctly,
-without needing to change either receiver module's own listening path.
-
-**How it's wired:**
-- `dedi-static-server/nginx.conf.template` — the two `location` blocks doing
-  the proxying, targeting `${ONIX_BPP_HOST}`/`${ONIX_BAP_HOST}`.
-- `dedi-static-server/Dockerfile` — `COPY`s that template into
-  `/etc/nginx/templates/default.conf.template` rather than directly into
-  `/etc/nginx/conf.d/`, so `nginx:alpine`'s built-in entrypoint does the
-  `envsubst` substitution from real environment variables at container
-  startup. This has to happen at *startup*, not image build time, because
-  the target host is only known once `onix-bpp`/`onix-bap` already exist.
-- `terraform/cloud-run-dedi-static.tf` — sets `ONIX_BPP_HOST`/`ONIX_BAP_HOST`
-  on the container from `google_cloud_run_v2_service.onix_bpp.uri` /
-  `google_cloud_run_v2_service.onix_bap.uri` (scheme stripped).
-- Redeploying after touching any of the above is the same as any other
-  Cloud Run image change — see "Redeploy after a change" → "Code change in
-  any service" below.
-
-**Do not extend this to `/bpp/caller/` or `/bap/caller/`.** Unlike the
-receiver modules (`validateSign` is their first processing step), the caller
-modules have no inbound signature validation — they trust whoever calls them
-and sign+forward outbound messages on the participant's behalf. They're
-meant to stay reachable only internally: `BPP_CALLER_URL`/`ADAPTER_URL`
-point directly at `onix-bpp`'s/`onix-bap`'s raw Cloud Run URL, set by
-`terraform/cloud-run-wiring.tf`. Proxying either publicly would let anyone
-get that adapter to sign and send forged outbound messages impersonating
-this participant.
-
-**Update:** `BAP_URI`/`BPP_URI` (the in-band `context.bapUri`/`context.bppUri`
-fields on outbound messages) now *do* point at this same domain+path —
-`terraform/cloud-run-wiring.tf` sets them to `https://${var.dedi_domain}/bap/receiver/`
-/ `.../bpp/receiver/`. This is required, not just cosmetic: other network
-participants POST callbacks to `{bapUri}/<action>` directly, and
-`bapTxnReceiver`/`bppTxnReceiver` only listen at `/bap/receiver/`/
-`/bpp/receiver/` (see `config/local-simple-bap.yaml`/`local-simple-bpp.yaml`)
-— a bare `bapUri` with no path would misroute every inbound callback.
-
-## Custom domains for bap, bap-frontend, bpp-frontend, and the landing page (optional)
-
-`terraform/domain-mapping.tf` also maps `bap` (`var.bap_domain`),
-`bap-frontend` (`var.bap_frontend_domain`), `bpp-frontend`
-(`var.bpp_frontend_domain`), and `landing-page` (`var.landing_page_domain`) to
-their own subdomains — same `google_cloud_run_domain_mapping` pattern,
-Search Console verification prerequisite, and **no-default treatment** as
-`dedi_domain` above: all four are required, `terraform plan` fails without
-them. Set all four in `terraform.tfvars` to subdomains you control before
-applying.
-
-`bpp` intentionally does **not** get its own separate domain — it shares
-`dedi-static-server`'s domain instead, via one more `location` block in
-`dedi-static-server/nginx.conf.template` (`/api/v1/` → `bpp`'s dashboard/
-provider-facing API, using the same envsubst'd-hostname proxy pattern as the
-`/bpp/receiver/`/`/bap/receiver/` blocks above). `bpp`'s other route group,
-`/api/webhook/*`, is reached internally by `onix-bpp` via `bpp`'s raw Cloud
-Run URL (`BPP_URL`, set by `cloud-run-wiring.tf`) and is deliberately not
-exposed on any public domain.
-
-`bap_frontend_domain`/`bpp_frontend_domain` do double duty beyond domain
-mapping: `terraform/cloud-run-bap-frontend.tf` also injects
-`bap_frontend_domain` into `bap-frontend`'s own container as `BPP_ADMIN_URL`,
-and `terraform/cloud-run-bpp-frontend.tf` injects `bpp_frontend_domain` into
-`bpp-frontend`'s container as `BAP_URL` — these back the "BPP APP" /
-"Go to BAP APP" cross-navigation buttons in each frontend's UI (locally,
-the same values come from `VITE_BPP_ADMIN_URL`/`VITE_BAP_URL` in `.env`).
-Note that `BAP_URL` as a container env var name is overloaded: on
-`bap-frontend` it's a *different* var pointing at the bap backend (nginx's
-reverse-proxy target, `var.bap_domain`), while on `bpp-frontend` it points at
-bap-frontend's own URL for the button — same name, different meaning
-depending on which service reads it.
-
-After applying, get the DNS records for the four new domains the same way as
-`dedi_domain`:
-```sh
-terraform output bap_domain_dns_records
-terraform output bap_frontend_domain_dns_records
-terraform output bpp_frontend_domain_dns_records
-terraform output landing_page_domain_dns_records
-```
-
-## Redeploy after a change
-
-### A new service added to the Terraform module
-
-If you add a brand-new `google_cloud_run_v2_service` to an
-**already-running** deployment (not a fresh deploy — see step 5 above,
-which already covers this case), Cloud Run refuses to create the service
-until its image exists in Artifact Registry: `Image '...' not found`. Build
-and push that one image before applying:
-```sh
-docker build -t <YOUR_REGION>-docker.pkg.dev/<YOUR_PROJECT_ID>/beckn-app/<new-service>:latest <new-service-dir>/
-docker push <YOUR_REGION>-docker.pkg.dev/<YOUR_PROJECT_ID>/beckn-app/<new-service>:latest
-```
-then `terraform apply` as usual.
-
-### Code change in any service
-
-Cloud Run pins each service to a specific image digest at deploy time, and
-every Cloud Run resource in this module has a `lifecycle { ignore_changes =
-[...] }` block on its image — so pushing a new image under the same
-`:latest` tag does nothing to an already-running service. **A plain
-`terraform apply`, even with a new `image_tag`, does not force a redeploy
-either** — `ignore_changes` blocks that field regardless of where the new
-value comes from. What actually forces a new revision is
-`gcloud run services update --image=...` directly, bypassing Terraform for
-that one field — which is exactly what the per-service Task commands below
-do, so you never need to touch `image_tag` at all:
-
-```sh
-task redeploy:bap-frontend   # only rebuilds/redeploys bap-frontend
-task redeploy:bpp            # only rebuilds/redeploys bpp
-task redeploy:all            # rebuilds/redeploys every service (not the migrate jobs)
-```
-
-Every service has its own `redeploy:<service>` task (`task --list` shows
-them all) — see `Taskfile.yaml` for the full set, or run the equivalent
-commands by hand:
-```sh
-docker build -t <YOUR_REGION>-docker.pkg.dev/<YOUR_PROJECT_ID>/beckn-app/<service>:$(git rev-parse --short HEAD) <service-dir>/
-docker push <YOUR_REGION>-docker.pkg.dev/<YOUR_PROJECT_ID>/beckn-app/<service>:$(git rev-parse --short HEAD)
-gcloud run services update <service> --project=<YOUR_PROJECT_ID> --region=<YOUR_REGION> \
-  --container=<container-name> --image=<YOUR_REGION>-docker.pkg.dev/<YOUR_PROJECT_ID>/beckn-app/<service>:$(git rev-parse --short HEAD)
-```
-
-### Database migration added
-
-The migrate *jobs* have the same `ignore_changes` lifecycle, so
-`redeploy:all` above doesn't touch them — update and re-run each job
-explicitly:
-
-```sh
-task redeploy:migrate-bap
-task redeploy:migrate-bpp
-```
-
-### Terraform-only change (no new image)
-
-Just re-run Terraform — no `image_tag` needed:
-
-```sh
-cd terraform
-terraform plan -out=redeploy.tfplan
-terraform apply redeploy.tfplan
-```
-
-### A secret value changed (key rotation, etc.)
-
-Reseed via `scripts/seed-secrets.sh`, then force a new revision on whatever
-service reads that secret — Secret Manager's `latest` doesn't propagate to
-an already-running instance. See
-[terraform/README.md's Gotcha #9](terraform/README.md#gotchas-actually-hit-doing-this-not-theoretical--each-one-broke-a-real-deploy).
-
-## Keeping local and cloud in sync
-
-If you rotate keys or re-register an identity, the same values need updating
-in local dev's `.env`/`config/local-simple-*.yaml` and the cloud secrets
-above, or the two environments will drift — see
-[INFRA_SETUP.md §3](INFRA_SETUP.md#3-keeping-local-and-cloud-in-sync) for the
-full mapping.
+- **Deploy to your own fresh GCP project** →
+  [terraform/README.md](terraform/README.md#deploy-to-your-fresh-gcp-project)

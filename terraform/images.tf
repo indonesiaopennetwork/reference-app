@@ -17,4 +17,10 @@ locals {
   }
 
   cloudsql_proxy_image = "gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.14.2"
+
+  # Off-the-shelf upstream image, like cloudsql_proxy_image above — not
+  # built/pushed by this repo (see scripts/build-and-push.sh, which has no
+  # zitadel entry), so it's pinned here rather than in the registry map.
+  # Upgrading is just bumping this tag and re-applying.
+  zitadel_image = "ghcr.io/zitadel/zitadel:v4.17.3"
 }
