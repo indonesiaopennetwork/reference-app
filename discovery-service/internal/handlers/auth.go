@@ -41,20 +41,20 @@ func VerifyMiddleware(verifier SignatureVerifier, signer AckSigner, maxBodyBytes
 			authHeader := r.Header.Get("Authorization")
 			if authHeader == "" {
 				logger.Warn().LogActivity("discover request rejected: missing Authorization header", map[string]any{"path": r.URL.Path})
-				writeSignedNack(w, signer, nil, logger, http.StatusUnauthorized, constants.ErrSignatureMissing, "missing Authorization header")
+				writeSignedNack(w, r, signer, logger, http.StatusUnauthorized, nil, constants.ErrSignatureMissing, "missing Authorization header")
 				return
 			}
 
 			r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 			body, err := io.ReadAll(r.Body)
 			if err != nil {
-				writeSignedNack(w, signer, nil, logger, http.StatusBadRequest, constants.ErrInvalidJSON, "request body could not be read (or exceeds the size limit)")
+				writeSignedNack(w, r, signer, logger, http.StatusBadRequest, nil, constants.ErrInvalidJSON, "request body could not be read (or exceeds the size limit)")
 				return
 			}
 
 			if err := verifier.Verify(authHeader, body); err != nil {
 				logger.Warn().LogActivity("discover request rejected: signature verification failed", map[string]any{"path": r.URL.Path, "error": err.Error()})
-				writeSignedNack(w, signer, body, logger, http.StatusUnauthorized, constants.ErrSignatureInvalid, "signature verification failed")
+				writeSignedNack(w, r, signer, logger, http.StatusUnauthorized, body, constants.ErrSignatureInvalid, "signature verification failed")
 				return
 			}
 

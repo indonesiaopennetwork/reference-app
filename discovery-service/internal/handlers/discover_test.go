@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"github.com/remiges-tushar/discovery-service/internal/service"
 	"github.com/remiges-tushar/discovery-service/internal/signing"
 	"github.com/remiges-tushar/discovery-service/internal/worker"
+	"golang.org/x/crypto/blake2b"
 )
 
 func testLogger() *logharbour.Logger {
@@ -205,6 +207,117 @@ func TestDiscoverHandler_WithSigner_AckCarriesARealVerifiableSignature(t *testin
 	}
 }
 
+// TestDiscoverHandler_WithSigner_ResponseCarriesNFH007SignatureHeader
+// checks the NFH-007 (Authentication and Trust) Signature RESPONSE
+// HEADER — distinct from the body-embedded beckn.yaml CounterSignature
+// checked above: it must (a) actually be present as an HTTP header, not
+// a JSON field, (b) verify as a real Ed25519 signature over the exact
+// response body bytes, using NFH-007's own "BLAKE2b-512=" digest prefix,
+// and (c) chain in the inbound request's own Authorization signature
+// value via the signing string's request-signature component, per
+// NFH-007 §3.4.
+func TestDiscoverHandler_WithSigner_ResponseCarriesNFH007SignatureHeader(t *testing.T) {
+	kp, err := signing.GenerateKeyPair()
+	if err != nil {
+		t.Fatalf("GenerateKeyPair() error = %v", err)
+	}
+	signer := signing.NewSigner(kp, "own-bpp.example.com", "key-1", 5*time.Minute)
+	h := newTestHandlerWithSigner(t, signer)
+
+	const inboundSigValue = "SGVsbG9Xb3JsZFRlc3RTaWduYXR1cmU=" // arbitrary but valid base64
+	reqBody := validRequestBody("https://bap.example.com")
+	req := httptest.NewRequest(http.MethodPost, "/discover", strings.NewReader(reqBody))
+	req.Header.Set("Authorization", `Signature keyId="bap.example.com|key-1|ed25519",algorithm="ed25519",created="1",expires="2",headers="(created) (expires) digest",signature="`+inboundSigValue+`"`)
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+
+	headerVal := rec.Header().Get("Signature")
+	if headerVal == "" {
+		t.Fatal("no Signature response header present, want NFH-007's CounterSignature header")
+	}
+
+	parsed, err := beckn.ParseSignature(headerVal)
+	if err != nil {
+		t.Fatalf("ParseSignature(header) error = %v", err)
+	}
+	if parsed.SubscriberID != "own-bpp.example.com" || parsed.UniqueKeyID != "key-1" {
+		t.Errorf("Signature header keyId = %s|%s, want own-bpp.example.com|key-1", parsed.SubscriberID, parsed.UniqueKeyID)
+	}
+	if parsed.Headers != "(created) (expires) digest request-signature" {
+		t.Errorf("Signature header's headers param = %q, want the NFH-007 4-field list", parsed.Headers)
+	}
+
+	// Reconstruct NFH-007's exact signing string (response-body digest,
+	// "BLAKE2b-512=" prefix, chained request-signature) and verify
+	// independently -- proves the header is a real signature over what
+	// was actually sent, not just structurally shaped like one.
+	digest := blake2b.Sum512(rec.Body.Bytes())
+	digestB64 := base64.StdEncoding.EncodeToString(digest[:])
+	signingString := fmt.Sprintf("(created): %d\n(expires): %d\ndigest: BLAKE2b-512=%s\nrequest-signature: %s",
+		parsed.Created, parsed.Expires, digestB64, inboundSigValue)
+	if !ed25519.Verify(kp.Public, []byte(signingString), parsed.Signature) {
+		t.Error("Signature header does not verify against the response body + chained request-signature — wrong digest, wrong prefix, or chaining broken")
+	}
+}
+
+// TestDiscoverHandler_WithSigner_NoAuthorizationHeader_StillSignsResponse
+// checks the NFH-007 header is still present (chained to an empty
+// request-signature) even when the inbound request carried no
+// Authorization header at all (e.g. auth not enforced) — per NFH-007,
+// every synchronous response must carry it regardless.
+func TestDiscoverHandler_WithSigner_NoAuthorizationHeader_StillSignsResponse(t *testing.T) {
+	kp, err := signing.GenerateKeyPair()
+	if err != nil {
+		t.Fatalf("GenerateKeyPair() error = %v", err)
+	}
+	signer := signing.NewSigner(kp, "own-bpp.example.com", "key-1", 5*time.Minute)
+	h := newTestHandlerWithSigner(t, signer)
+
+	req := httptest.NewRequest(http.MethodPost, "/discover", strings.NewReader(validRequestBody("https://bap.example.com")))
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	headerVal := rec.Header().Get("Signature")
+	if headerVal == "" {
+		t.Fatal("no Signature response header present even with no inbound Authorization header")
+	}
+	parsed, err := beckn.ParseSignature(headerVal)
+	if err != nil {
+		t.Fatalf("ParseSignature(header) error = %v", err)
+	}
+
+	digest := blake2b.Sum512(rec.Body.Bytes())
+	digestB64 := base64.StdEncoding.EncodeToString(digest[:])
+	signingString := fmt.Sprintf("(created): %d\n(expires): %d\ndigest: BLAKE2b-512=%s\nrequest-signature: ",
+		parsed.Created, parsed.Expires, digestB64)
+	if !ed25519.Verify(kp.Public, []byte(signingString), parsed.Signature) {
+		t.Error("Signature header does not verify with an empty chained request-signature")
+	}
+}
+
+// TestDiscoverHandler_NoSigner_OmitsNFH007Header checks no Signature
+// response header is emitted at all when no signer is configured — NFH-007
+// compliance is meaningless without a real key, and a garbage/placeholder
+// header would be worse than none.
+func TestDiscoverHandler_NoSigner_OmitsNFH007Header(t *testing.T) {
+	h := newTestHandler(t) // signer == nil
+
+	req := httptest.NewRequest(http.MethodPost, "/discover", strings.NewReader(validRequestBody("https://bap.example.com")))
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if got := rec.Header().Get("Signature"); got != "" {
+		t.Errorf("Signature header = %q, want none when no signer is configured", got)
+	}
+}
+
 // TestDiscoverHandler_SignerFailure_FallsBackToPlaceholder checks the Ack
 // still gets sent — with a clearly-marked placeholder, not an error —
 // when the configured signer itself fails. A broken signing key must
@@ -232,6 +345,10 @@ func TestDiscoverHandler_SignerFailure_FallsBackToPlaceholder(t *testing.T) {
 type failingSigner struct{}
 
 func (failingSigner) Sign(body []byte) (beckn.Signature, error) {
+	return "", fmt.Errorf("signing key unavailable")
+}
+
+func (failingSigner) SignAckHeader(responseBody []byte, requestSignatureBase64 string) (string, error) {
 	return "", fmt.Errorf("signing key unavailable")
 }
 

@@ -29,20 +29,33 @@ func main() {
 	priority := logging.ParsePriority(cfg.LogLevel)
 	logger := logging.New("discovery-service", priority, logging.IsDebugLevel(priority))
 
-	dispatchSigner := buildSigner(cfg, logger)
+	// signer is *signing.Signer, concretely -- kept as a concrete type
+	// (not an interface) so the nil-vs-real check below is unambiguous.
+	// Assigning a nil *signing.Signer directly to an interface-typed
+	// variable would produce a non-nil interface wrapping a nil pointer
+	// (a classic Go footgun) -- reqSigner/ackSigner below are built
+	// explicitly to stay genuinely nil when signer is, instead.
+	signer := buildSigner(cfg, logger)
+	var reqSigner dispatch.RequestSigner
+	var ackSigner handlers.AckSigner
+	if signer != nil {
+		reqSigner = signer
+		ackSigner = signer
+	}
 
 	pool := worker.NewPool(cfg.WorkerPoolSize, cfg.WorkerQueueSize, logger)
-	dispatcher := dispatch.NewHTTPDispatcher(&http.Client{Timeout: cfg.DispatchClientTimeout}, cfg.OnDiscoverPath, dispatchSigner)
+	dispatcher := dispatch.NewHTTPDispatcher(&http.Client{Timeout: cfg.DispatchClientTimeout}, cfg.OnDiscoverPath, reqSigner)
 
 	catalogStore, stopCatalogRefresh := buildCatalogStore(cfg, logger)
 	defer stopCatalogRefresh()
 
 	svc := service.NewDiscoverService(dispatcher, pool, cfg.DispatchDeliveryTimeout, logger, cfg.SubscriberID, cfg.SubscriberURI, catalogStore)
-	// dispatchSigner also signs the Ack/NACK's CounterSignature -- same
-	// identity, same key, both directions -- see handlers.AckSigner.
-	discoverHandler := handlers.NewDiscoverHandler(svc, cfg.MaxRequestBodyBytes, logger, dispatchSigner)
+	// ackSigner also signs the Ack/NACK's CounterSignature (body field)
+	// and NFH-007's Signature response header -- same identity, same
+	// key, every direction -- see handlers.AckSigner.
+	discoverHandler := handlers.NewDiscoverHandler(svc, cfg.MaxRequestBodyBytes, logger, ackSigner)
 
-	verifyDiscover := handlers.VerifyMiddleware(buildVerifier(cfg, logger), dispatchSigner, cfg.MaxRequestBodyBytes, logger)
+	verifyDiscover := handlers.VerifyMiddleware(buildVerifier(cfg, logger), ackSigner, cfg.MaxRequestBodyBytes, logger)
 
 	mux := http.NewServeMux()
 	mux.Handle("POST /discover", verifyDiscover(discoverHandler))
@@ -126,7 +139,7 @@ func main() {
 // from whichever of SUBSCRIBER_ID/SIGNING_KEY_ID or the combined
 // SUBSCRIBER_KEY_ID (this service's own dedicated identity) was
 // configured.
-func buildSigner(cfg config.Config, logger *logharbour.Logger) dispatch.RequestSigner {
+func buildSigner(cfg config.Config, logger *logharbour.Logger) *signing.Signer {
 	if cfg.SubscriberID == "" {
 		logger.Warn().LogActivity("no subscriber identity configured (SUBSCRIBER_ID/SUBSCRIBER_KEY_ID) — outbound on_discover requests will be unsigned", nil)
 		return nil

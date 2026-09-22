@@ -110,6 +110,52 @@ func (s *Signer) Sign(body []byte) (beckn.Signature, error) {
 	), nil
 }
 
+// SignAckHeader produces NFH-007's (Authentication and Trust) Signature
+// RESPONSE HEADER value for a synchronous Ack/NACK — distinct from Sign,
+// which produces beckn.yaml's own body-embedded Signature field. Both are
+// emitted (see handlers.writeSignedAck) since NFH-014 confirms
+// /discover/on_discover are otherwise unchanged from plain beckn.yaml, so
+// nothing says its body-level requirement goes away just because this
+// network layers NFH-007's stricter header on top.
+//
+// Two things make this genuinely different from Sign, not just a
+// relabeling, and both must be reproduced exactly as NFH-007 §3.4
+// specifies:
+//   - the digest covers responseBody (what we're about to send back), not
+//     an inbound request body, and uses NFH-007's own digest prefix
+//     "BLAKE2b-512=" — beckn.yaml's Signature schema spells the identical
+//     BLAKE2b-512 hash's prefix "BLAKE-512=" instead; these are NOT
+//     interchangeable strings even though the hash function is the same.
+//   - the signing string has a fourth component, request-signature: the
+//     raw base64 signature value (no quotes, no other Authorization
+//     header parts) extracted from the specific inbound request being
+//     acknowledged — this is what chains the response to that request
+//     for non-repudiation. Pass "" when there isn't one (no Authorization
+//     header on the inbound request, e.g. auth not configured) — the
+//     header must still be present on every response regardless.
+func (s *Signer) SignAckHeader(responseBody []byte, requestSignatureBase64 string) (string, error) {
+	digest := blake2b.Sum512(responseBody)
+	digestB64 := base64.StdEncoding.EncodeToString(digest[:])
+
+	created := time.Now().Unix()
+	expires := created + int64(s.validity.Seconds())
+
+	signingString := fmt.Sprintf(
+		"(created): %d\n(expires): %d\ndigest: BLAKE2b-512=%s\nrequest-signature: %s",
+		created, expires, digestB64, requestSignatureBase64,
+	)
+	sigBytes := ed25519.Sign(s.keyPair.Private, []byte(signingString))
+	sigB64 := base64.StdEncoding.EncodeToString(sigBytes)
+
+	sig := beckn.FormatSignature(
+		s.subscriberID, s.uniqueKeyID, "ed25519",
+		created, expires,
+		"(created) (expires) digest request-signature",
+		sigB64,
+	)
+	return string(sig), nil
+}
+
 // Verifier checks an inbound Authorization header against a single trusted
 // caller identity and public key (see package doc).
 type Verifier struct {

@@ -1060,6 +1060,82 @@ against; `beckn.yaml` was already the correct, sufficient source.
   via `signing.NewVerifier`) and `TestDiscoverHandler_SignerFailure_FallsBackToPlaceholder`.
   134 tests across 12 packages pass.
 
+**D24 — Added NFH-007's `Signature` HTTP response header alongside D23's
+body-embedded CounterSignature, discovery-service only (2026-09-22).**
+D23 satisfied `beckn.yaml`'s own Ack `signature` field. A follow-up user
+question ("but as per NFH documentation are we returning the signature
+field in ACK response?") led to reading NFH's own docs
+(`docs.nfh.global/build/creating-a-network/catalog-publishing-and-discovery`),
+which pointed at NFH-014 (confirms `/discover`/`/on_discover` are
+unchanged from plain `beckn.yaml` — no separate NFH-specific *body*
+shape), and then NFH-007 (`Authentication_and_Trust.md`) — which turned
+out to mandate a genuinely different, additional mechanism: every
+synchronous response, on every status code, must carry a `Signature`
+**HTTP response header** (not a JSON body field), built from a 4-field
+signing string `(created) (expires) digest request-signature`, where:
+  - `digest` covers the **response body** (not the request body D23's
+    field covers), prefixed `"BLAKE2b-512="` — NOT interchangeable with
+    `beckn.yaml`'s own prefix spelling `"BLAKE-512="` for the identical
+    hash function; a byte-for-byte match on the prefix string matters
+    because the signing string is hashed as literal text.
+  - `request-signature` chains in the *inbound* request's own
+    Authorization signature value (raw base64, no quotes/other params) —
+    ties this specific response to that specific request for
+    non-repudiation. Empty string when there's no inbound Authorization
+    header (auth unconfigured) — the header must still be emitted.
+
+Since NFH-014 doesn't remove `beckn.yaml`'s body-field requirement, and
+nothing about NFH-007 says the header replaces it, both signatures are
+now emitted on every Ack/NACK — not a redundancy, they cover different
+things (request vs. response body) for different purposes (protocol
+compliance vs. this network's stricter binding). Scoped to
+discovery-service only, per explicit user choice, after the two other
+options (retrofit onto all services network-wide; do nothing) were laid
+out — the rest of the reference app's services don't participate in this
+network's specific binding requirements.
+- `internal/signing/signing.go`: new `Signer.SignAckHeader(responseBody
+  []byte, requestSignatureBase64 string) (string, error)`, kept
+  deliberately separate from `Sign` rather than parameterizing one method
+  — the two digest prefixes and signing-string shapes are genuinely
+  different formats per two different specs, not variations of one.
+- `internal/utility/httpjson.go`: new `WriteJSONBytes(w, status, body
+  []byte)` — signing needs the exact response bytes before they're
+  written, which `WriteJSON`'s streaming `json.NewEncoder` never exposes.
+- `internal/handlers/discover.go`: `AckSigner` interface extended with
+  `SignAckHeader`; `writeAck`/`writeNack` now thread `*http.Request`
+  through to a new shared `writeSignedAck`, which marshals the Ack once,
+  sets the `Signature` header from `SignAckHeader` (skipped entirely, not
+  placeholder'd, when no signer is configured — an unverifiable header
+  would be worse than none), then writes the marshaled bytes via
+  `WriteJSONBytes`. New `requestSignatureValue(r)` extracts the chained
+  value from `r`'s inbound `Authorization` header via the existing
+  `beckn.ParseSignature`.
+- `cmd/discovery/main.go`: `buildSigner`'s return type changed from the
+  `dispatch.RequestSigner` interface to the concrete `*signing.Signer` —
+  `AckSigner`'s expanded method set no longer matches
+  `dispatch.RequestSigner`'s narrower one, and Go interfaces don't
+  implicitly convert between each other. `main()` now builds `reqSigner`/
+  `ackSigner` as explicitly nil-checked interface variables rather than
+  assigning a possibly-nil `*signing.Signer` straight into them — a nil
+  concrete pointer assigned to an interface variable produces a **non-nil
+  interface wrapping nil**, which would have made every `signer == nil`
+  check downstream silently wrong.
+- **Verified live**: a real `curl -X POST /discover` with no
+  `Authorization` header returned both signatures — body:
+  `"signature":"Signature keyId=\"...\",...,headers=\"(created) (expires) digest\",..."`
+  (D23's, unchanged) and response header:
+  `Signature: Signature keyId="...",...,headers="(created) (expires) digest request-signature",...`
+  (this entry's, with an empty chained `request-signature` since no
+  Authorization header was sent) — structurally distinct as designed.
+- Tests: `TestDiscoverHandler_WithSigner_ResponseCarriesNFH007SignatureHeader`
+  (independently reconstructs the signing string and verifies via
+  `ed25519.Verify` against the signer's public key — proves the header is
+  a real signature over the actual response bytes and chained value, not
+  just structurally shaped like one),
+  `TestDiscoverHandler_WithSigner_NoAuthorizationHeader_StillSignsResponse`,
+  `TestDiscoverHandler_NoSigner_OmitsNFH007Header`. 137 tests across 12
+  packages pass.
+
 ## 5. Milestone plan (TDD, step by step)
 
 1. **M1 — Contract skeleton — DONE, then hardened for concurrency
