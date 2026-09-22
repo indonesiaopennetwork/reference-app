@@ -4,6 +4,7 @@ routingRules:
     target:
       url: "http://bap:8083/api/webhook"
     endpoints:
+      - on_discover
       - on_select
       - on_init
       - on_confirm
