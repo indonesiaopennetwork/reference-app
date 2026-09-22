@@ -244,14 +244,58 @@ services:
       PORT: "8087"
       LOG_LEVEL: info
 
-      # This service's own registered Beckn subscriber identity — distinct
-      # from bpp/bap's own BPP_ID/BAP_ID above (a Discovery Service is its
-      # own network participant, not the BPP). Sourced from the git-ignored
-      # root .env file.
-      BPP_ID: ${DS_BPP_ID}
-      BPP_URI: ${DS_BPP_URI}
-      SIGNING_PRIVATE_KEY_BASE64: ${DS_SIGNING_PRIVATE_KEY_BASE64}
-      SIGNING_KEY_ID: ${DS_SIGNING_KEY_ID}
+      # Default (10s) is too tight for delivering on_discover to onix-bap:
+      # its bapTxnReceiver's Extended Schema validation resolves a chain
+      # of remote $ref schemas (TradeResource -> TradeOffer -> RetailOffer
+      # -> AcceptedPaymentMethod, ...) from schema.ion.id on a COLD cache,
+      # each hop a separate fetch -- easily exceeding 10s the first time.
+      # onix caches resolved schemas for 24h (extendedSchema_cacheTTL in
+      # config/local-simple-bap.yaml), so this long timeout is only ever
+      # actually used once per onix-bap restart; every call after that is
+      # fast. Without enough budget here, discovery-service cancels the
+      # request mid-flight and onix-bap's fetch fails with "context
+      # canceled" -- not a schema or auth problem, a timeout one.
+      DISPATCH_DELIVERY_TIMEOUT_SECONDS: "45"
+
+      # Outbound on_discover callbacks are signed as discovery-service's
+      # OWN, INDEPENDENT identity -- deliberately NOT the reference app's
+      # BAP_ID/BPP_ID or their private keys. Discovery Service is its own
+      # network participant architecturally (it can aggregate catalogs
+      # from many Provider Platforms, not just this repo's own bpp), so it
+      # needs its own dedicated Ed25519 keypair, not one borrowed from a
+      # participant it happens to be deployed alongside -- see
+      # discovery-service/CONTEXT.md D20/D21/D22 for why an earlier version
+      # of this wrongly signed as the reference app's BPP identity instead,
+      # and why the container-side var names below used to say "BPP_*"
+      # even though they've never meant "the reference app's BPP".
+      # DS_ID/DS_KEY_ID/DS_PRIVATE_KEY/DS_URI are generated once for this
+      # service alone (see .env.example) -- left unset, the service falls
+      # back to a fresh ephemeral key every restart and logs a warning,
+      # which is honest (no signature spoofing another identity) even
+      # though nothing can verify it until it's actually registered
+      # somewhere (a real, out-of-band registration step -- see
+      # INFRA_SETUP.md's "ask whoever administers the network registry"
+      # process, the same one used for BAP_ID/BPP_ID).
+      SUBSCRIBER_ID: ${DS_ID}
+      SUBSCRIBER_URI: ${DS_URI}
+      SUBSCRIBER_KEY_ID: ${DS_KEY_ID}
+      SIGNING_PRIVATE_KEY_BASE64: ${DS_PRIVATE_KEY}
+
+      # Inbound /discover requests are only accepted when signed by this
+      # trusted caller (in this deployment, our own BAP, whose onix
+      # bapTxnCaller signs every outbound request) -- see
+      # internal/handlers.VerifyMiddleware. Named "TRUSTED_CALLER_*", not
+      # "BAP_*": which participant is trusted here is this deployment's
+      # choice, not something Discovery Service should hard-code by role.
+      # TRUSTED_CALLER_KEY_ID reuses BAP_KEY_ID as-is -- just a public
+      # identifier, safe to share. TRUSTED_CALLER_PUBLIC_KEY_BASE64 is
+      # deliberately BAP's PUBLIC key ONLY (BAP_ONIX_SIGNING_PUBLIC_KEY),
+      # never BAP_PRIVATE_KEY: this service only ever needs to verify as
+      # the trusted caller, never sign as it, so it must never be handed a
+      # credential capable of doing that. Leaving either unset disables
+      # verification (logged as a warning).
+      TRUSTED_CALLER_KEY_ID: ${BAP_KEY_ID}
+      TRUSTED_CALLER_PUBLIC_KEY_BASE64: ${BAP_ONIX_SIGNING_PUBLIC_KEY}
 
       # Crawls real, signed Provider Node catalog index/baseline/change
       # files this reference-app's OWN bpp actually publishes — see
@@ -260,8 +304,11 @@ services:
       # writes real index/baseline/change files under
       # file-onboarding-and-catalog-publish/data/beckn/; catalog-files (an
       # nginx static server over that same directory) is what makes that
-      # reachable over HTTP for this crawler.
-      CATALOG_INDEX_URLS: http://catalog-files/index/becknCatalogs.index.json
+      # reachable over HTTP for this crawler. Sourced from root .env so it
+      # can be overridden without editing this file (e.g. pointed at a
+      # real remote index like
+      # https://bpp-backend2.ion-ref-app.ayushmatha.in/index/becknCatalogs.index.json).
+      CATALOG_INDEX_URLS: ${CATALOG_INDEX_URLS}
       CATALOG_REFRESH_INTERVAL_SECONDS: "10"
     ports:
       - "8087:8087"
@@ -367,9 +414,22 @@ services:
       ADAPTER_URL: http://onix-bap:8081/bap/caller
 
 
-      # onix-bap's own router has an independent discover target in
-      # config/local-simple-routing-BAPCaller.yaml — this only controls bap's
-      # own direct call, not what onix itself routes to.
+      # Selects which of the two discover implementations the browser's
+      # GET /api/v1/discover actually runs -- exactly one at a time (see
+      # internal/config.Config.DiscoverMethod):
+      #   GET  = DiscoverSync, direct to discovery-service, bypassing
+      #          onix-bap entirely (fast, reliable, but not the spec's
+      #          real adapter-mediated topology).
+      #   POST = Discover, the real async Beckn contract via onix-bap
+      #          (same path every other action uses) -- requires
+      #          discovery-service's identity to be resolvable through
+      #          onix-bap's network registry, which it currently is not
+      #          (see discovery-service/CONTEXT.md D20/D21); leave this on
+      #          GET until that's actually registered, or it'll time out.
+      DISCOVER_METHOD: ${DISCOVER_METHOD:-GET}
+
+      # discovery-service's own /discover endpoint, called DIRECTLY --
+      # bypassing onix-bap entirely. Used only when DISCOVER_METHOD=GET.
       CDS_DISCOVER_URL: ${CDS_DISCOVER_URL}
 
       # Same keypair as config/local-simple-bap.yaml's keyManager — one registered identity.
