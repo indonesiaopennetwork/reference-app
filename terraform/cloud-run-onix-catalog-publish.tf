@@ -73,7 +73,7 @@ resource "google_cloud_run_v2_service" "onix_catalog_publish" {
       }
       env {
         name  = "CATALOG_BASE_URL"
-        value = "https://${var.dedi_domain}"
+        value = "https://${var.bpp_domain}"
       }
       env {
         name = "BPP_ONIX_KEY_ID"

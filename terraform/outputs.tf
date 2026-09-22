@@ -52,13 +52,17 @@ output "landing_page_url" {
   description = "Public URL — the entry-point page with buttons to the buyer and seller apps."
 }
 
-output "dedi_domain_url" {
-  value       = "https://${var.dedi_domain}"
+output "zitadel_url" {
+  value = google_cloud_run_v2_service.zitadel.uri
+}
+
+output "bpp_domain_url" {
+  value       = "https://${var.bpp_domain}"
   description = "Custom domain URL for the DeDi discovery chain / dedi-static-server (also serves bpp's /api/v1/* — see README)."
 }
 
-output "dedi_domain_www_url" {
-  value = "https://${var.dedi_domain_www}"
+output "bpp_domain_www_url" {
+  value = "https://${var.bpp_domain_www}"
 }
 
 output "bap_domain_url" {
@@ -81,14 +85,19 @@ output "landing_page_domain_url" {
   description = "Custom domain URL for the landing page."
 }
 
-output "dedi_domain_dns_records" {
-  value       = google_cloud_run_domain_mapping.dedi_apex.status[0].resource_records
-  description = "DNS records to create at your registrar for var.dedi_domain."
+output "zitadel_domain_url" {
+  value       = "https://${var.zitadel_domain}"
+  description = "Custom domain URL for Zitadel."
 }
 
-output "dedi_domain_www_dns_records" {
+output "bpp_domain_dns_records" {
+  value       = google_cloud_run_domain_mapping.dedi_apex.status[0].resource_records
+  description = "DNS records to create at your registrar for var.bpp_domain."
+}
+
+output "bpp_domain_www_dns_records" {
   value       = google_cloud_run_domain_mapping.dedi_www.status[0].resource_records
-  description = "DNS records to create at your registrar for var.dedi_domain_www."
+  description = "DNS records to create at your registrar for var.bpp_domain_www."
 }
 
 output "bap_domain_dns_records" {
@@ -109,6 +118,16 @@ output "bpp_frontend_domain_dns_records" {
 output "landing_page_domain_dns_records" {
   value       = google_cloud_run_domain_mapping.landing_page.status[0].resource_records
   description = "DNS records to create at your registrar for var.landing_page_domain."
+}
+
+output "zitadel_domain_dns_records" {
+  value       = google_cloud_run_domain_mapping.zitadel.status[0].resource_records
+  description = "DNS records to create at your registrar for var.zitadel_domain."
+}
+
+output "zitadel_machinekey_bucket" {
+  value       = google_storage_bucket.zitadel_machinekey.name
+  description = "Read the first-boot automation PAT from here, e.g.: gsutil cat gs://<this>/pat.txt -- used by scripts/setup-zitadel-cloud.sh."
 }
 
 output "artifact_registry_repo" {

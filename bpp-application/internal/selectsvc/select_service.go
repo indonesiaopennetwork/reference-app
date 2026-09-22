@@ -20,6 +20,7 @@ import (
 
 	dbsqlc "github.com/ion/winroom/bpp/db/sqlc"
 	"github.com/ion/winroom/bpp/internal/config"
+	"github.com/ion/winroom/bpp/internal/httpclient"
 )
 
 // SelectService handles the full /beckn/select flow:
@@ -39,7 +40,7 @@ func NewSelectService(pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.Log
 		pool:       pool,
 		cfg:        cfg,
 		lh:         lh,
-		httpClient: &http.Client{Timeout: 30 * time.Second},
+		httpClient: httpclient.New(30 * time.Second),
 	}
 }
 
@@ -136,8 +137,8 @@ func (s *SelectService) enrichContract(ctx context.Context, req *SelectRequest) 
 			total += b.Amount
 		}
 		attrsJSON, _ := json.Marshal(dbConsiderationAttrs{
-			Context:     "https://schema.beckn.io/RetailConsideration/v2.1/context.jsonld",
-			Type:        "RetailConsideration",
+			Context:     "https://schema.ion.id/release1/schema/extension/trade/TradeConsideration/v1/context.jsonld",
+			Type:        "ion:IONTradeConsideration",
 			Currency:    currency,
 			TotalAmount: total,
 			Breakup:     allBreakup,

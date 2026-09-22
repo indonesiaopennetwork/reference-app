@@ -1,4 +1,4 @@
-# Maps var.dedi_domain / var.dedi_domain_www to dedi-static-server.
+# Maps var.bpp_domain / var.bpp_domain_www to dedi-static-server.
 #
 # PREREQUISITE (outside Terraform, cannot be automated here): the domain must
 # be a VERIFIED domain in Search Console
@@ -15,10 +15,10 @@
 # --domain=<domain> --region=<region>` directly for a clearer error message.
 #
 # After a successful apply, read the DNS records to create at your registrar
-# from the `dedi_domain_dns_records` / `dedi_domain_www_dns_records` outputs.
+# from the `bpp_domain_dns_records` / `bpp_domain_www_dns_records` outputs.
 
 resource "google_cloud_run_domain_mapping" "dedi_apex" {
-  name     = var.dedi_domain
+  name     = var.bpp_domain
   location = var.region
   project  = var.project_id
 
@@ -32,7 +32,7 @@ resource "google_cloud_run_domain_mapping" "dedi_apex" {
 }
 
 resource "google_cloud_run_domain_mapping" "dedi_www" {
-  name     = var.dedi_domain_www
+  name     = var.bpp_domain_www
   location = var.region
   project  = var.project_id
 
@@ -48,7 +48,7 @@ resource "google_cloud_run_domain_mapping" "dedi_www" {
 # bap_domain is a hub, not a direct 1:1 mapping — it routes to
 # dedi-static-server, whose nginx (server_name-differentiated, see
 # nginx.conf.template) sends /bap/receiver/ to onix-bap (validated) and
-# everything else straight to bap. Mirrors how dedi_domain already works
+# everything else straight to bap. Mirrors how bpp_domain already works
 # for bpp/onix-bpp.
 resource "google_cloud_run_domain_mapping" "bap" {
   name     = var.bap_domain
@@ -103,5 +103,19 @@ resource "google_cloud_run_domain_mapping" "landing_page" {
 
   spec {
     route_name = google_cloud_run_v2_service.landing_page.name
+  }
+}
+
+resource "google_cloud_run_domain_mapping" "zitadel" {
+  name     = var.zitadel_domain
+  location = var.region
+  project  = var.project_id
+
+  metadata {
+    namespace = var.project_id
+  }
+
+  spec {
+    route_name = google_cloud_run_v2_service.zitadel.name
   }
 }

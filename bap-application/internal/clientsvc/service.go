@@ -18,6 +18,7 @@ import (
 
 	dbsqlc "github.com/ion/winroom/bap/db/sqlc"
 	"github.com/ion/winroom/bap/internal/config"
+	"github.com/ion/winroom/bap/internal/httpclient"
 )
 
 type ClientService struct {
@@ -32,15 +33,16 @@ func NewClientService(pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.Log
 		pool: pool,
 		cfg:  cfg,
 		lh:   lh,
-		client: &http.Client{
-			Timeout: 10 * time.Second,
-		},
+		client: httpclient.New(10 * time.Second),
 	}
 }
 
 // Discover sends a Beckn v2 `discover` action to the CDS and returns the raw JSON response.
 // Logs an OUTBOUND row to beckn_message_log capturing both the request and the CDS response.
 func (s *ClientService) Discover(ctx context.Context, req *ClientDiscoverRequest) (json.RawMessage, error) {
+	if s.cfg.CDSDiscoverURL == "" {
+		return json.RawMessage(`{"message":{"catalogs":[]}}`), nil
+	}
 
 	start := time.Now()
 	msgID := uuid.New()
@@ -72,7 +74,7 @@ func (s *ClientService) Discover(ctx context.Context, req *ClientDiscoverRequest
 		httpStatus int
 	)
 
-	discoverURL := s.cfg.BapCallerURL + "/discover"
+	discoverURL := s.cfg.CDSDiscoverURL
 
 	// Deferred block: DB log + logharbour ACK/ERR entry.
 	defer func() {
@@ -183,10 +185,6 @@ func (s *ClientService) Select(ctx context.Context, req *ClientSelectRequest, bu
 		Message: json.RawMessage(msgJSON),
 	}
 
-	if err := s.sendToBPP(ctx, s.cfg.BapCallerURL, "select", txnID, msgID, s.cfg.NetworkID, becknReq); err != nil {
-		return "", err
-	}
-
 	q := dbsqlc.New(s.pool)
 	if err := q.UpsertTransaction(ctx, dbsqlc.UpsertTransactionParams{
 		TransactionID: txnID,
@@ -198,6 +196,10 @@ func (s *ClientService) Select(ctx context.Context, req *ClientSelectRequest, bu
 		BuyerSubject:  buyerSubject,
 	}); err != nil {
 		s.lh.WithModule("client_svc").Warn().Error(err).Log("upsert transaction failed")
+	}
+
+	if err := s.sendToBPP(ctx, s.cfg.BapCallerURL, "select", txnID, msgID, s.cfg.NetworkID, becknReq); err != nil {
+		return "", err
 	}
 
 	return txnID.String(), nil
@@ -256,8 +258,8 @@ func buildSelectMessage(items []SelectItem, bapID string) ([]byte, error) {
 				"offerAttributes": offerAttr,
 			},
 			"commitmentAttributes": map[string]interface{}{
-				"@context":   "https://raw.githubusercontent.com/beckn/local-retail/refs/heads/main/schema/RetailCommitment/v2.1/context.jsonld",
-				"@type":      "RetailCommitment",
+				"@context":   "https://schema.ion.id/release1/schema/extension/trade/TradeCommitment/v1/context.jsonld",
+				"@type":      "ion:IONTradeCommitment",
 				"lineId":     fmt.Sprintf("LINE-%03d", i+1),
 				"resourceId": item.ResourceID,
 				"quantity":   map[string]interface{}{"unitCode": "EA", "unitQuantity": qty},
@@ -269,11 +271,11 @@ func buildSelectMessage(items []SelectItem, bapID string) ([]byte, error) {
 		"status": map[string]interface{}{"code": "DRAFT"},
 		"participants": []map[string]interface{}{
 			{
-				"id":          providerID,
-				"descriptor":  map[string]interface{}{"name": providerName},
+				"id":         providerID,
+				"descriptor": map[string]interface{}{"name": providerName},
 				"participantAttributes": map[string]interface{}{
-					"@context": "https://raw.githubusercontent.com/beckn/schemas/main/schema/Provider/v2.1/context.jsonld",
-					"@type":    "Provider",
+					"@context": "https://schema.ion.id/release1/schema/extension/trade/TradeProvider/v1/context.jsonld",
+					"@type":    "ion:IONTradeProvider",
 					"id":       providerID,
 					"descriptor": map[string]interface{}{
 						"name": providerName,
@@ -298,8 +300,8 @@ func buildSelectMessage(items []SelectItem, bapID string) ([]byte, error) {
 				"status":        map[string]interface{}{"code": "PENDING"},
 				"commitmentIds": commitmentIDs,
 				"performanceAttributes": map[string]interface{}{
-					"@context": "https://raw.githubusercontent.com/beckn/local-retail/refs/heads/main/schema/RetailPerformance/v2.1/context.jsonld",
-					"@type":    "rcpa:RetailPerformance",
+					"@context":                  "https://schema.ion.id/release1/schema/extension/trade/TradePerformance/v1/context.jsonld",
+					"@type":                     "ion:IONTradePerformance",
 					"supportedPerformanceModes": []string{"DELIVERY"},
 					"deliveryDetails": map[string]interface{}{
 						"address": map[string]interface{}{
@@ -334,8 +336,8 @@ func buildSelectMessage(items []SelectItem, bapID string) ([]byte, error) {
 // fields like price.applicableQuantity.minValue that the CDS uses but the adapter does not.
 func sanitizeOfferAttributes(raw json.RawMessage) map[string]interface{} {
 	const (
-		offerCtx  = "https://raw.githubusercontent.com/beckn/local-retail/refs/heads/main/schema/RetailOffer/v2.1/context.jsonld"
-		offerType = "RetailOffer"
+		offerCtx  = "https://schema.ion.id/release1/schema/extension/trade/TradeOffer/v1/context.jsonld"
+		offerType = "ion:IONTradeOffer"
 	)
 
 	out := map[string]interface{}{
@@ -423,11 +425,7 @@ func (s *ClientService) Init(ctx context.Context, req *ClientInitRequest) error 
 		Message: json.RawMessage(msgJSON),
 	}
 
-	if err := s.sendToBPP(ctx, s.cfg.BapCallerURL, "init", txnID, msgID, s.cfg.NetworkID, becknReq); err != nil {
-		return err
-	}
-
-	return q.UpsertTransaction(ctx, dbsqlc.UpsertTransactionParams{
+	err = q.UpsertTransaction(ctx, dbsqlc.UpsertTransactionParams{
 		TransactionID: txnID,
 		BapID:         s.cfg.BapID,
 		NetworkID:     &s.cfg.NetworkID,
@@ -435,6 +433,11 @@ func (s *ClientService) Init(ctx context.Context, req *ClientInitRequest) error 
 		BppUri:        &bppURI,
 		Status:        dbsqlc.TransactionStatusINITSENT,
 	})
+	if err != nil {
+		return err
+	}
+
+	return s.sendToBPP(ctx, s.cfg.BapCallerURL, "init", txnID, msgID, s.cfg.NetworkID, becknReq)
 }
 
 // buildInitMessage loads the on_select contract snapshot and patches it with real
@@ -570,11 +573,7 @@ func (s *ClientService) Confirm(ctx context.Context, req *ClientConfirmRequest) 
 		Message: json.RawMessage(msgJSON),
 	}
 
-	if err := s.sendToBPP(ctx, s.cfg.BapCallerURL, "confirm", txnID, msgID, s.cfg.NetworkID, becknReq); err != nil {
-		return err
-	}
-
-	return q.UpsertTransaction(ctx, dbsqlc.UpsertTransactionParams{
+	err = q.UpsertTransaction(ctx, dbsqlc.UpsertTransactionParams{
 		TransactionID: txnID,
 		BapID:         s.cfg.BapID,
 		NetworkID:     &s.cfg.NetworkID,
@@ -582,6 +581,11 @@ func (s *ClientService) Confirm(ctx context.Context, req *ClientConfirmRequest) 
 		BppUri:        &bppURI,
 		Status:        dbsqlc.TransactionStatusCONFIRMSENT,
 	})
+	if err != nil {
+		return err
+	}
+
+	return s.sendToBPP(ctx, s.cfg.BapCallerURL, "confirm", txnID, msgID, s.cfg.NetworkID, becknReq)
 }
 
 // RequestStatus sends a Beckn status request for an active transaction.
@@ -614,10 +618,7 @@ func (s *ClientService) RequestStatus(ctx context.Context, req *ClientRequestSta
 		Context: s.newContext("status", req.TransactionID, msgID.String(), bppID, bppURI),
 		Message: json.RawMessage(msgJSON),
 	}
-	if err := s.sendToBPP(ctx, s.cfg.BapCallerURL, "status", txnID, msgID, s.cfg.NetworkID, becknReq); err != nil {
-		return err
-	}
-	return q.UpsertTransaction(ctx, dbsqlc.UpsertTransactionParams{
+	err = q.UpsertTransaction(ctx, dbsqlc.UpsertTransactionParams{
 		TransactionID: txnID,
 		BapID:         s.cfg.BapID,
 		NetworkID:     &s.cfg.NetworkID,
@@ -625,6 +626,10 @@ func (s *ClientService) RequestStatus(ctx context.Context, req *ClientRequestSta
 		BppUri:        &bppURI,
 		Status:        dbsqlc.TransactionStatusSTATUSSENT,
 	})
+	if err != nil {
+		return err
+	}
+	return s.sendToBPP(ctx, s.cfg.BapCallerURL, "status", txnID, msgID, s.cfg.NetworkID, becknReq)
 }
 
 // Cancel sends a Beckn cancel request for an active transaction.
@@ -667,10 +672,7 @@ func (s *ClientService) Cancel(ctx context.Context, req *ClientCancelRequest) er
 		Context: s.newContext("cancel", req.TransactionID, msgID.String(), bppID, bppURI),
 		Message: json.RawMessage(msgJSON),
 	}
-	if err := s.sendToBPP(ctx, s.cfg.BapCallerURL, "cancel", txnID, msgID, s.cfg.NetworkID, becknReq); err != nil {
-		return err
-	}
-	return q.UpsertTransaction(ctx, dbsqlc.UpsertTransactionParams{
+	err = q.UpsertTransaction(ctx, dbsqlc.UpsertTransactionParams{
 		TransactionID: txnID,
 		BapID:         s.cfg.BapID,
 		NetworkID:     &s.cfg.NetworkID,
@@ -678,6 +680,10 @@ func (s *ClientService) Cancel(ctx context.Context, req *ClientCancelRequest) er
 		BppUri:        &bppURI,
 		Status:        dbsqlc.TransactionStatusCANCELSENT,
 	})
+	if err != nil {
+		return err
+	}
+	return s.sendToBPP(ctx, s.cfg.BapCallerURL, "cancel", txnID, msgID, s.cfg.NetworkID, becknReq)
 }
 
 // Update sends a Beckn update request with partial contract changes.
@@ -697,10 +703,7 @@ func (s *ClientService) Update(ctx context.Context, req *ClientUpdateRequest) er
 		Context: s.newContext("update", req.TransactionID, msgID.String(), bppID, bppURI),
 		Message: json.RawMessage(msgJSON),
 	}
-	if err := s.sendToBPP(ctx, s.cfg.BapCallerURL, "update", txnID, msgID, s.cfg.NetworkID, becknReq); err != nil {
-		return err
-	}
-	return q.UpsertTransaction(ctx, dbsqlc.UpsertTransactionParams{
+	err = q.UpsertTransaction(ctx, dbsqlc.UpsertTransactionParams{
 		TransactionID: txnID,
 		BapID:         s.cfg.BapID,
 		NetworkID:     &s.cfg.NetworkID,
@@ -708,6 +711,10 @@ func (s *ClientService) Update(ctx context.Context, req *ClientUpdateRequest) er
 		BppUri:        &bppURI,
 		Status:        dbsqlc.TransactionStatusUPDATESENT,
 	})
+	if err != nil {
+		return err
+	}
+	return s.sendToBPP(ctx, s.cfg.BapCallerURL, "update", txnID, msgID, s.cfg.NetworkID, becknReq)
 }
 
 // Rate sends a Beckn rate request with the provided rating inputs.
@@ -752,10 +759,7 @@ func (s *ClientService) Rate(ctx context.Context, req *ClientRateRequest) error 
 		Context: s.newContext("rate", req.TransactionID, msgID.String(), bppID, bppURI),
 		Message: json.RawMessage(msgJSON),
 	}
-	if err := s.sendToBPP(ctx, s.cfg.BapCallerURL, "rate", txnID, msgID, s.cfg.NetworkID, becknReq); err != nil {
-		return err
-	}
-	return q.UpsertTransaction(ctx, dbsqlc.UpsertTransactionParams{
+	err = q.UpsertTransaction(ctx, dbsqlc.UpsertTransactionParams{
 		TransactionID: txnID,
 		BapID:         s.cfg.BapID,
 		NetworkID:     &s.cfg.NetworkID,
@@ -763,6 +767,10 @@ func (s *ClientService) Rate(ctx context.Context, req *ClientRateRequest) error 
 		BppUri:        &bppURI,
 		Status:        dbsqlc.TransactionStatusRATESENT,
 	})
+	if err != nil {
+		return err
+	}
+	return s.sendToBPP(ctx, s.cfg.BapCallerURL, "rate", txnID, msgID, s.cfg.NetworkID, becknReq)
 }
 
 // Support sends a Beckn support request.
@@ -793,10 +801,7 @@ func (s *ClientService) Support(ctx context.Context, req *ClientSupportRequest) 
 		Context: s.newContext("support", req.TransactionID, msgID.String(), bppID, bppURI),
 		Message: json.RawMessage(msgJSON),
 	}
-	if err := s.sendToBPP(ctx, s.cfg.BapCallerURL, "support", txnID, msgID, s.cfg.NetworkID, becknReq); err != nil {
-		return err
-	}
-	return q.UpsertTransaction(ctx, dbsqlc.UpsertTransactionParams{
+	err = q.UpsertTransaction(ctx, dbsqlc.UpsertTransactionParams{
 		TransactionID: txnID,
 		BapID:         s.cfg.BapID,
 		NetworkID:     &s.cfg.NetworkID,
@@ -804,6 +809,10 @@ func (s *ClientService) Support(ctx context.Context, req *ClientSupportRequest) 
 		BppUri:        &bppURI,
 		Status:        dbsqlc.TransactionStatusSUPPORTSENT,
 	})
+	if err != nil {
+		return err
+	}
+	return s.sendToBPP(ctx, s.cfg.BapCallerURL, "support", txnID, msgID, s.cfg.NetworkID, becknReq)
 }
 
 // resolveBPP returns the BPP ID and URI for a transaction, falling back to server config.

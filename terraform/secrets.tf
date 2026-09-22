@@ -33,7 +33,7 @@ locals {
     "bpp-onix-encr-public-key",
   ]
 
-  all_secret_ids = concat(["postgres-password"], local.externally_seeded_secret_ids)
+  all_secret_ids = concat(["postgres-password", "zitadel-masterkey", "zitadel-admin-password"], local.externally_seeded_secret_ids)
 }
 
 resource "google_secret_manager_secret" "this" {
@@ -47,10 +47,20 @@ resource "google_secret_manager_secret" "this" {
   }
 }
 
-# The only secret value Terraform ever generates or sees itself.
+# The only secret values Terraform ever generates or sees itself.
 resource "google_secret_manager_secret_version" "postgres_password" {
   secret      = google_secret_manager_secret.this["postgres-password"].id
   secret_data = random_password.postgres.result
+}
+
+resource "google_secret_manager_secret_version" "zitadel_masterkey" {
+  secret      = google_secret_manager_secret.this["zitadel-masterkey"].id
+  secret_data = random_password.zitadel_masterkey.result
+}
+
+resource "google_secret_manager_secret_version" "zitadel_admin_password" {
+  secret      = google_secret_manager_secret.this["zitadel-admin-password"].id
+  secret_data = random_password.zitadel_admin_password.result
 }
 
 resource "google_secret_manager_secret_iam_member" "accessor" {
