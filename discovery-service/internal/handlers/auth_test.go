@@ -34,7 +34,7 @@ func TestVerifyMiddleware_NilVerifierPassesThrough(t *testing.T) {
 
 	called := false
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true })
-	wrapped := VerifyMiddleware(nil, 1<<20, logger)(inner)
+	wrapped := VerifyMiddleware(nil, nil, 1<<20, logger)(inner)
 
 	req := httptest.NewRequest(http.MethodPost, "/discover", bytes.NewBufferString(`{}`))
 	rec := httptest.NewRecorder()
@@ -52,7 +52,7 @@ func TestVerifyMiddleware_RejectsMissingAuthorizationHeader(t *testing.T) {
 
 	called := false
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true })
-	wrapped := VerifyMiddleware(verifier, 1<<20, logger)(inner)
+	wrapped := VerifyMiddleware(verifier, nil, 1<<20, logger)(inner)
 
 	req := httptest.NewRequest(http.MethodPost, "/discover", bytes.NewBufferString(`{}`))
 	rec := httptest.NewRecorder()
@@ -87,7 +87,7 @@ func TestVerifyMiddleware_RejectsAFailedVerification(t *testing.T) {
 
 	called := false
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true })
-	wrapped := VerifyMiddleware(verifier, 1<<20, logger)(inner)
+	wrapped := VerifyMiddleware(verifier, nil, 1<<20, logger)(inner)
 
 	req := httptest.NewRequest(http.MethodPost, "/discover", bytes.NewBufferString(`{"context":{}}`))
 	req.Header.Set("Authorization", `Signature keyId="a|b|ed25519",algorithm="ed25519",created="1",expires="2",headers="h",signature="c2ln"`)
@@ -120,7 +120,7 @@ func TestVerifyMiddleware_PassesBodyUnchangedToTheNextHandlerOnSuccess(t *testin
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotBody, _ = io.ReadAll(r.Body)
 	})
-	wrapped := VerifyMiddleware(verifier, 1<<20, logger)(inner)
+	wrapped := VerifyMiddleware(verifier, nil, 1<<20, logger)(inner)
 
 	req := httptest.NewRequest(http.MethodPost, "/discover", bytes.NewBufferString(wantBody))
 	req.Header.Set("Authorization", `Signature keyId="a|b|ed25519",algorithm="ed25519",created="1",expires="2",headers="h",signature="c2ln"`)
