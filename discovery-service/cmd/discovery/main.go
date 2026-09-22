@@ -38,9 +38,11 @@ func main() {
 	defer stopCatalogRefresh()
 
 	svc := service.NewDiscoverService(dispatcher, pool, cfg.DispatchDeliveryTimeout, logger, cfg.SubscriberID, cfg.SubscriberURI, catalogStore)
-	discoverHandler := handlers.NewDiscoverHandler(svc, cfg.MaxRequestBodyBytes, logger)
+	// dispatchSigner also signs the Ack/NACK's CounterSignature -- same
+	// identity, same key, both directions -- see handlers.AckSigner.
+	discoverHandler := handlers.NewDiscoverHandler(svc, cfg.MaxRequestBodyBytes, logger, dispatchSigner)
 
-	verifyDiscover := handlers.VerifyMiddleware(buildVerifier(cfg, logger), cfg.MaxRequestBodyBytes, logger)
+	verifyDiscover := handlers.VerifyMiddleware(buildVerifier(cfg, logger), dispatchSigner, cfg.MaxRequestBodyBytes, logger)
 
 	mux := http.NewServeMux()
 	mux.Handle("POST /discover", verifyDiscover(discoverHandler))

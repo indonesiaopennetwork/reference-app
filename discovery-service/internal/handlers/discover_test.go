@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +16,7 @@ import (
 	"github.com/remiges-tushar/discovery-service/internal/beckn"
 	"github.com/remiges-tushar/discovery-service/internal/dispatch"
 	"github.com/remiges-tushar/discovery-service/internal/service"
+	"github.com/remiges-tushar/discovery-service/internal/signing"
 	"github.com/remiges-tushar/discovery-service/internal/worker"
 )
 
@@ -41,12 +44,16 @@ func validRequestBody(bapURI string) string {
 }
 
 func newTestHandler(t *testing.T) *DiscoverHandler {
+	return newTestHandlerWithSigner(t, nil)
+}
+
+func newTestHandlerWithSigner(t *testing.T, signer AckSigner) *DiscoverHandler {
 	client := &http.Client{Timeout: 2 * time.Second}
 	pool := worker.NewPool(2, 4, testLogger())
 	t.Cleanup(func() { _ = pool.Shutdown(context.Background()) })
 
 	svc := service.NewDiscoverService(dispatch.NewHTTPDispatcher(client, "/on_discover", nil), pool, 2*time.Second, testLogger(), "own-bpp.example.com", "https://own-bpp.example.com", service.EmbeddedCatalogStore{})
-	return NewDiscoverHandler(svc, testMaxBodyBytes, testLogger())
+	return NewDiscoverHandler(svc, testMaxBodyBytes, testLogger(), signer)
 }
 
 const testMaxBodyBytes = 1 << 20 // 1 MiB, mirrors config.defaultMaxRequestBodyBytes
@@ -156,6 +163,76 @@ func TestDiscoverHandler_MalformedJSON_ReturnsNack400(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)
 	}
+}
+
+// TestDiscoverHandler_WithSigner_AckCarriesARealVerifiableSignature checks
+// that when a real AckSigner is configured, the Ack's CounterSignature is
+// an actual Ed25519 signature over the exact request body received — not
+// service.PlaceholderSignature — and that it verifies against the
+// signer's own public key. See beckn.yaml's Signature schema: "signature
+// ... proves we authenticated and processed the request."
+func TestDiscoverHandler_WithSigner_AckCarriesARealVerifiableSignature(t *testing.T) {
+	kp, err := signing.GenerateKeyPair()
+	if err != nil {
+		t.Fatalf("GenerateKeyPair() error = %v", err)
+	}
+	signer := signing.NewSigner(kp, "own-bpp.example.com", "key-1", 5*time.Minute)
+	h := newTestHandlerWithSigner(t, signer)
+
+	body := validRequestBody("https://bap.example.com")
+	req := httptest.NewRequest(http.MethodPost, "/discover", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var ack beckn.Ack
+	if err := json.Unmarshal(rec.Body.Bytes(), &ack); err != nil {
+		t.Fatalf("decode ack: %v", err)
+	}
+	if strings.Contains(string(ack.Signature), "unsigned|placeholder|none") {
+		t.Fatalf("Ack.Signature = %q, want a real signature, not the placeholder", ack.Signature)
+	}
+
+	verifier, err := signing.NewVerifier(base64.StdEncoding.EncodeToString(kp.Public), "own-bpp.example.com", "key-1")
+	if err != nil {
+		t.Fatalf("NewVerifier() error = %v", err)
+	}
+	if err := verifier.Verify(string(ack.Signature), []byte(body)); err != nil {
+		t.Errorf("Ack.Signature does not verify against the exact request body: %v", err)
+	}
+}
+
+// TestDiscoverHandler_SignerFailure_FallsBackToPlaceholder checks the Ack
+// still gets sent — with a clearly-marked placeholder, not an error —
+// when the configured signer itself fails. A broken signing key must
+// never stop an Ack from being sent.
+func TestDiscoverHandler_SignerFailure_FallsBackToPlaceholder(t *testing.T) {
+	h := newTestHandlerWithSigner(t, failingSigner{})
+
+	req := httptest.NewRequest(http.MethodPost, "/discover", strings.NewReader(validRequestBody("https://bap.example.com")))
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var ack beckn.Ack
+	if err := json.Unmarshal(rec.Body.Bytes(), &ack); err != nil {
+		t.Fatalf("decode ack: %v", err)
+	}
+	if !strings.Contains(string(ack.Signature), "unsigned|placeholder|none") {
+		t.Errorf("Ack.Signature = %q, want the placeholder when signing fails", ack.Signature)
+	}
+}
+
+type failingSigner struct{}
+
+func (failingSigner) Sign(body []byte) (beckn.Signature, error) {
+	return "", fmt.Errorf("signing key unavailable")
 }
 
 // GET /discover (see CONTEXT.md D16) returns the on_discover result
