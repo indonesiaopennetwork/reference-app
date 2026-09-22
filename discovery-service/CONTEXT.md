@@ -770,6 +770,235 @@ index file, its baseline/change files, no live app-server query at all.
   and its tests are gone; `internal/dedicrawl` gained tests but lost its
   signature-focused ones, which no longer apply).
 
+**D20 — Inbound signature verification implemented, and outbound signing
+switched from an unregistered `DS_*` identity to the reference app's own
+registered BPP identity (2026-09-22), closing the gap D15 left open.**
+D15 got outbound `on_discover` signing spec-correct but discovered the
+signed identity (`ds-fabric.ion.id`) wasn't registered anywhere a real
+verifier could look it up (`404` from the live DeDi registry). Separately,
+`internal/handlers` had zero inbound auth on `/discover` — anyone could
+call it, and this service could never reject an unsigned or forged caller.
+
+- **`internal/signing.Verifier`** (new, alongside the existing `Signer`):
+  trusts exactly one caller identity (subscriberId/uniqueKeyId) and its
+  base64 Ed25519 **public** key, all statically configured — no live
+  registry lookup. `Verify(authHeader, body)` parses the header via the
+  new `beckn.ParseSignature`, rejects a keyId that doesn't match the
+  trusted identity, checks the created/expires window (5 minutes' clock
+  skew tolerance), and rebuilds the same `(created)/(expires)/digest`
+  signing string `Signer.Sign` produces to verify the Ed25519 signature —
+  so a tampered body fails even though the header alone still parses.
+  This mirrors this service's own outbound-signing trust model (D15) and
+  onix's `bapTxnReceiver.validateSign` step, just without the registry
+  round-trip — appropriate for a reference deployment with exactly one
+  known caller (our own BAP); a multi-caller deployment would resolve the
+  caller's public key from a registry lookup on keyId instead.
+- **`beckn.ParseSignature`**: parses an `Authorization` header formatted
+  per `FormatSignature`'s pattern back into its fields (subscriberId,
+  uniqueKeyId, algorithm, created, expires, headers, decoded signature
+  bytes) — the inverse operation, needed by `Verifier` and useful on its
+  own. Round-trip-tested against `FormatSignature`.
+- **`handlers.VerifyMiddleware`**: wraps both `POST /discover` and
+  `GET /discover` (see D16). Reads the full body up front (bounded by
+  `MAX_REQUEST_BODY_BYTES`, same cap `DiscoverHandler` already enforces)
+  to compute the digest the signature covers, restores `r.Body` unchanged
+  for the wrapped handler's own JSON decoding, and rejects with `401` +
+  `AUT_SIGNATURE_MISSING`/`AUT_SIGNATURE_INVALID` (new error codes in
+  `internal/constants`) on a missing header or failed verification. A
+  `nil` verifier — i.e. `CALLER_BAP_KEY_ID`/`CALLER_BAP_PRIVATE_KEY_BASE64`
+  not both configured — passes every request through unchecked, logged as
+  a warning, matching this service's existing fail-open-with-a-warning
+  posture for unconfigured signing (`buildSigner` in `main.go`).
+- **`beckn.SplitKeyID`**: splits a combined
+  `"{subscriberId}|{uniqueKeyId}|{algorithm}"` key id — refactored out of
+  `ParseSignature` and reused by `config.Load()`/`main.go` too (see next
+  point).
+- **Outbound identity switched from `DS_BPP_ID`/`DS_SIGNING_*` to the
+  reference app's registered BPP identity, reusing the exact vars
+  `bap-application`/`bpp-application` already sign with — no new secrets
+  added to `.env`.** D15 flagged signing as an unregistered standalone
+  identity as presenting as a network participant this deployment doesn't
+  own; discovery-service is a facade in front of this same reference
+  app's own BPP catalog, so signing `on_discover` as that already-
+  registered BPP identity is both correct in practice (a real verifier
+  can resolve it) and honest about whose data is being served.
+  **First pass of this change wrongly introduced brand-new `.env` vars
+  (`BPP_ONIX_SIGNING_PRIVATE_KEY`/`BPP_ONIX_KEY_ID`/`CALLER_BAP_ID`/
+  `CALLER_BAP_KEY_ID`/`CALLER_BAP_PUBLIC_KEY_BASE64`) duplicating identity
+  material that already existed as `BAP_PRIVATE_KEY`/`BAP_ID`/
+  `BAP_KEY_ID`/`BPP_PRIVATE_KEY`/`BPP_ID`/`BPP_KEY_ID` — caught and
+  corrected by the user.** The actual, corrected design: `config.BppKeyID`
+  (env `BPP_KEY_ID`) is root `.env`'s existing combined identity var,
+  reused as-is (the same value `bap-application`'s own
+  `internal/clientsvc/becknsign.go` passes straight through); when set,
+  `config.Load()` splits it (`beckn.SplitKeyID`) and overrides `BppID`/
+  `SigningKeyID`, so a deployment sets the one identity var it already
+  has for `bpp-application`, not a second, separately-split copy of the
+  same secret. `SigningPrivateKeyBase64` reuses `BPP_PRIVATE_KEY`
+  directly. Inbound verification is symmetric: `config.CallerKeyID` (env
+  `CALLER_BAP_KEY_ID`) reuses root `.env`'s `BAP_KEY_ID` directly, and
+  `config.CallerPrivateKeyBase64` (env `CALLER_BAP_PRIVATE_KEY_BASE64`)
+  reuses `BAP_PRIVATE_KEY` — `main.go`'s `buildVerifier` derives the
+  trusted **public** key from that private key's own seed
+  (`signing.LoadKeyPair(...).Public`), since this service only ever needs
+  to verify as the BAP, never sign as it, so no separate public-key-only
+  var was needed either. `DS_BPP_URI` is kept as this service's own
+  operational URI (stamped onto responses) — independent of which
+  identity signs. **Net result: zero new `.env` entries required** — every
+  container-side var (`BPP_KEY_ID`/`CALLER_BAP_KEY_ID`/
+  `CALLER_BAP_PRIVATE_KEY_BASE64` etc. in `docker-compose.yml`) maps from
+  an identity var that already existed and was already populated.
+- **Companion change, `bap-application`**: added `internal/on_discover_svc`
+  (mirrors `on_select_svc`'s ack-then-persist-async shape) and wired
+  `POST /api/webhook/on_discover`, plus a routing rule for `on_discover`
+  in `config/local-simple-routing-BAPReceiver.yaml` (and its `.tmpl`) —
+  onix-bap's `bapTxnReceiver` had no rule for it at all, so even a
+  correctly-signed callback had nowhere to be forwarded.
+- **Known caveat, flagged rather than silently resolved**: the live root
+  `.env` was found to have `BPP_ID` and `BPP_KEY_ID` disagreeing on the
+  BPP's own subscriberId (`BPP_ID=onix-bpp-x7m2wmy7nq-et.a.run.app` vs.
+  `BPP_KEY_ID`'s embedded `sample-pn.ion-ref-app.ayushmatha.in|...`) —
+  pre-existing drift, not introduced by this change, most likely from
+  `scripts/render-onix-config.sh` not having been re-run after `.env`'s
+  identity was rotated. Deriving `BppID` from `BPP_KEY_ID` (above) means
+  discovery-service itself always signs with the current, authoritative
+  identity regardless of this drift — but `config/local-simple-bpp.yaml`
+  (onix-bpp's own rendered keyManager config) still reflects the OLD
+  identity until `.env`'s `BPP_ONIX_*`/`BAP_ONIX_*` are reconciled and
+  `render-onix-config.sh` is re-run; that's a pre-existing, separate issue
+  (affects onix-bpp's own outbound order-flow signing, not this feature)
+  that only the user can resolve, since only they know which identity is
+  actually currently registered.
+- Tests: `internal/beckn` (`SplitKeyID`, `ParseSignature` round-trip +
+  malformed-header cases), `internal/signing` (`Verifier` accept/tamper/
+  untrusted-signer/wrong-keyId/expired/malformed-public-key cases),
+  `internal/handlers` (`VerifyMiddleware` nil-passthrough/missing-header/
+  failed-verification/body-restored-unchanged cases), `internal/config`
+  (`BppKeyID` override + invalid-fallback, `CallerKeyID`/
+  `CallerPrivateKeyBase64` passthrough). 132 tests across 12 packages pass.
+
+**D21 — Reverted D20's "sign as the reference app's BPP identity" decision:
+Discovery Service gets its own, independent identity again, and never
+touches another participant's private key (2026-09-22, same day as D20,
+caught by the user in review).** D20 solved the "signature can't be
+verified against a real registry" problem by having discovery-service
+sign `on_discover` as the reference app's already-registered BPP identity
+(`BPP_KEY_ID`/`BPP_PRIVATE_KEY`), and deriving the trusted BAP public key
+for inbound verification from `BAP_PRIVATE_KEY`. Both were wrong, for the
+same underlying reason: **a private signing key is proof of identity —
+handing it to a different service lets that service impersonate the real
+participant anywhere on the network**, not just for this one purpose.
+Concretely:
+- Signing `on_discover` as the BPP means anything discovery-service ever
+  sends is indistinguishable, cryptographically, from something the real
+  `bpp-application` sent — a receiver has no way to know it wasn't. This
+  also misrepresents the architecture: a Beckn v2 Discovery Service is
+  its own network participant (it can aggregate catalogs from many
+  Provider Platforms, not just this repo's own bpp), not a facade that
+  should present as a specific BPP.
+- Deriving the trusted BAP public key from `BAP_PRIVATE_KEY` at runtime
+  meant handing discovery-service the actual private key material capable
+  of signing as the BAP — even though the *use* of it (deriving a public
+  key) was itself harmless, giving the service the capability at all
+  was not.
+
+**The fix**: discovery-service's own identity is independent again —
+`BppID`/`BppURI`/`BppKeyID`/`SigningPrivateKeyBase64` (env `BPP_ID`/
+`BPP_URI`/`BPP_KEY_ID`/`SIGNING_PRIVATE_KEY_BASE64` — container-internal
+names, unchanged from D15/D20) are now sourced in `docker-compose.yml`
+from dedicated root `.env` vars `DS_ID`/`DS_URI`/`DS_KEY_ID`/
+`DS_PRIVATE_KEY` — a wholly separate keypair, never `BAP_*`/`BPP_*`.
+Inbound verification (`CallerKeyID`/`CallerPublicKeyBase64`, reverted from
+D20's `CallerPrivateKeyBase64`) now takes the BAP's **public** key
+directly — `CALLER_BAP_PUBLIC_KEY_BASE64` sources from
+`BAP_ONIX_SIGNING_PUBLIC_KEY` (a public key: safe to share across
+services, unlike a private one) instead of deriving it from
+`BAP_PRIVATE_KEY`. `signing.NewVerifier` already took a public key
+directly, so this is a straight revert of the derivation code added in
+D20, not new machinery. Verified: `BAP_ONIX_SIGNING_PUBLIC_KEY`'s value
+was independently re-derived from `BAP_PRIVATE_KEY`'s seed
+(`ed25519.NewKeyFromSeed(seed).Public()`) and confirmed to match
+`config/local-simple-bap.yaml`'s already-committed `signingPublicKey` —
+so populating it in `.env` doesn't introduce a new, unverified value.
+
+**What this does and doesn't fix**: discovery-service now signs
+`on_discover` as its own identity (`DS_ID`, unchanged placeholder value
+`ds-fabric.ion.id` from the original scaffold) and depends on zero BAP/BPP
+secret material — confirmed via `docker compose config`, which shows the
+container's resolved environment carries no `*_PRIVATE_KEY` for BAP or
+BPP at all. It does **not** fix registry verification actually
+succeeding: `ds-fabric.ion.id` still isn't registered anywhere
+`onix-bap`'s `bapTxnReceiver` can resolve it (same `404` from D15) — that
+requires a real, out-of-band registration (INFRA_SETUP.md's "ask whoever
+administers the network registry" process, the same one used for
+`BAP_ID`/`BPP_ID`), which cannot be done from inside this repo. Research
+into self-hosting a substitute registry found two real options
+(`dediregistry`'s `{url}/lookup/{subscriberID}/{registryName}/{keyID}`
+contract could be satisfied by static files on infrastructure this repo
+already runs — `dedi-static-server`/GCS — or the classic `registry`
+plugin already bundled in the `fidedocker/onix-adapter:1.6.1` image but
+unused here, paired with a self-hosted `fidedocker/registry` server) —
+but both would repoint `bapTxnReceiver`'s ONE shared registry config,
+which also governs verification of every other real inbound callback
+(`on_select`, `on_init`, ...) for both `onix-bap` and `onix-bpp`, not just
+discovery-service's. That's a deliberate infrastructure decision with a
+real blast radius, not something to fold quietly into an auth bugfix —
+left as an explicit open question for the user, not built.
+- Tests: `internal/config`'s `TestLoad_CallerKeyIDAndCallerPublicKeyReadFromEnv`
+  replaces the D20 private-key version; `BppKeyID` override tests
+  unchanged (the combined-key-id mechanism itself was fine — only which
+  `.env` var fed it was wrong). 132 tests across 12 packages pass
+  (unchanged from D20 — this was a config/wiring-only revert, no new
+  production code paths).
+
+**D22 — Renamed the config fields/env vars D20/D21 introduced: discovery
+service's own identity was still called `BppID`/`BppURI`/`BppKeyID`
+(env `BPP_ID`/`BPP_URI`/`BPP_KEY_ID`), and the trusted-caller vars were
+called `CallerKeyID`/`CallerPublicKeyBase64` (env `CALLER_BAP_KEY_ID`/
+`CALLER_BAP_PUBLIC_KEY_BASE64`) — both misleading, called out by the user
+(2026-09-22, same day as D21).** Even after D21 fixed the actual
+credential sharing, the *names* still implied things that were never
+true: `BPP_ID` suggested this was (or should be) the reference app's
+BPP's identity, when it has always been Discovery Service's own,
+unrelated identity (D20/D21 already established this — only the naming
+lagged). `CALLER_BAP_KEY_ID` hard-coded the assumption that the trusted
+caller is specifically "a BAP" — true in this one reference deployment
+(onix-bap's bapTxnCaller is what signs `/discover`), but not a fact about
+Discovery Service in general; a real Discovery Service on a live network
+could be called by any authorized participant, so baking "BAP" into the
+name of a *deployment-specific trust decision* was wrong.
+
+**The fix — a pure rename, no behavior change**:
+- `config.Config`: `BppID`/`BppURI`/`BppKeyID` → `SubscriberID`/
+  `SubscriberURI`/`SubscriberKeyID`. `CallerKeyID`/`CallerPublicKeyBase64`
+  → `TrustedCallerKeyID`/`TrustedCallerPublicKeyBase64`.
+- Container-side env vars: `BPP_ID`/`BPP_URI`/`BPP_KEY_ID` →
+  `SUBSCRIBER_ID`/`SUBSCRIBER_URI`/`SUBSCRIBER_KEY_ID`.
+  `CALLER_BAP_KEY_ID`/`CALLER_BAP_PUBLIC_KEY_BASE64` →
+  `TRUSTED_CALLER_KEY_ID`/`TRUSTED_CALLER_PUBLIC_KEY_BASE64`.
+- `cmd/discovery/main.go`'s `buildSigner`/`buildVerifier` and the
+  `service.NewDiscoverService(...)` call updated to match; the actual
+  logic (ephemeral-key fallback, `SubscriberKeyID`-splitting override,
+  fail-open-with-a-warning when unconfigured) is unchanged from D20/D21.
+- Root/standalone `docker-compose.yml`, both `.env`/`.env.example` files
+  updated to match — the ROOT-level source vars (`DS_ID`/`DS_KEY_ID`/
+  `DS_PRIVATE_KEY`/`DS_URI`, `BAP_KEY_ID`/`BAP_ONIX_SIGNING_PUBLIC_KEY`)
+  were already fine and unchanged; only what container env var name they
+  map INTO changed.
+- Deliberately NOT renamed: `service.DiscoverService`'s `ownBppID`/
+  `ownBppURI` fields and `beckn.Catalog`'s `bppId`/`bppUri` JSON fields —
+  those genuinely are named `bppId`/`bppUri` because that's the Beckn v2
+  wire schema's own field name for "which Provider Platform does this
+  catalog entry belong to," which is a real, correct, spec-mandated name,
+  unrelated to the config-level identity-naming confusion this entry
+  fixes. Only the config/env layer, which was never about the wire
+  schema, needed to change.
+- Tests: `internal/config`'s tests renamed to match (mechanical, same
+  assertions/behavior — `TestLoad_SubscriberKeyIDOverridesSubscriberIDAndSigningKeyID`,
+  `TestLoad_TrustedCallerKeyIDAndPublicKeyReadFromEnv`, etc.). 132 tests
+  across 12 packages pass — unchanged count, this was a rename, not new
+  logic.
+
 ## 5. Milestone plan (TDD, step by step)
 
 1. **M1 — Contract skeleton — DONE, then hardened for concurrency
