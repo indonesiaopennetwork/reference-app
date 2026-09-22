@@ -18,28 +18,103 @@ import (
 
 	dbsqlc "github.com/ion/winroom/bap/db/sqlc"
 	"github.com/ion/winroom/bap/internal/config"
+	"github.com/ion/winroom/bap/internal/discoverwait"
 	"github.com/ion/winroom/bap/internal/httpclient"
 )
 
+// discoverCallbackTimeout bounds how long Discover waits for discovery
+// service's on_discover callback to arrive after the initial Ack, before
+// giving up and returning an error to the browser. See internal/discoverwait.
+//
+// Must stay comfortably above discovery-service's own
+// DISPATCH_DELIVERY_TIMEOUT_SECONDS (docker-compose.yml, 45s as of this
+// writing) — that bounds how long discovery-service itself will keep
+// retrying delivery to onix-bap (whose bapTxnReceiver can be slow on a
+// cold Extended Schema cache, see that var's own comment). If this is
+// shorter, the browser sees a timeout even when delivery eventually
+// succeeds a few seconds later.
+const discoverCallbackTimeout = 60 * time.Second
+
 type ClientService struct {
-	pool   *pgxpool.Pool
-	cfg    *config.Config
-	lh     *logharbour.Logger
-	client *http.Client
+	pool     *pgxpool.Pool
+	cfg      *config.Config
+	lh       *logharbour.Logger
+	client   *http.Client
+	registry *discoverwait.Registry
 }
 
-func NewClientService(pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.Logger) *ClientService {
+func NewClientService(pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.Logger, registry *discoverwait.Registry) *ClientService {
 	return &ClientService{
-		pool: pool,
-		cfg:  cfg,
-		lh:   lh,
-		client: httpclient.New(10 * time.Second),
+		pool:     pool,
+		cfg:      cfg,
+		lh:       lh,
+		client:   httpclient.New(10 * time.Second),
+		registry: registry,
 	}
 }
 
-// Discover sends a Beckn v2 `discover` action to the CDS and returns the raw JSON response.
-// Logs an OUTBOUND row to beckn_message_log capturing both the request and the CDS response.
+// Discover sends a Beckn v2 `discover` action through onix-bap's
+// bapTxnCaller — the same adapter-mediated path every other action
+// (select, init, confirm, ...) uses via sendToBPP, rather than a
+// direct point-to-point call to discovery service. onix-bap signs the
+// outbound request and, on the way back, its bapTxnReceiver verifies
+// on_discover's signature against the network registry before routing it
+// here — the same trust model as every other callback.
+//
+// Discover presents a synchronous call to its own caller (HandleDiscover,
+// and so the browser) even though the real exchange underneath is
+// genuinely async per the Beckn v2 spec: sendToBPP only gets back an
+// immediate Ack, and the actual catalogs arrive later via a separate
+// on_discover callback delivered to /api/webhook/on_discover. This method
+// blocks on internal/discoverwait's Registry until that callback arrives
+// (delivered by internal/on_discover_svc) or discoverCallbackTimeout
+// elapses.
 func (s *ClientService) Discover(ctx context.Context, req *ClientDiscoverRequest) (json.RawMessage, error) {
+	txnID := uuid.New()
+	msgID := uuid.New()
+	txnIDStr := txnID.String()
+
+	msgJSON, _ := json.Marshal(map[string]any{
+		"intent": map[string]any{
+			"textSearch": req.TextSearch,
+		},
+	})
+
+	becknReq := BecknRequest{
+		Context: s.newContext("discover", txnIDStr, msgID.String(), "", ""),
+		Message: msgJSON,
+	}
+
+	// Register before sending: a callback that arrives unusually fast must
+	// never race ahead of us starting to wait for it.
+	resultCh := s.registry.Register(txnIDStr)
+	defer s.registry.Cancel(txnIDStr)
+
+	if err := s.sendToBPP(ctx, s.cfg.BapCallerURL, "discover", txnID, msgID, s.cfg.NetworkID, becknReq); err != nil {
+		return nil, err
+	}
+
+	select {
+	case result := <-resultCh:
+		return result, nil
+	case <-ctx.Done():
+		return nil, fmt.Errorf("discover request cancelled while waiting for on_discover: %w", ctx.Err())
+	case <-time.After(discoverCallbackTimeout):
+		return nil, fmt.Errorf("timed out after %s waiting for on_discover callback", discoverCallbackTimeout)
+	}
+}
+
+// DiscoverSync sends a Beckn v2 `discover` action DIRECTLY to
+// discovery-service — bypassing onix-bap entirely — using discovery
+// service's own GET /discover sync shortcut, which returns the full
+// catalog result inline in one request/response instead of the spec's
+// real async on_discover callback. Kept alongside the async, onix-routed
+// Discover as a fast, reliable alternative that doesn't depend on
+// discovery-service's identity being resolvable through onix-bap's
+// network registry (see discovery-service/CONTEXT.md D20/D21) — at the
+// cost of not being the spec's real adapter-mediated topology.
+// Logs an OUTBOUND row to beckn_message_log capturing both the request and the response.
+func (s *ClientService) DiscoverSync(ctx context.Context, req *ClientDiscoverRequest) (json.RawMessage, error) {
 	if s.cfg.CDSDiscoverURL == "" {
 		return json.RawMessage(`{"message":{"catalogs":[]}}`), nil
 	}
@@ -48,8 +123,8 @@ func (s *ClientService) Discover(ctx context.Context, req *ClientDiscoverRequest
 	msgID := uuid.New()
 	txnID := uuid.New()
 
-	becknReq := map[string]interface{}{
-		"context": map[string]interface{}{
+	becknReq := map[string]any{
+		"context": map[string]any{
 			"version":       "2.0.0",
 			"action":        "discover",
 			"timestamp":     start.UTC().Format(time.RFC3339),
@@ -59,8 +134,8 @@ func (s *ClientService) Discover(ctx context.Context, req *ClientDiscoverRequest
 			"bapUri":        s.cfg.BapURI,
 			"networkId":     s.cfg.NetworkID,
 		},
-		"message": map[string]interface{}{
-			"intent": map[string]interface{}{
+		"message": map[string]any{
+			"intent": map[string]any{
 				"textSearch": req.TextSearch,
 			},
 		},
