@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/remiges-tushar/discovery-service/internal/beckn"
 	"github.com/remiges-tushar/discovery-service/internal/constants"
 )
 
@@ -92,15 +93,38 @@ type Config struct {
 	// this to a debug tier also enables per-request "hit" logging.
 	LogLevel string
 
-	// BppID/BppURI are this service's own registered Beckn subscriber
-	// identity. Stamped onto the on_discover response context (and any
-	// catalog that doesn't already declare its own) whenever an incoming
-	// /discover request doesn't already address a specific bppId/bppUri
-	// — see service.BuildFixedOnDiscover and CONTEXT.md D13. Empty by
-	// default; set these once this service is actually registered on a
-	// network.
-	BppID  string
-	BppURI string
+	// SubscriberID/SubscriberURI are THIS SERVICE'S OWN registered Beckn
+	// network identity — a Discovery Service is its own network
+	// participant (it can aggregate catalogs from many Provider
+	// Platforms, not just this repo's own bpp), so it has its own
+	// identity, entirely unrelated to this reference app's BAP/BPP
+	// identities. Deliberately NOT named after "Bpp"/"Bap" — this field
+	// used to be called BppID/BppURI, which wrongly suggested it was, or
+	// should be, the reference app's BPP's identity; it never was. See
+	// CONTEXT.md D20/D21/D22 for that history. Stamped onto the
+	// on_discover response context (and any catalog that doesn't already
+	// declare its own) as the default bppId/bppUri whenever an incoming
+	// /discover request doesn't already address a specific BPP — see
+	// service.BuildFixedOnDiscover and CONTEXT.md D13 (that field is
+	// legitimately named bppId/bppUri on the wire, per the Beckn v2
+	// schema — only this config-level identity was misnamed). Empty by
+	// default; set these (or SubscriberKeyID below) once this service has
+	// its own dedicated Ed25519 keypair, whether or not it's registered
+	// on a network yet — see SubscriberKeyID and main.go's buildSigner.
+	SubscriberID  string
+	SubscriberURI string
+
+	// SubscriberKeyID is an optional combined
+	// "{subscriberId}|{uniqueKeyId}|{algorithm}" form of this service's
+	// OWN identity above — the same combined shape this repo's other Go
+	// apps use for BAP_KEY_ID/BPP_KEY_ID (see
+	// bap-application/internal/clientsvc/becknsign.go), for consistency,
+	// but never actually reusing either of THEIR values: this is a wholly
+	// separate, dedicated identity for Discovery Service, not shared with
+	// anyone. When set, main.go's buildSigner splits it (beckn.SplitKeyID)
+	// and uses its parts in place of SubscriberID and SigningKeyID below.
+	// Leave unset to keep using those two directly (e.g. in tests).
+	SubscriberKeyID string
 
 	// OnDiscoverPath is appended to a BAP's context.bapUri to form the
 	// on_discover callback URL. Defaults to the spec-correct
@@ -127,6 +151,31 @@ type Config struct {
 	// SigningValidity is how long a signature is valid for
 	// (created→expires).
 	SigningValidity time.Duration
+
+	// TrustedCallerKeyID/TrustedCallerPublicKeyBase64 identify the single
+	// caller allowed to POST /discover — see internal/signing.Verifier.
+	// Deliberately named "caller", not "Bap": whoever is actually
+	// configured here (in this reference deployment, our own BAP, since
+	// its onix bapTxnCaller is what signs the outbound /discover request)
+	// is a deployment choice, not something Discovery Service should
+	// assume by role name — a real Discovery Service in a live network
+	// could equally be called by any authorized participant. Verifying
+	// ANY caller at all requires knowing two things about them: who they
+	// claim to be (an identifier) and their public key (to check the
+	// signature math) — that's inherent to signature verification, not
+	// optional. TrustedCallerKeyID is a public identifier, safe to share
+	// (in this deployment, reused from BAP_KEY_ID as-is).
+	// TrustedCallerPublicKeyBase64 is deliberately the caller's PUBLIC key
+	// ONLY (never a private key): this service only ever needs to verify
+	// as that caller, never sign as it, so it must never be handed a
+	// credential capable of doing that — see CONTEXT.md D21. Both must be
+	// set for inbound signature verification to run; if either is empty,
+	// /discover accepts requests without checking the Authorization
+	// header at all (logged as a warning) — matching this service's
+	// existing fail-open-with-a-warning posture for unconfigured signing
+	// (see buildSigner in cmd/discovery/main.go).
+	TrustedCallerKeyID           string
+	TrustedCallerPublicKeyBase64 string
 
 	// CatalogIndexURLs is a list of Provider Node catalog index URLs
 	// (e.g. "https://bpp.example.com/index/becknCatalogs.index.json")
@@ -158,7 +207,7 @@ func (c Config) Addr() string {
 func Load() Config {
 	loadDotEnv()
 
-	return Config{
+	cfg := Config{
 		Port:                    getString("PORT", defaultPort),
 		DispatchClientTimeout:   getSeconds("DISPATCH_CLIENT_TIMEOUT_SECONDS", defaultDispatchClientTimeout),
 		DispatchDeliveryTimeout: getSeconds("DISPATCH_DELIVERY_TIMEOUT_SECONDS", defaultDispatchDeliveryTimeout),
@@ -177,8 +226,9 @@ func Load() Config {
 
 		LogLevel: getString("LOG_LEVEL", defaultLogLevel),
 
-		BppID:  getString("BPP_ID", ""),
-		BppURI: getString("BPP_URI", ""),
+		SubscriberID:    getString("SUBSCRIBER_ID", ""),
+		SubscriberURI:   getString("SUBSCRIBER_URI", ""),
+		SubscriberKeyID: getString("SUBSCRIBER_KEY_ID", ""),
 
 		OnDiscoverPath: getString("ON_DISCOVER_PATH", constants.OnDiscoverPath),
 
@@ -186,10 +236,27 @@ func Load() Config {
 		SigningKeyID:            getString("SIGNING_KEY_ID", defaultSigningKeyID),
 		SigningValidity:         getSeconds("SIGNING_VALIDITY_SECONDS", defaultSigningValidity),
 
+		TrustedCallerKeyID:           getString("TRUSTED_CALLER_KEY_ID", ""),
+		TrustedCallerPublicKeyBase64: getString("TRUSTED_CALLER_PUBLIC_KEY_BASE64", ""),
+
 		CatalogIndexURLs:       getStringSlice("CATALOG_INDEX_URLS"),
 		CatalogRefreshInterval: getSeconds("CATALOG_REFRESH_INTERVAL_SECONDS", defaultCatalogRefreshInterval),
 		CatalogFetchTimeout:    getSeconds("CATALOG_FETCH_TIMEOUT_SECONDS", defaultCatalogFetchTimeout),
 	}
+
+	// SubscriberKeyID (see Config.SubscriberKeyID) is the authoritative
+	// identity when set, overriding SubscriberID/SigningKeyID rather than
+	// requiring them separately duplicated in .env.
+	if cfg.SubscriberKeyID != "" {
+		if subscriberID, uniqueKeyID, _, err := beckn.SplitKeyID(cfg.SubscriberKeyID); err == nil {
+			cfg.SubscriberID = subscriberID
+			cfg.SigningKeyID = uniqueKeyID
+		} else {
+			slog.Warn("invalid SUBSCRIBER_KEY_ID, falling back to SUBSCRIBER_ID/SIGNING_KEY_ID", "error", err)
+		}
+	}
+
+	return cfg
 }
 
 // getStringSlice parses a comma-separated env var into a trimmed,

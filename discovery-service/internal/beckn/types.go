@@ -4,7 +4,13 @@
 // resourceAttributes, camelCase context) — v1 shapes are not supported.
 package beckn
 
-import "fmt"
+import (
+	"encoding/base64"
+	"fmt"
+	"regexp"
+	"strconv"
+	"strings"
+)
 
 // Context carries addressing, protocol version, and message identity for
 // every Beckn v2 API call. See beckn.yaml#/components/schemas/Context.
@@ -105,6 +111,85 @@ func FormatSignature(subscriberID, uniqueKeyID, algorithm string, created, expir
 		`Signature keyId="%s|%s|%s",algorithm="%s",created="%d",expires="%d",headers="%s",signature="%s"`,
 		subscriberID, uniqueKeyID, algorithm, algorithm, created, expires, headers, signatureValue,
 	))
+}
+
+// SplitKeyID splits a combined "{subscriberId}|{uniqueKeyId}|{algorithm}"
+// key id — the format root .env's BAP_KEY_ID/BPP_KEY_ID already use, and
+// what a Signature header's own "keyId" field carries — into its three
+// parts. Reuse this instead of asking for the parts pre-split: this repo's
+// other Go services (see bap-application/internal/clientsvc/becknsign.go)
+// already pass BAP_KEY_ID/BPP_KEY_ID through as a single combined string.
+func SplitKeyID(combined string) (subscriberID, uniqueKeyID, algorithm string, err error) {
+	parts := strings.SplitN(combined, "|", 3)
+	if len(parts) != 3 {
+		return "", "", "", fmt.Errorf(`keyId %q is not "subscriberId|uniqueKeyId|algorithm"`, combined)
+	}
+	return parts[0], parts[1], parts[2], nil
+}
+
+// ParsedSignature holds the fields extracted from an inbound Authorization
+// header by ParseSignature, ready for a verifier to check.
+type ParsedSignature struct {
+	SubscriberID string
+	UniqueKeyID  string
+	Algorithm    string
+	Created      int64
+	Expires      int64
+	Headers      string
+	Signature    []byte // decoded from the header's base64 "signature" field
+}
+
+// signatureFieldPattern matches one `key="value"` pair inside the header,
+// e.g. `keyId="a|b|c"` or `created="1234"`.
+var signatureFieldPattern = regexp.MustCompile(`(\w+)="([^"]*)"`)
+
+// ParseSignature parses an inbound Authorization header value formatted per
+// FormatSignature's pattern (the "Signature " prefix is optional — callers
+// may pass either the full header value or just its parameter list).
+func ParseSignature(header string) (ParsedSignature, error) {
+	header = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(header), "Signature"))
+
+	fields := map[string]string{}
+	for _, m := range signatureFieldPattern.FindAllStringSubmatch(header, -1) {
+		fields[m[1]] = m[2]
+	}
+
+	keyID, ok := fields["keyId"]
+	if !ok {
+		return ParsedSignature{}, fmt.Errorf("missing keyId field")
+	}
+	subscriberID, uniqueKeyID, algorithm, err := SplitKeyID(keyID)
+	if err != nil {
+		return ParsedSignature{}, err
+	}
+
+	sigB64, ok := fields["signature"]
+	if !ok {
+		return ParsedSignature{}, fmt.Errorf("missing signature field")
+	}
+	sig, err := base64.StdEncoding.DecodeString(sigB64)
+	if err != nil {
+		return ParsedSignature{}, fmt.Errorf("decode base64 signature: %w", err)
+	}
+
+	created, err := strconv.ParseInt(fields["created"], 10, 64)
+	if err != nil {
+		return ParsedSignature{}, fmt.Errorf("invalid created timestamp %q: %w", fields["created"], err)
+	}
+	expires, err := strconv.ParseInt(fields["expires"], 10, 64)
+	if err != nil {
+		return ParsedSignature{}, fmt.Errorf("invalid expires timestamp %q: %w", fields["expires"], err)
+	}
+
+	return ParsedSignature{
+		SubscriberID: subscriberID,
+		UniqueKeyID:  uniqueKeyID,
+		Algorithm:    algorithm,
+		Created:      created,
+		Expires:      expires,
+		Headers:      fields["headers"],
+		Signature:    sig,
+	}, nil
 }
 
 type Error struct {

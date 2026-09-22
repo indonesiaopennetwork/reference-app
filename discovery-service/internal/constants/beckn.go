@@ -29,6 +29,15 @@ const (
 	ErrInvalidIntent = "SCH_INVALID_INTENT"
 )
 
+// Authentication error codes (beckn-discovr's ErrorCodes.java convention,
+// same rationale as the SCH_* codes above) — returned by
+// handlers.VerifyMiddleware when an inbound /discover request's
+// Authorization header is missing or fails signature verification.
+const (
+	ErrSignatureMissing = "AUT_SIGNATURE_MISSING"
+	ErrSignatureInvalid = "AUT_SIGNATURE_INVALID"
+)
+
 const (
 	ContentTypeJSON = "application/json"
 

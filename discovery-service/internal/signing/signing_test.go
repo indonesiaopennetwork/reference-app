@@ -141,6 +141,128 @@ func TestSign_ExpiresIsCreatedPlusValidity(t *testing.T) {
 	}
 }
 
+func TestVerifier_AcceptsASignatureFromTheTrustedSigner(t *testing.T) {
+	kp, err := GenerateKeyPair()
+	if err != nil {
+		t.Fatalf("GenerateKeyPair() error = %v", err)
+	}
+	signer := NewSigner(kp, "bap.example.com", "key-1", 5*time.Minute)
+	verifier, err := NewVerifier(base64.StdEncoding.EncodeToString(kp.Public), "bap.example.com", "key-1")
+	if err != nil {
+		t.Fatalf("NewVerifier() error = %v", err)
+	}
+
+	body := []byte(`{"context":{"action":"discover"}}`)
+	sig, err := signer.Sign(body)
+	if err != nil {
+		t.Fatalf("Sign() error = %v", err)
+	}
+
+	if err := verifier.Verify(string(sig), body); err != nil {
+		t.Fatalf("Verify() error = %v, want nil", err)
+	}
+}
+
+func TestVerifier_RejectsATamperedBody(t *testing.T) {
+	kp, err := GenerateKeyPair()
+	if err != nil {
+		t.Fatalf("GenerateKeyPair() error = %v", err)
+	}
+	signer := NewSigner(kp, "bap.example.com", "key-1", 5*time.Minute)
+	verifier, err := NewVerifier(base64.StdEncoding.EncodeToString(kp.Public), "bap.example.com", "key-1")
+	if err != nil {
+		t.Fatalf("NewVerifier() error = %v", err)
+	}
+
+	sig, err := signer.Sign([]byte(`{"original":true}`))
+	if err != nil {
+		t.Fatalf("Sign() error = %v", err)
+	}
+
+	if err := verifier.Verify(string(sig), []byte(`{"tampered":true}`)); err == nil {
+		t.Fatal("Verify() error = nil, want an error for a tampered body")
+	}
+}
+
+func TestVerifier_RejectsAnUntrustedSigner(t *testing.T) {
+	trustedKP, err := GenerateKeyPair()
+	if err != nil {
+		t.Fatalf("GenerateKeyPair() error = %v", err)
+	}
+	imposterKP, err := GenerateKeyPair()
+	if err != nil {
+		t.Fatalf("GenerateKeyPair() error = %v", err)
+	}
+	imposterSigner := NewSigner(imposterKP, "bap.example.com", "key-1", 5*time.Minute)
+	verifier, err := NewVerifier(base64.StdEncoding.EncodeToString(trustedKP.Public), "bap.example.com", "key-1")
+	if err != nil {
+		t.Fatalf("NewVerifier() error = %v", err)
+	}
+
+	body := []byte(`{"context":{"action":"discover"}}`)
+	sig, err := imposterSigner.Sign(body)
+	if err != nil {
+		t.Fatalf("Sign() error = %v", err)
+	}
+
+	if err := verifier.Verify(string(sig), body); err == nil {
+		t.Fatal("Verify() error = nil, want an error: signature was produced by a different key pair than the trusted one")
+	}
+}
+
+func TestVerifier_RejectsAMismatchedKeyId(t *testing.T) {
+	kp, err := GenerateKeyPair()
+	if err != nil {
+		t.Fatalf("GenerateKeyPair() error = %v", err)
+	}
+	signer := NewSigner(kp, "someone-else.example.com", "key-1", 5*time.Minute)
+	verifier, err := NewVerifier(base64.StdEncoding.EncodeToString(kp.Public), "bap.example.com", "key-1")
+	if err != nil {
+		t.Fatalf("NewVerifier() error = %v", err)
+	}
+
+	body := []byte(`{"context":{"action":"discover"}}`)
+	sig, err := signer.Sign(body)
+	if err != nil {
+		t.Fatalf("Sign() error = %v", err)
+	}
+
+	if err := verifier.Verify(string(sig), body); err == nil {
+		t.Fatal("Verify() error = nil, want an error: keyId's subscriberId does not match the trusted one")
+	}
+}
+
+func TestVerifier_RejectsAnExpiredSignature(t *testing.T) {
+	kp, err := GenerateKeyPair()
+	if err != nil {
+		t.Fatalf("GenerateKeyPair() error = %v", err)
+	}
+	signer := NewSigner(kp, "bap.example.com", "key-1", -10*time.Minute) // already-expired window
+	verifier, err := NewVerifier(base64.StdEncoding.EncodeToString(kp.Public), "bap.example.com", "key-1")
+	if err != nil {
+		t.Fatalf("NewVerifier() error = %v", err)
+	}
+
+	body := []byte(`{"context":{"action":"discover"}}`)
+	sig, err := signer.Sign(body)
+	if err != nil {
+		t.Fatalf("Sign() error = %v", err)
+	}
+
+	if err := verifier.Verify(string(sig), body); err == nil {
+		t.Fatal("Verify() error = nil, want an error for an expired signature")
+	}
+}
+
+func TestNewVerifier_RejectsAMalformedPublicKey(t *testing.T) {
+	if _, err := NewVerifier("not-base64!", "bap.example.com", "key-1"); err == nil {
+		t.Fatal("NewVerifier() error = nil, want an error for invalid base64")
+	}
+	if _, err := NewVerifier(base64.StdEncoding.EncodeToString([]byte("too short")), "bap.example.com", "key-1"); err == nil {
+		t.Fatal("NewVerifier() error = nil, want an error for a wrong-sized key")
+	}
+}
+
 // parseSignatureFields extracts keyId=".."-style fields from a
 // Signature string for test assertions.
 func parseSignatureFields(t *testing.T, sig string) map[string]string {
