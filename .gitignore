@@ -21,3 +21,4 @@ terraform/*.tfplan
 node_modules/
 dist/
 .DS_Store
+file-onboarding-and-catalog-publish/
