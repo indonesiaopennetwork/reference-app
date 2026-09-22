@@ -26,6 +26,47 @@ services:
     networks:
       - beckn
 
+  # ─── DB migrations ──────────────────────────────────────────────────────
+  # Idempotent one-shot jobs (tern migrate — safe to run every startup, it
+  # tracks applied migrations in its own schema_migrations table and skips
+  # what's already there). Production runs the equivalent as Cloud Run jobs
+  # (migrate-bap/migrate-bpp, see Taskfile.yaml deploy:migrate) — this is
+  # the same Dockerfile.migrate, wired in for local dev too, so bap/bpp
+  # never crash-loop on "relation ... does not exist" after a fresh clone
+  # or a reset postgres_data volume: bap/bpp's own depends_on below waits
+  # for these to actually finish successfully before starting.
+  migrate-bap:
+    build:
+      context: ./bap-application
+      dockerfile: Dockerfile.migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: bap
+      PGUSER: ${DB_USER}
+      PGPASSWORD: ${DB_PASSWORD}
+    networks:
+      - beckn
+
+  migrate-bpp:
+    build:
+      context: ./bpp-application
+      dockerfile: Dockerfile.migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: bpp
+      PGUSER: ${DB_USER}
+      PGPASSWORD: ${DB_PASSWORD}
+    networks:
+      - beckn
+
   # ─── Zitadel (seller login/registration identity provider) ────────────────
   # Runs the classic hosted login UI (LOGINV2 explicitly disabled) so this is
   # a single container -- Zitadel's newer "Login V2" architecture needs a
@@ -324,6 +365,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate-bpp:
+        condition: service_completed_successfully
       onix-bpp:
         condition: service_started
       zitadel:
@@ -381,6 +424,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate-bap:
+        condition: service_completed_successfully
       onix-bap:
         condition: service_started
       zitadel:
