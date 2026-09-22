@@ -298,6 +298,14 @@ services:
       # canceled" -- not a schema or auth problem, a timeout one.
       DISPATCH_DELIVERY_TIMEOUT_SECONDS: "45"
 
+      # The outer DISPATCH_DELIVERY_TIMEOUT_SECONDS above is meaningless
+      # without this: the underlying http.Client used to actually deliver
+      # on_discover has ITS OWN, separate Timeout (defaults to 10s --
+      # DispatchClientTimeout in main.go), and that inner one fires first,
+      # cancelling the request mid-flight before the outer 45s budget is
+      # ever used. Must be >= DISPATCH_DELIVERY_TIMEOUT_SECONDS.
+      DISPATCH_CLIENT_TIMEOUT_SECONDS: "45"
+
       # Outbound on_discover callbacks are signed as discovery-service's
       # OWN, INDEPENDENT identity -- deliberately NOT the reference app's
       # BAP_ID/BPP_ID or their private keys. Discovery Service is its own
