@@ -52,6 +52,20 @@ Three prior-art repos were scanned to ground this design:
    equivalent consumer-facing API."* **That gap is this project.** Style
    lessons taken from it: plain stdlib `net/http` (no framework), constructor
    injection, no field magic, small structs, table-driven tests.
+4. **NFH's own published docs** —
+   [docs.nfh.global/build/creating-a-network/catalog-publishing-and-discovery](https://docs.nfh.global/build/creating-a-network/catalog-publishing-and-discovery)
+   walks through this exact catalog-publish/discover flow at a diagram
+   level (its `/discover` sequence just shows `{status: ACK, messageId}` —
+   illustrative shorthand, not a literal schema) and explicitly defers to
+   **NFH-014 — Decentralized Catalog Publishing and Discovery**
+   ([github.com/beckn/protocol-specifications-v2, `decentralised-catalog`
+   branch, `docs/Catalog_Publishing_and_Discovery.md`](https://github.com/beckn/protocol-specifications-v2/blob/decentralised-catalog/docs/Catalog_Publishing_and_Discovery.md))
+   for the actual protocol contract. NFH-014 itself is explicit that it
+   does **not** change `/discover`/`/on_discover`: *"it also does not
+   remove or migrate beckn.yaml's existing Cataloging Service endpoints,
+   only marks them deprecated"* — confirming source #1 above
+   (`beckn.yaml`) is still the correct, unmodified ground truth for the
+   Ack's required `signature` (`CounterSignature`) field; see D23.
 
 ## 4. Decision log
 
@@ -998,6 +1012,43 @@ name of a *deployment-specific trust decision* was wrong.
   `TestLoad_TrustedCallerKeyIDAndPublicKeyReadFromEnv`, etc.). 132 tests
   across 12 packages pass — unchanged count, this was a rename, not new
   logic.
+
+**D23 — Ack/NACK now carry a real Ed25519 CounterSignature instead of
+PlaceholderSignature (2026-09-22).** D3/D15/M4 had left this as a known,
+explicitly-marked gap — the Ack's `signature` field was structurally
+valid (matched `beckn.yaml`'s `Signature` pattern) but cryptographically
+meaningless (`keyId="unsigned|placeholder|none"`). `beckn.yaml`'s own
+schema marks `signature` **required even on ACK**, and describes it as
+proof the responder "authenticated and processed the request" — a
+placeholder didn't satisfy that. Cross-checked against NFH's specific
+documentation before fixing, per a direct user question about whether
+NFH's contract even wants a signature here at all — see §3 item 4 above:
+NFH-014 explicitly leaves `/discover`/`/on_discover` unchanged from
+`beckn.yaml`, so no separate NFH-specific Ack shape exists to reconcile
+against; `beckn.yaml` was already the correct, sufficient source.
+- `internal/handlers/discover.go`: new `AckSigner` interface
+  (`Sign(body []byte) (beckn.Signature, error)`, same shape as
+  `dispatch.RequestSigner` — satisfied by the same `*signing.Signer`
+  instance `main.go` already builds for outbound `on_discover` delivery,
+  one identity signing both directions). `decodeAndValidate` now reads
+  the body into a byte slice up front (`io.ReadAll`) instead of streaming
+  straight into `json.Decoder`, so the exact received bytes are available
+  to sign — the CounterSignature covers the real request, not an
+  approximation of it. New shared `signOrPlaceholder`/`writeSignedNack`
+  helpers fall back to `PlaceholderSignature` (clearly marked, not
+  cryptographically real) when no signer is configured or signing itself
+  fails — a signing problem must never block an Ack from being sent.
+- `internal/handlers/auth.go`'s `VerifyMiddleware` takes the same
+  `AckSigner` now too, so a rejected request's NACK (missing/invalid
+  Authorization) is signed the same real way, not a separate code path.
+- **Verified live**, not just by inspection: `docker logs` on a real
+  discover round-trip now shows
+  `keyId="onix-bap-x7m2wmy7nq-et.a.run.app|76EU91ME6...",algorithm="ed25519",...`
+  in place of the old placeholder.
+- Tests: `TestDiscoverHandler_WithSigner_AckCarriesARealVerifiableSignature`
+  (signs, then independently verifies against the signer's own public key
+  via `signing.NewVerifier`) and `TestDiscoverHandler_SignerFailure_FallsBackToPlaceholder`.
+  134 tests across 12 packages pass.
 
 ## 5. Milestone plan (TDD, step by step)
 
