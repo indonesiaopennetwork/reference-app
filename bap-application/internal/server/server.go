@@ -10,8 +10,10 @@ import (
 	"github.com/ion/winroom/bap/internal/auth"
 	"github.com/ion/winroom/bap/internal/clientsvc"
 	"github.com/ion/winroom/bap/internal/config"
+	"github.com/ion/winroom/bap/internal/discoverwait"
 	oncancelsvc "github.com/ion/winroom/bap/internal/on_cancel_svc"
 	onconfirmsvc "github.com/ion/winroom/bap/internal/on_confirm_svc"
+	ondiscoversvc "github.com/ion/winroom/bap/internal/on_discover_svc"
 	oninitsvc "github.com/ion/winroom/bap/internal/on_init_svc"
 	onratesvc "github.com/ion/winroom/bap/internal/on_rate_svc"
 	onselectsvc "github.com/ion/winroom/bap/internal/on_select_svc"
@@ -28,11 +30,20 @@ func RegisterRoutes(r *gin.Engine, pool *pgxpool.Pool, cfg *config.Config, lh *l
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 
+	// discoverRegistry bridges the on_discover webhook below back to the
+	// synchronous /api/v1/discover request that triggered it -- see
+	// internal/discoverwait's package doc. One instance shared by both
+	// sides for the process lifetime.
+	discoverRegistry := discoverwait.NewRegistry()
+
 	// Beckn webhook endpoints — BPP (via ONIX adapter) POSTs on_* callbacks here.
 	webhook := r.Group("/api/webhook")
 	{
 		onSelectH := onselectsvc.NewOnSelectHandler(pool, cfg, lh)
 		webhook.POST("/on_select", onSelectH.Handle)
+
+		onDiscoverH := ondiscoversvc.NewOnDiscoverHandler(pool, cfg, lh, discoverRegistry)
+		webhook.POST("/on_discover", onDiscoverH.Handle)
 
 		onInitH := oninitsvc.NewOnInitHandler(pool, cfg, lh)
 		webhook.POST("/on_init", onInitH.Handle)
@@ -62,8 +73,12 @@ func RegisterRoutes(r *gin.Engine, pool *pgxpool.Pool, cfg *config.Config, lh *l
 	v1 := r.Group("/api/v1")
 	v1.Use(auth.OptionalAuth(verifier))
 	{
-		clientH := clientsvc.NewClientHandler(pool, cfg, lh)
+		clientH := clientsvc.NewClientHandler(pool, cfg, lh, discoverRegistry)
 		v1.GET("/catalog", clientH.HandleCatalog)
+		// Browser-facing contract is always GET; DISCOVER_METHOD (see
+		// config.Config.DiscoverMethod) picks which implementation serves
+		// it underneath -- exactly one active at a time. See
+		// clientsvc.ClientHandler.HandleDiscover.
 		v1.GET("/discover", clientH.HandleDiscover)
 		v1.POST("/select", clientH.HandleSelect)
 		v1.POST("/init", clientH.HandleInit)
