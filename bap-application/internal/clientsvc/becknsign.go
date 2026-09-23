@@ -15,6 +15,10 @@ import (
 // privateKeyBase64 is a base64-encoded Ed25519 private key (64 bytes) or seed (32 bytes).
 //
 // Returns an empty string and no error when privateKeyBase64 is empty (signing skipped).
+// Used only by DiscoverSync, which calls discovery-service directly
+// (bypassing onix-bap) and so must sign for itself — see DiscoverSync's
+// own doc comment. Discover (the async, onix-routed path) relies on
+// onix-bap's bapTxnCaller to sign instead, like every other action.
 func becknAuthHeader(body []byte, keyID, privateKeyBase64 string) (string, error) {
 	if privateKeyBase64 == "" {
 		return "", nil

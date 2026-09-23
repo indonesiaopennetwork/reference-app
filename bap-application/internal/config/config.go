@@ -4,6 +4,16 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
+)
+
+const (
+	// DiscoverMethodGet selects ClientService.DiscoverSync — direct to
+	// discovery-service, bypassing onix-bap.
+	DiscoverMethodGet = "GET"
+	// DiscoverMethodPost selects ClientService.Discover — the real async
+	// Beckn contract, routed through onix-bap like every other action.
+	DiscoverMethodPost = "POST"
 )
 
 // Config holds all runtime configuration for the BAP application.
@@ -30,17 +40,42 @@ type Config struct {
 	BppURI string // BPP receiver URL   (context.bppUri, e.g. https://bpptest.remiges.tech/bpp/receiver)
 
 	// BapCallerURL is the ONIX BAP caller base URL the BAP actually POSTs to.
-	// The action is appended: <BapCallerURL>/select, <BapCallerURL>/init, etc.
-	// This is intentionally different from BppURI, which stays in the Beckn context.
+	// The action is appended: <BapCallerURL>/select, <BapCallerURL>/init,
+	// <BapCallerURL>/discover, etc. — clientsvc.ClientService.Discover (the
+	// async path, POST /api/v1/discover) goes through this same
+	// adapter-mediated path (sendToBPP) as every other action; onix-bap
+	// signs the outbound request and its bapTxnReceiver verifies the
+	// on_discover callback against the network registry, same as any
+	// other on_* callback. This is intentionally different from BppURI,
+	// which stays in the Beckn context.
 	BapCallerURL string
 
-	// CDSDiscoverURL is the full URL of the Catalog Discovery Service discover endpoint.
-	// Example: https://cds.example.com/discover
-	// Leave blank in environments without a live CDS (returns empty catalog list).
+	// CDSDiscoverURL is the full URL of discovery-service's own /discover
+	// endpoint, called DIRECTLY — bypassing onix-bap entirely. Used only
+	// by clientsvc.ClientService.DiscoverSync (selected when
+	// DiscoverMethod is "GET"), kept alongside the async, onix-routed
+	// Discover ("POST") as a fast, reliable fallback: it doesn't depend
+	// on discovery-service's identity being resolvable through onix-bap's
+	// network registry (see discovery-service/CONTEXT.md D20/D21), at the
+	// cost of not being the spec's real adapter-mediated topology.
+	// Example: http://discovery-service:8087/discover. Leave blank in
+	// environments without a live discovery service (returns an empty
+	// catalog list, only relevant when DiscoverMethod is "GET").
 	CDSDiscoverURL string
 
+	// DiscoverMethod selects which of the two discover implementations
+	// GET /api/v1/discover actually calls — exactly one is active at a
+	// time. "GET" (DiscoverMethodGet, the default) → DiscoverSync, direct
+	// to discovery-service. "POST" (DiscoverMethodPost) → Discover, the
+	// real async contract via onix-bap. Named after the HTTP method each
+	// implementation used before this switch existed, not the method the
+	// browser sends — the browser-facing route is always a plain GET
+	// either way. Env: DISCOVER_METHOD.
+	DiscoverMethod string
+
 	// BapPrivateKey is the base64-encoded Ed25519 private key (64 bytes) or seed (32 bytes)
-	// used to sign outbound Beckn requests. Required when CDSDiscoverURL is set.
+	// used to sign outbound Beckn requests. Required when CDSDiscoverURL is set
+	// (DiscoverSync signs for itself, since it bypasses onix-bap's own signing).
 	// Env: BAP_PRIVATE_KEY
 	BapPrivateKey string
 
@@ -81,6 +116,7 @@ func Load() (*Config, error) {
 		BapCallerURL: getEnv("BAP_CALLER_URL", os.Getenv("ADAPTER_URL")),
 
 		CDSDiscoverURL: os.Getenv("CDS_DISCOVER_URL"),
+		DiscoverMethod: strings.ToUpper(getEnv("DISCOVER_METHOD", DiscoverMethodGet)),
 
 		BapPrivateKey: os.Getenv("BAP_PRIVATE_KEY"),
 		BapKeyID:      os.Getenv("BAP_KEY_ID"),
@@ -143,6 +179,9 @@ func (c *Config) validate() error {
 	}
 	if c.BapCallerURL == "" {
 		return fmt.Errorf("BAP_CALLER_URL is required")
+	}
+	if c.DiscoverMethod != DiscoverMethodGet && c.DiscoverMethod != DiscoverMethodPost {
+		return fmt.Errorf("DISCOVER_METHOD must be %q or %q, got %q", DiscoverMethodGet, DiscoverMethodPost, c.DiscoverMethod)
 	}
 	return nil
 }

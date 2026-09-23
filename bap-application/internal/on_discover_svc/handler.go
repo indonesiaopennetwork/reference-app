@@ -9,37 +9,55 @@ import (
 	"github.com/remiges-tech/logharbour/logharbour"
 
 	"github.com/ion/winroom/bap/internal/config"
+	"github.com/ion/winroom/bap/internal/discoverwait"
 )
 
-type Handler struct {
-	svc *Service
+// OnDiscoverHandler handles POST /api/webhook/on_discover — the callback
+// from the Discovery Service delivering catalog results for a prior async
+// /discover request. The BAP immediately returns ACK and asynchronously
+// persists the result for observability, delivering it first to any
+// request still waiting on it (see service.go, internal/discoverwait).
+type OnDiscoverHandler struct {
+	svc *OnDiscoverService
 	lh  *logharbour.Logger
 }
 
-func NewHandler(pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.Logger) *Handler {
-	return &Handler{svc: NewService(pool, cfg, lh), lh: lh}
+func NewOnDiscoverHandler(pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.Logger, registry *discoverwait.Registry) *OnDiscoverHandler {
+	return &OnDiscoverHandler{
+		svc: NewOnDiscoverService(pool, cfg, lh, registry),
+		lh:  lh,
+	}
 }
 
-func (h *Handler) Handle(c *gin.Context) {
+func (h *OnDiscoverHandler) Handle(c *gin.Context) {
 	var req OnDiscoverRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		h.lh.WithModule("on_discover_handler").Err().Error(err).Log("invalid on_discover body")
-		c.JSON(http.StatusBadRequest, buildNACK(BecknContext{}, err.Error()))
+		h.lh.WithModule("on_discover_handler").Err().Error(err).Log("invalid on_discover request body")
+		c.JSON(http.StatusBadRequest, buildNACK(BecknContext{}))
 		return
 	}
+
+	// Immediately return ACK — Beckn spec requires a synchronous ACK.
 	c.JSON(http.StatusOK, BecknACK{
-		Context: ackCtx(req.Context),
+		Context: contextForACK(req.Context),
 		Message: ACKMessage{ACK: ACKStatus{Status: "ACK"}},
 	})
-	go func() { h.svc.Process(context.Background(), &req) }()
+
+	// Persist state asynchronously.
+	go func() {
+		h.svc.Process(context.Background(), &req)
+	}()
 }
 
-func ackCtx(in BecknContext) BecknContext {
+func contextForACK(in BecknContext) BecknContext {
 	out := in
 	out.Action = "on_discover"
 	return out
 }
 
-func buildNACK(ctx BecknContext, _ string) BecknACK {
-	return BecknACK{Context: ackCtx(ctx), Message: ACKMessage{ACK: ACKStatus{Status: "NACK"}}}
+func buildNACK(ctx BecknContext) BecknACK {
+	return BecknACK{
+		Context: contextForACK(ctx),
+		Message: ACKMessage{ACK: ACKStatus{Status: "NACK"}},
+	}
 }

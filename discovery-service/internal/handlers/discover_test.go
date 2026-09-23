@@ -1,0 +1,505 @@
+package handlers
+
+import (
+	"context"
+	"crypto/ed25519"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/remiges-tech/logharbour/logharbour"
+	"github.com/remiges-tushar/discovery-service/internal/beckn"
+	"github.com/remiges-tushar/discovery-service/internal/dispatch"
+	"github.com/remiges-tushar/discovery-service/internal/service"
+	"github.com/remiges-tushar/discovery-service/internal/signing"
+	"github.com/remiges-tushar/discovery-service/internal/worker"
+	"golang.org/x/crypto/blake2b"
+)
+
+func testLogger() *logharbour.Logger {
+	ctx := logharbour.NewLoggerContext(logharbour.Info)
+	return logharbour.NewLoggerWithFallback(ctx, "handlers-test", logharbour.NewFallbackWriter(io.Discard, io.Discard))
+}
+
+// validRequestBody deliberately leaves textSearch blank (matches
+// everything) — these are transport/wiring tests, not search-relevance
+// tests (see the dedicated search tests below), and shouldn't need
+// updating whenever the embedded demo catalog's content changes.
+func validRequestBody(bapURI string) string {
+	return `{
+		"context": {
+			"action": "discover",
+			"version": "2.0.0",
+			"bapId": "bap.example.com",
+			"bapUri": "` + bapURI + `",
+			"transactionId": "txn-1",
+			"messageId": "msg-1"
+		},
+		"message": { "intent": {} }
+	}`
+}
+
+func newTestHandler(t *testing.T) *DiscoverHandler {
+	return newTestHandlerWithSigner(t, nil)
+}
+
+func newTestHandlerWithSigner(t *testing.T, signer AckSigner) *DiscoverHandler {
+	client := &http.Client{Timeout: 2 * time.Second}
+	pool := worker.NewPool(2, 4, testLogger())
+	t.Cleanup(func() { _ = pool.Shutdown(context.Background()) })
+
+	svc := service.NewDiscoverService(dispatch.NewHTTPDispatcher(client, "/on_discover", nil), pool, 2*time.Second, testLogger(), "own-bpp.example.com", "https://own-bpp.example.com", service.EmbeddedCatalogStore{})
+	return NewDiscoverHandler(svc, testMaxBodyBytes, testLogger(), signer)
+}
+
+const testMaxBodyBytes = 1 << 20 // 1 MiB, mirrors config.defaultMaxRequestBodyBytes
+
+func TestDiscoverHandler_ValidRequest_ReturnsAck(t *testing.T) {
+	h := newTestHandler(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/discover", strings.NewReader(validRequestBody("https://bap.example.com")))
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+
+	var ack beckn.Ack
+	if err := json.Unmarshal(rec.Body.Bytes(), &ack); err != nil {
+		t.Fatalf("decode ack: %v", err)
+	}
+	if ack.Status != "ACK" {
+		t.Errorf("status = %q, want ACK", ack.Status)
+	}
+	if ack.Signature == "" {
+		t.Error("expected a (placeholder) signature value on the Ack")
+	}
+	// The Ack must be JSON-decodable with Signature as a plain string —
+	// if it were still (wrongly) serialized as a nested object, decoding
+	// into beckn.Ack (Signature is now a string type) would have failed
+	// above already, but assert the raw wire shape explicitly too.
+	var raw map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode raw ack: %v", err)
+	}
+	if _, isString := raw["signature"].(string); !isString {
+		t.Errorf("wire-level signature field is not a JSON string (got %T) — beckn.yaml requires Signature to be type: string", raw["signature"])
+	}
+}
+
+func TestDiscoverHandler_ValidRequest_DeliversOnDiscoverAsynchronously(t *testing.T) {
+	received := make(chan beckn.OnDiscoverRequest, 1)
+	bap := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body beckn.OnDiscoverRequest
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(beckn.Ack{Status: "ACK"})
+		received <- body
+	}))
+	defer bap.Close()
+
+	h := newTestHandler(t)
+	req := httptest.NewRequest(http.MethodPost, "/discover", strings.NewReader(validRequestBody(bap.URL)))
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+
+	select {
+	case cb := <-received:
+		if cb.Context.Action != "on_discover" {
+			t.Errorf("callback context.action = %q, want on_discover", cb.Context.Action)
+		}
+		if cb.Context.TransactionID != "txn-1" {
+			t.Errorf("callback transactionId = %q, want txn-1", cb.Context.TransactionID)
+		}
+		if len(cb.Message.Catalogs) == 0 {
+			t.Error("expected at least one catalog in on_discover callback")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for on_discover callback")
+	}
+}
+
+func TestDiscoverHandler_MissingTransactionID_ReturnsNack400(t *testing.T) {
+	h := newTestHandler(t)
+	body := `{"context":{"action":"discover","version":"2.0.0","bapUri":"https://bap.example.com","messageId":"m1"},"message":{"intent":{}}}`
+	req := httptest.NewRequest(http.MethodPost, "/discover", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+	var ack beckn.Ack
+	if err := json.Unmarshal(rec.Body.Bytes(), &ack); err != nil {
+		t.Fatalf("decode nack: %v", err)
+	}
+	if ack.Status != "NACK" {
+		t.Errorf("status = %q, want NACK", ack.Status)
+	}
+	if ack.Error == nil || ack.Error.ErrorCode == "" {
+		t.Error("expected a populated error on NACK")
+	}
+}
+
+func TestDiscoverHandler_MalformedJSON_ReturnsNack400(t *testing.T) {
+	h := newTestHandler(t)
+	req := httptest.NewRequest(http.MethodPost, "/discover", strings.NewReader("{not json"))
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+// TestDiscoverHandler_WithSigner_AckCarriesARealVerifiableSignature checks
+// that when a real AckSigner is configured, the Ack's CounterSignature is
+// an actual Ed25519 signature over the exact request body received — not
+// service.PlaceholderSignature — and that it verifies against the
+// signer's own public key. See beckn.yaml's Signature schema: "signature
+// ... proves we authenticated and processed the request."
+func TestDiscoverHandler_WithSigner_AckCarriesARealVerifiableSignature(t *testing.T) {
+	kp, err := signing.GenerateKeyPair()
+	if err != nil {
+		t.Fatalf("GenerateKeyPair() error = %v", err)
+	}
+	signer := signing.NewSigner(kp, "own-bpp.example.com", "key-1", 5*time.Minute)
+	h := newTestHandlerWithSigner(t, signer)
+
+	body := validRequestBody("https://bap.example.com")
+	req := httptest.NewRequest(http.MethodPost, "/discover", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var ack beckn.Ack
+	if err := json.Unmarshal(rec.Body.Bytes(), &ack); err != nil {
+		t.Fatalf("decode ack: %v", err)
+	}
+	if strings.Contains(string(ack.Signature), "unsigned|placeholder|none") {
+		t.Fatalf("Ack.Signature = %q, want a real signature, not the placeholder", ack.Signature)
+	}
+
+	verifier, err := signing.NewVerifier(base64.StdEncoding.EncodeToString(kp.Public), "own-bpp.example.com", "key-1")
+	if err != nil {
+		t.Fatalf("NewVerifier() error = %v", err)
+	}
+	if err := verifier.Verify(string(ack.Signature), []byte(body)); err != nil {
+		t.Errorf("Ack.Signature does not verify against the exact request body: %v", err)
+	}
+}
+
+// TestDiscoverHandler_WithSigner_ResponseCarriesNFH007SignatureHeader
+// checks the NFH-007 (Authentication and Trust) Signature RESPONSE
+// HEADER — distinct from the body-embedded beckn.yaml CounterSignature
+// checked above: it must (a) actually be present as an HTTP header, not
+// a JSON field, (b) verify as a real Ed25519 signature over the exact
+// response body bytes, using NFH-007's own "BLAKE2b-512=" digest prefix,
+// and (c) chain in the inbound request's own Authorization signature
+// value via the signing string's request-signature component, per
+// NFH-007 §3.4.
+func TestDiscoverHandler_WithSigner_ResponseCarriesNFH007SignatureHeader(t *testing.T) {
+	kp, err := signing.GenerateKeyPair()
+	if err != nil {
+		t.Fatalf("GenerateKeyPair() error = %v", err)
+	}
+	signer := signing.NewSigner(kp, "own-bpp.example.com", "key-1", 5*time.Minute)
+	h := newTestHandlerWithSigner(t, signer)
+
+	const inboundSigValue = "SGVsbG9Xb3JsZFRlc3RTaWduYXR1cmU=" // arbitrary but valid base64
+	reqBody := validRequestBody("https://bap.example.com")
+	req := httptest.NewRequest(http.MethodPost, "/discover", strings.NewReader(reqBody))
+	req.Header.Set("Authorization", `Signature keyId="bap.example.com|key-1|ed25519",algorithm="ed25519",created="1",expires="2",headers="(created) (expires) digest",signature="`+inboundSigValue+`"`)
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+
+	headerVal := rec.Header().Get("Signature")
+	if headerVal == "" {
+		t.Fatal("no Signature response header present, want NFH-007's CounterSignature header")
+	}
+
+	parsed, err := beckn.ParseSignature(headerVal)
+	if err != nil {
+		t.Fatalf("ParseSignature(header) error = %v", err)
+	}
+	if parsed.SubscriberID != "own-bpp.example.com" || parsed.UniqueKeyID != "key-1" {
+		t.Errorf("Signature header keyId = %s|%s, want own-bpp.example.com|key-1", parsed.SubscriberID, parsed.UniqueKeyID)
+	}
+	if parsed.Headers != "(created) (expires) digest request-signature" {
+		t.Errorf("Signature header's headers param = %q, want the NFH-007 4-field list", parsed.Headers)
+	}
+
+	// Reconstruct NFH-007's exact signing string (response-body digest,
+	// "BLAKE2b-512=" prefix, chained request-signature) and verify
+	// independently -- proves the header is a real signature over what
+	// was actually sent, not just structurally shaped like one.
+	digest := blake2b.Sum512(rec.Body.Bytes())
+	digestB64 := base64.StdEncoding.EncodeToString(digest[:])
+	signingString := fmt.Sprintf("(created): %d\n(expires): %d\ndigest: BLAKE2b-512=%s\nrequest-signature: %s",
+		parsed.Created, parsed.Expires, digestB64, inboundSigValue)
+	if !ed25519.Verify(kp.Public, []byte(signingString), parsed.Signature) {
+		t.Error("Signature header does not verify against the response body + chained request-signature — wrong digest, wrong prefix, or chaining broken")
+	}
+}
+
+// TestDiscoverHandler_WithSigner_NoAuthorizationHeader_StillSignsResponse
+// checks the NFH-007 header is still present (chained to an empty
+// request-signature) even when the inbound request carried no
+// Authorization header at all (e.g. auth not enforced) — per NFH-007,
+// every synchronous response must carry it regardless.
+func TestDiscoverHandler_WithSigner_NoAuthorizationHeader_StillSignsResponse(t *testing.T) {
+	kp, err := signing.GenerateKeyPair()
+	if err != nil {
+		t.Fatalf("GenerateKeyPair() error = %v", err)
+	}
+	signer := signing.NewSigner(kp, "own-bpp.example.com", "key-1", 5*time.Minute)
+	h := newTestHandlerWithSigner(t, signer)
+
+	req := httptest.NewRequest(http.MethodPost, "/discover", strings.NewReader(validRequestBody("https://bap.example.com")))
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	headerVal := rec.Header().Get("Signature")
+	if headerVal == "" {
+		t.Fatal("no Signature response header present even with no inbound Authorization header")
+	}
+	parsed, err := beckn.ParseSignature(headerVal)
+	if err != nil {
+		t.Fatalf("ParseSignature(header) error = %v", err)
+	}
+
+	digest := blake2b.Sum512(rec.Body.Bytes())
+	digestB64 := base64.StdEncoding.EncodeToString(digest[:])
+	signingString := fmt.Sprintf("(created): %d\n(expires): %d\ndigest: BLAKE2b-512=%s\nrequest-signature: ",
+		parsed.Created, parsed.Expires, digestB64)
+	if !ed25519.Verify(kp.Public, []byte(signingString), parsed.Signature) {
+		t.Error("Signature header does not verify with an empty chained request-signature")
+	}
+}
+
+// TestDiscoverHandler_NoSigner_OmitsNFH007Header checks no Signature
+// response header is emitted at all when no signer is configured — NFH-007
+// compliance is meaningless without a real key, and a garbage/placeholder
+// header would be worse than none.
+func TestDiscoverHandler_NoSigner_OmitsNFH007Header(t *testing.T) {
+	h := newTestHandler(t) // signer == nil
+
+	req := httptest.NewRequest(http.MethodPost, "/discover", strings.NewReader(validRequestBody("https://bap.example.com")))
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if got := rec.Header().Get("Signature"); got != "" {
+		t.Errorf("Signature header = %q, want none when no signer is configured", got)
+	}
+}
+
+// TestDiscoverHandler_SignerFailure_FallsBackToPlaceholder checks the Ack
+// still gets sent — with a clearly-marked placeholder, not an error —
+// when the configured signer itself fails. A broken signing key must
+// never stop an Ack from being sent.
+func TestDiscoverHandler_SignerFailure_FallsBackToPlaceholder(t *testing.T) {
+	h := newTestHandlerWithSigner(t, failingSigner{})
+
+	req := httptest.NewRequest(http.MethodPost, "/discover", strings.NewReader(validRequestBody("https://bap.example.com")))
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var ack beckn.Ack
+	if err := json.Unmarshal(rec.Body.Bytes(), &ack); err != nil {
+		t.Fatalf("decode ack: %v", err)
+	}
+	if !strings.Contains(string(ack.Signature), "unsigned|placeholder|none") {
+		t.Errorf("Ack.Signature = %q, want the placeholder when signing fails", ack.Signature)
+	}
+}
+
+type failingSigner struct{}
+
+func (failingSigner) Sign(body []byte) (beckn.Signature, error) {
+	return "", fmt.Errorf("signing key unavailable")
+}
+
+func (failingSigner) SignAckHeader(responseBody []byte, requestSignatureBase64 string) (string, error) {
+	return "", fmt.Errorf("signing key unavailable")
+}
+
+// GET /discover (see CONTEXT.md D16) returns the on_discover result
+// inline, with no async callback involved at all.
+func TestDiscoverHandler_ServeSync_ValidRequest_ReturnsOnDiscoverInline(t *testing.T) {
+	h := newTestHandler(t)
+
+	// No context.bapUri at all — a synchronous caller has nowhere for a
+	// callback to go, and ValidateSync must not require one.
+	body := `{
+		"context": {
+			"action": "discover",
+			"version": "2.0.0",
+			"transactionId": "txn-sync-1",
+			"messageId": "msg-sync-1"
+		},
+		"message": { "intent": {} }
+	}`
+	req := httptest.NewRequest(http.MethodGet, "/discover", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	h.ServeSync(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+
+	var resp beckn.OnDiscoverRequest
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode on_discover response: %v", err)
+	}
+	if resp.Context.Action != "on_discover" {
+		t.Errorf("context.action = %q, want on_discover", resp.Context.Action)
+	}
+	if resp.Context.TransactionID != "txn-sync-1" {
+		t.Errorf("transactionId = %q, want txn-sync-1", resp.Context.TransactionID)
+	}
+	if len(resp.Message.Catalogs) == 0 {
+		t.Error("expected at least one catalog in the synchronous response")
+	}
+}
+
+func TestDiscoverHandler_ServeSync_MissingBapUri_StillAccepted(t *testing.T) {
+	h := newTestHandler(t)
+	body := `{"context":{"transactionId":"t1","messageId":"m1"},"message":{"intent":{}}}`
+	req := httptest.NewRequest(http.MethodGet, "/discover", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	h.ServeSync(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (bapUri must not be required on the sync path); body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestDiscoverHandler_ServeSync_MissingTransactionID_ReturnsNack400(t *testing.T) {
+	h := newTestHandler(t)
+	body := `{"context":{"messageId":"m1"},"message":{"intent":{}}}`
+	req := httptest.NewRequest(http.MethodGet, "/discover", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	h.ServeSync(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+	var ack beckn.Ack
+	if err := json.Unmarshal(rec.Body.Bytes(), &ack); err != nil {
+		t.Fatalf("decode nack: %v", err)
+	}
+	if ack.Status != "NACK" {
+		t.Errorf("status = %q, want NACK", ack.Status)
+	}
+}
+
+// textSearch actually narrows results now (see internal/service/match.go) —
+// "coffee" matches the embedded demo catalog's real content
+// (internal/service/data/catalog.json).
+func TestDiscoverHandler_ServeSync_TextSearchMatchingRealData_ReturnsCatalog(t *testing.T) {
+	h := newTestHandler(t)
+	body := `{"context":{"transactionId":"t","messageId":"m"},"message":{"intent":{"textSearch":"coffee"}}}`
+	req := httptest.NewRequest(http.MethodGet, "/discover", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	h.ServeSync(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var resp beckn.OnDiscoverRequest
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode on_discover response: %v", err)
+	}
+	if len(resp.Message.Catalogs) == 0 {
+		t.Error("expected textSearch=coffee to match the embedded coffee catalog")
+	}
+}
+
+// A textSearch term matching nothing is still a valid, successful result —
+// an empty catalogs array, not an error.
+func TestDiscoverHandler_ServeSync_TextSearchMatchingNothing_ReturnsEmptyCatalogs(t *testing.T) {
+	h := newTestHandler(t)
+	body := `{"context":{"transactionId":"t","messageId":"m"},"message":{"intent":{"textSearch":"doesnotexist12345"}}}`
+	req := httptest.NewRequest(http.MethodGet, "/discover", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	h.ServeSync(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (no match is a valid empty result, not an error); body=%s", rec.Code, rec.Body.String())
+	}
+	var resp beckn.OnDiscoverRequest
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode on_discover response: %v", err)
+	}
+	if len(resp.Message.Catalogs) != 0 {
+		t.Errorf("expected zero catalogs for a non-matching textSearch, got %d", len(resp.Message.Catalogs))
+	}
+}
+
+// An unparseable filters.expression is a validation error, not a 500 or a
+// silently-ignored filter — see service.validateIntent.
+func TestDiscoverHandler_ServeSync_InvalidFilterExpression_ReturnsNack400(t *testing.T) {
+	h := newTestHandler(t)
+	body := `{"context":{"transactionId":"t","messageId":"m"},"message":{"intent":{"filters":{"type":"jsonpath","expression":"not a jsonpath ["}}}}`
+	req := httptest.NewRequest(http.MethodGet, "/discover", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	h.ServeSync(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for an unparseable filters.expression; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// Guards against unbounded-memory-read: a body larger than
+// maxDiscoverBodyBytes must be rejected as a bad request, not read fully
+// into memory first.
+func TestDiscoverHandler_OversizedBody_ReturnsNack400(t *testing.T) {
+	h := newTestHandler(t)
+
+	padding := strings.Repeat("x", testMaxBodyBytes+1)
+	body := `{"context":{"transactionId":"t","messageId":"m","bapUri":"https://bap"},"message":{"intent":{"textSearch":"` + padding + `"}}}`
+
+	req := httptest.NewRequest(http.MethodPost, "/discover", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for oversized body", rec.Code)
+	}
+}
