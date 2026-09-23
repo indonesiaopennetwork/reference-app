@@ -214,6 +214,10 @@ services:
       - "8086:8086"
     networks:
       - beckn
+    environment:
+      BPP_ID: ${BPP_ID}
+      BPP_URI: http://onix-bpp:8082/bpp/receiver
+      BPP_CALLER_URL: http://onix-bpp:8082/bpp/caller
     volumes:
       - ./scripts/mock-cds.py:/app/mock-cds.py:ro
       - ./file-onboarding-and-catalog-publish/data/beckn:/beckn:ro

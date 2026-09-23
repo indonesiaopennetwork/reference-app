@@ -12,6 +12,7 @@ import (
 	"github.com/ion/winroom/bap/internal/config"
 	oncancelsvc "github.com/ion/winroom/bap/internal/on_cancel_svc"
 	onconfirmsvc "github.com/ion/winroom/bap/internal/on_confirm_svc"
+	ondiscoversvc "github.com/ion/winroom/bap/internal/on_discover_svc"
 	oninitsvc "github.com/ion/winroom/bap/internal/on_init_svc"
 	onratesvc "github.com/ion/winroom/bap/internal/on_rate_svc"
 	onselectsvc "github.com/ion/winroom/bap/internal/on_select_svc"
@@ -31,6 +32,9 @@ func RegisterRoutes(r *gin.Engine, pool *pgxpool.Pool, cfg *config.Config, lh *l
 	// Beckn webhook endpoints — BPP (via ONIX adapter) POSTs on_* callbacks here.
 	webhook := r.Group("/api/webhook")
 	{
+		onDiscoverH := ondiscoversvc.NewHandler(pool, cfg, lh)
+		webhook.POST("/on_discover", onDiscoverH.Handle)
+
 		onSelectH := onselectsvc.NewOnSelectHandler(pool, cfg, lh)
 		webhook.POST("/on_select", onSelectH.Handle)
 
@@ -65,6 +69,7 @@ func RegisterRoutes(r *gin.Engine, pool *pgxpool.Pool, cfg *config.Config, lh *l
 		clientH := clientsvc.NewClientHandler(pool, cfg, lh)
 		v1.GET("/catalog", clientH.HandleCatalog)
 		v1.GET("/discover", clientH.HandleDiscover)
+		v1.GET("/discover/results/:message_id", clientH.HandleDiscoverResults)
 		v1.POST("/select", clientH.HandleSelect)
 		v1.POST("/init", clientH.HandleInit)
 		v1.POST("/confirm", clientH.HandleConfirm)

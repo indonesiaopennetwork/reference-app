@@ -30,19 +30,16 @@ type ClientService struct {
 
 func NewClientService(pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.Logger) *ClientService {
 	return &ClientService{
-		pool: pool,
-		cfg:  cfg,
-		lh:   lh,
+		pool:   pool,
+		cfg:    cfg,
+		lh:     lh,
 		client: httpclient.New(10 * time.Second),
 	}
 }
 
-// Discover sends a Beckn v2 `discover` action to the CDS and returns the raw JSON response.
+// Discover sends a Beckn v2 `discover` action to the CDS and returns the transaction and message IDs.
 // Logs an OUTBOUND row to beckn_message_log capturing both the request and the CDS response.
-func (s *ClientService) Discover(ctx context.Context, req *ClientDiscoverRequest) (json.RawMessage, error) {
-	if s.cfg.CDSDiscoverURL == "" {
-		return json.RawMessage(`{"message":{"catalogs":[]}}`), nil
-	}
+func (s *ClientService) Discover(ctx context.Context, req *ClientDiscoverRequest) (string, string, error) {
 
 	start := time.Now()
 	msgID := uuid.New()
@@ -107,12 +104,24 @@ func (s *ClientService) Discover(ctx context.Context, req *ClientDiscoverRequest
 		}
 	}()
 
-	s.logBecknOut("discover", http.MethodGet, discoverURL, txnID.String(), msgID.String(), reqJSON)
+	s.logBecknOut("discover", http.MethodPost, discoverURL, txnID.String(), msgID.String(), reqJSON)
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, discoverURL, bytes.NewBuffer(reqJSON))
+	q := dbsqlc.New(s.pool)
+	if err := q.UpsertTransaction(ctx, dbsqlc.UpsertTransactionParams{
+		TransactionID: txnID,
+		BapID:         s.cfg.BapID,
+		NetworkID:     &s.cfg.NetworkID,
+		BppID:         nil,
+		BppUri:        nil,
+		Status:        dbsqlc.TransactionStatusDISCOVERSENT,
+	}); err != nil {
+		s.lh.WithModule("client_svc").Warn().Error(err).Log("upsert transaction failed")
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, discoverURL, bytes.NewBuffer(reqJSON))
 	if err != nil {
 		callErr = fmt.Errorf("build discover request: %w", err)
-		return nil, callErr
+		return "", "", callErr
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
@@ -120,7 +129,7 @@ func (s *ClientService) Discover(ctx context.Context, req *ClientDiscoverRequest
 		authHeader, authErr := becknAuthHeader(reqJSON, s.cfg.BapKeyID, s.cfg.BapPrivateKey)
 		if authErr != nil {
 			callErr = fmt.Errorf("build Beckn Authorization header: %w", authErr)
-			return nil, callErr
+			return "", "", callErr
 		}
 		httpReq.Header.Set("Authorization", authHeader)
 	}
@@ -128,7 +137,7 @@ func (s *ClientService) Discover(ctx context.Context, req *ClientDiscoverRequest
 	resp, err := s.client.Do(httpReq)
 	if err != nil {
 		callErr = fmt.Errorf("discover HTTP call failed: %w", err)
-		return nil, callErr
+		return "", "", callErr
 	}
 	defer resp.Body.Close() //nolint:errcheck
 
@@ -137,15 +146,39 @@ func (s *ClientService) Discover(ctx context.Context, req *ClientDiscoverRequest
 	respBody, err = io.ReadAll(resp.Body)
 	if err != nil {
 		callErr = fmt.Errorf("read discover response: %w", err)
-		return nil, callErr
+		return "", "", callErr
 	}
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
 		callErr = fmt.Errorf("CDS returned status %d: %s", resp.StatusCode, string(respBody))
-		return nil, callErr
+		return "", "", callErr
 	}
 
-	return respBody, nil
+	return txnID.String(), msgID.String(), nil
+}
+
+// GetDiscoverResults queries the message log for an inbound on_discover message matching the message ID.
+func (s *ClientService) GetDiscoverResults(ctx context.Context, msgIDStr string) (json.RawMessage, error) {
+	msgID, err := uuid.Parse(msgIDStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid message ID format: %w", err)
+	}
+
+	q := dbsqlc.New(s.pool)
+	logs, err := q.GetMessageLogsByMessageID(ctx, msgID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch message logs: %w", err)
+	}
+
+	for _, log := range logs {
+		if log.Action == dbsqlc.BecknActionOnDiscover && log.Direction == dbsqlc.MessageDirectionINBOUND {
+			if len(log.RequestPayload) > 0 {
+				return log.RequestPayload, nil
+			}
+		}
+	}
+
+	return nil, nil // Not found yet (Pending)
 }
 
 // Select initiates a Select action to the ONIX BAP adapter.

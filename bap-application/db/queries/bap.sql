@@ -30,3 +30,8 @@ INSERT INTO beckn_message_log (
     $14,
     $15
 );
+
+-- name: GetMessageLogsByMessageID :many
+SELECT * FROM beckn_message_log
+WHERE message_id = $1
+ORDER BY created_at DESC;

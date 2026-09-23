@@ -102,15 +102,38 @@ func (h *ClientHandler) HandleStatus(c *gin.Context) {
 // The CDS requires a non-empty textSearch — defaults to "coffee" for the initial catalog load.
 func (h *ClientHandler) HandleDiscover(c *gin.Context) {
 	q := c.Query("q")
-	if q == "" {
-		q = "coffee"
-	}
 	req := ClientDiscoverRequest{TextSearch: q}
 
-	resp, err := h.svc.Discover(c.Request.Context(), &req)
+	txnID, msgID, err := h.svc.Discover(c.Request.Context(), &req)
 	if err != nil {
 		h.lh.WithModule("client_handler").Err().Error(err).Log("discover failed")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"transaction_id": txnID, "message_id": msgID})
+}
+
+// HandleDiscoverResults polls the discover search results (on_discover payload) by message_id.
+func (h *ClientHandler) HandleDiscoverResults(c *gin.Context) {
+	msgID := c.Param("message_id")
+	if msgID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "message_id parameter required"})
+		return
+	}
+
+	resp, err := h.svc.GetDiscoverResults(c.Request.Context(), msgID)
+	if err != nil {
+		h.lh.WithModule("client_handler").Err().Error(err).Log("get discover results failed")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	if resp == nil {
+		c.JSON(http.StatusAccepted, gin.H{
+			"message_id": msgID,
+			"status":     "DISCOVER_SENT",
+		})
 		return
 	}
 
