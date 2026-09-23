@@ -77,10 +77,15 @@ modules:
           config:
             # subscriberId derives from keyManager.config above.
             nextUpdateIn: "336h"
-            # Public URL prefix outputRoot is served under. No reverse
-            # proxy serves this folder publicly yet -- update this once
-            # you expose data/beckn/ over HTTP.
-            catalogBaseURL: "https://REPLACE_WITH_YOUR_PUBLIC_CATALOG_DOMAIN"
+            # Public URL prefix outputRoot is served under -- must be
+            # reachable by anything that will crawl the resulting index
+            # (e.g. discovery-service/internal/dedicrawl, CATALOG_INDEX_URLS).
+            # docker-compose.yml's catalog-files service (nginx over this
+            # same data/beckn/ directory) is what makes that true locally --
+            # use "http://catalog-files" for local dev; replace with your
+            # real public domain once data/beckn/ is served from somewhere
+            # publicly reachable.
+            catalogBaseURL: "http://catalog-files"
             # Read-only, warn-only: checks whether this node's DeDi registry
             # record links this catalog index via meta.catalog_index_urls.
             checkCatalogIndexLink: "true"

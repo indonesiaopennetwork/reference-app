@@ -1,6 +1,7 @@
 package clientsvc
 
 import (
+	"encoding/json"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -9,17 +10,20 @@ import (
 
 	"github.com/ion/winroom/bap/internal/auth"
 	"github.com/ion/winroom/bap/internal/config"
+	"github.com/ion/winroom/bap/internal/discoverwait"
 )
 
 type ClientHandler struct {
-	svc *ClientService
-	lh  *logharbour.Logger
+	svc            *ClientService
+	lh             *logharbour.Logger
+	discoverMethod string
 }
 
-func NewClientHandler(pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.Logger) *ClientHandler {
+func NewClientHandler(pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.Logger, discoverRegistry *discoverwait.Registry) *ClientHandler {
 	return &ClientHandler{
-		svc: NewClientService(pool, cfg, lh),
-		lh:  lh,
+		svc:            NewClientService(pool, cfg, lh, discoverRegistry),
+		lh:             lh,
+		discoverMethod: cfg.DiscoverMethod,
 	}
 }
 
@@ -97,43 +101,33 @@ func (h *ClientHandler) HandleStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
-// HandleDiscover triggers a Discover request to the CDS.
+// HandleDiscover triggers a Discover request. The browser-facing contract
+// is always a plain GET — which of the two underlying implementations
+// actually handles it is a config-time choice, DISCOVER_METHOD (see
+// config.Config.DiscoverMethod): exactly one is active at a time.
+//   - "GET"  → ClientService.DiscoverSync, direct to discovery-service,
+//     bypassing onix-bap.
+//   - "POST" → ClientService.Discover, the real async Beckn contract via
+//     onix-bap (same adapter-mediated path as every other action).
+//
 // GET /api/v1/discover?q=<text search term>
-// The CDS requires a non-empty textSearch — defaults to "coffee" for the initial catalog load.
+// Requires a non-empty textSearch — defaults to "coffee" for the initial catalog load.
 func (h *ClientHandler) HandleDiscover(c *gin.Context) {
-	q := c.Query("q")
-	req := ClientDiscoverRequest{TextSearch: q}
+	req := ClientDiscoverRequest{TextSearch: c.Query("q")}
 
-	txnID, msgID, err := h.svc.Discover(c.Request.Context(), &req)
+	var (
+		resp json.RawMessage
+		err  error
+	)
+	switch h.discoverMethod {
+	case config.DiscoverMethodPost:
+		resp, err = h.svc.Discover(c.Request.Context(), &req)
+	default:
+		resp, err = h.svc.DiscoverSync(c.Request.Context(), &req)
+	}
 	if err != nil {
 		h.lh.WithModule("client_handler").Err().Error(err).Log("discover failed")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"transaction_id": txnID, "message_id": msgID})
-}
-
-// HandleDiscoverResults polls the discover search results (on_discover payload) by message_id.
-func (h *ClientHandler) HandleDiscoverResults(c *gin.Context) {
-	msgID := c.Param("message_id")
-	if msgID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "message_id parameter required"})
-		return
-	}
-
-	resp, err := h.svc.GetDiscoverResults(c.Request.Context(), msgID)
-	if err != nil {
-		h.lh.WithModule("client_handler").Err().Error(err).Log("get discover results failed")
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	if resp == nil {
-		c.JSON(http.StatusAccepted, gin.H{
-			"message_id": msgID,
-			"status":     "DISCOVER_SENT",
-		})
 		return
 	}
 

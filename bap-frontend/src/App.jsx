@@ -1413,32 +1413,15 @@ export default function App() {
     apiFetch(path)
       .then(r => { if (!r.ok) throw new Error(`Status ${r.status}`); return r.json(); })
       .then(data => {
-        if (!data.message_id) throw new Error("No message_id returned from discover");
-        
-        const poll = () => {
-          apiFetch(`/discover/results/${data.message_id}`)
-            .then(r => {
-              if (r.status === 202) {
-                setTimeout(poll, 1500); // Poll every 1.5s
-                return null;
-              }
-              if (!r.ok) throw new Error(`Status ${r.status}`);
-              return r.json();
-            })
-            .then(d => {
-              if (d) {
-                setCatalog(parseCatalogs(d));
-                setActiveCategory('All');
-                setIsSearching(false);
-              }
-            })
-            .catch(e => {
-              setError(e.message);
-              setCatalog([]);
-              setIsSearching(false);
-            });
-        };
-        poll();
+        // /api/v1/discover now returns the catalog result directly, whether
+        // DISCOVER_METHOD routed it via DiscoverSync (a direct call to
+        // discovery-service) or Discover (async via onix-bap, blocked on
+        // internal/discoverwait until on_discover arrives) -- both are
+        // synchronous from the browser's point of view, so no more polling
+        // /discover/results/:message_id here.
+        setCatalog(parseCatalogs(data));
+        setActiveCategory('All');
+        setIsSearching(false);
       })
       .catch(e => {
         setError(e.message);
