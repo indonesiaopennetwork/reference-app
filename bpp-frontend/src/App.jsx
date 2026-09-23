@@ -1339,7 +1339,7 @@ function PublishPage({ onNav }) {
                   currency: o.currency,
                   breakup: [{ title: o.name || o.id, amount: Number(o.price), type: 'BASE_PRICE' }],
                   totalAmount: Number(o.price),
-                  paymentMethods: o.cod_available ? ['PREPAID', 'COD', 'UPI'] : ['PREPAID', 'UPI'],
+                  paymentMethods: o.cod_available ? ['PREPAID', 'COD', 'DIGITAL_WALLET'] : ['PREPAID', 'DIGITAL_WALLET'],
                 }
               }]
             } : {}),
@@ -3104,7 +3104,7 @@ function AddOfferPage({ onNav, catalogId, preselectedResourceId }) {
             currency: off.currency,
             breakup: [{ title: off.name || off.id, amount: Number(off.price), type: 'BASE_PRICE' }],
             totalAmount: Number(off.price),
-            paymentMethods: off.cod_available ? ['PREPAID', 'COD', 'UPI'] : ['PREPAID', 'UPI'],
+            paymentMethods: off.cod_available ? ['PREPAID', 'COD', 'DIGITAL_WALLET'] : ['PREPAID', 'DIGITAL_WALLET'],
           },
         }],
       } : {}),
