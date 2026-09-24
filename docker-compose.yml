@@ -278,13 +278,21 @@ services:
     networks:
       - beckn
     environment:
-      BPP_ID: ${BPP_ID}
-      BPP_URI: http://onix-bpp:8082/bpp/receiver
-      BPP_CALLER_URL: http://onix-bpp:8082/bpp/caller
+      # Signs the async on_discover callback -- see mock-cds.py's
+      # sign_beckn_header. Mock-cds has no identity of its own registered
+      # on the real DeDi registry onix-bap's bapTxnReceiver checks against,
+      # so (same trick DS_PRIVATE_KEY already uses for discovery-service,
+      # see root .env) it signs as the BAP's own already-registered
+      # identity instead of a fabricated, unresolvable one.
+      BAP_KEY_ID: ${BAP_KEY_ID}
+      BAP_PRIVATE_KEY: ${BAP_PRIVATE_KEY}
     volumes:
       - ./scripts/mock-cds.py:/app/mock-cds.py:ro
       - ./file-onboarding-and-catalog-publish/data/beckn:/beckn:ro
-    command: [ "python", "-u", "/app/mock-cds.py" ]
+    # cryptography isn't in the base image -- installed at container start
+    # rather than a custom Dockerfile, since mock-cds stays a zero-build
+    # single-file stub everywhere else.
+    command: [ "sh", "-c", "pip install --quiet --no-cache-dir cryptography && python -u /app/mock-cds.py" ]
 
   # ─── Discovery Service ─────────────────────────────────────────────────────
   # Real Go /discover implementation (textSearch/filters/spatial intent
