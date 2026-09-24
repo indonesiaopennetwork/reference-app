@@ -22,11 +22,7 @@ type CancelRequest struct {
 }
 
 type CancelMessage struct {
-	Contract ContractRef `json:"contract"`
-}
-
-type ContractRef struct {
-	ID string `json:"id,omitempty"`
+	Contract json.RawMessage `json:"contract"`
 }
 
 type OnCancelRequest struct {

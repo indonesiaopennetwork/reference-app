@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -83,7 +84,11 @@ func (s *Service) Process(ctx context.Context, req *StatusRequest) {
 
 func (s *Service) callOnStatus(ctx context.Context, bapURI string, req OnStatusRequest) {
 	start := time.Now()
-	url := bapURI + "/on_status"
+	url, err := s.resolveOnStatusURL(bapURI)
+	if err != nil {
+		s.lh.WithModule("statussvc").Err().Error(err).Log("on_status target resolution failed")
+		return
+	}
 	body, _ := json.Marshal(req)
 
 	prettyLog(fmt.Sprintf("→ OUT  ON_STATUS | txn=%.8s… | POST %s", req.Context.TransactionID, url), req)
@@ -103,6 +108,30 @@ func (s *Service) callOnStatus(ctx context.Context, bapURI string, req OnStatusR
 	defer resp.Body.Close() //nolint:errcheck
 	respBody, _ := io.ReadAll(resp.Body)
 	prettyLog(fmt.Sprintf("← ACK  ON_STATUS | http=%d | dur=%dms", resp.StatusCode, time.Since(start).Milliseconds()), map[string]interface{}{"response": json.RawMessage(respBody)})
+}
+
+// resolveOnStatusURL returns the ONIX BPP caller on_status endpoint.
+// Priority:
+//  1. BPP_CALLER_URL env/config (e.g. https://bpptest.remiges.tech/bpp/caller)
+//  2. Derived from BPP_URI by replacing /bpp/receiver with /bpp/caller
+func (s *Service) resolveOnStatusURL(_ string) (string, error) {
+	base := strings.TrimSpace(s.cfg.BppCallerURL)
+	if base == "" {
+		base = strings.TrimSpace(s.cfg.BppURI)
+		if base == "" {
+			return "", fmt.Errorf("cannot resolve on_status URL: both BPP_CALLER_URL and BPP_URI are empty")
+		}
+		if strings.HasSuffix(base, "/") {
+			base = strings.TrimSuffix(base, "/")
+		}
+		if strings.HasSuffix(base, "/bpp/receiver") {
+			base = strings.TrimSuffix(base, "/bpp/receiver") + "/bpp/caller"
+		} else {
+			return "", fmt.Errorf("cannot derive caller URL from BPP_URI %q; set BPP_CALLER_URL", s.cfg.BppURI)
+		}
+	}
+	base = strings.TrimRight(base, "/")
+	return base + "/on_status", nil
 }
 
 func prettyLog(label string, v interface{}) {

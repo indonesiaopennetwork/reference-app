@@ -177,6 +177,15 @@ services:
     restart: unless-stopped
     networks:
       - beckn
+    # Bypass Docker's embedded DNS proxy (127.0.0.11) for external lookups.
+    # This image is Alpine-based (musl libc), which has a well-documented
+    # flakiness issue with Docker's embedded resolver under bursty/
+    # concurrent DNS queries -- exactly what schema validation does here
+    # (several schema.ion.id/raw.githubusercontent.com lookups per select).
+    # Querying a real public resolver directly sidesteps it.
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     ports:
       - "8081:8081"
     environment:
@@ -203,6 +212,11 @@ services:
     restart: unless-stopped
     networks:
       - beckn
+    # See onix-bap's identical dns: override above -- same Alpine/Docker
+    # embedded-DNS-proxy flakiness applies here too.
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     ports:
       - "8082:8082"
     environment:
