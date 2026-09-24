@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -90,7 +91,11 @@ func (s *Service) Process(ctx context.Context, req *UpdateRequest) {
 }
 
 func (s *Service) callOnUpdate(ctx context.Context, bapURI string, req OnUpdateRequest) {
-	url := bapURI + "/on_update"
+	url, err := s.resolveOnUpdateURL(bapURI)
+	if err != nil {
+		s.lh.WithModule("updatesvc").Err().Error(err).Log("on_update target resolution failed")
+		return
+	}
 	body, _ := json.Marshal(req)
 	prettyLog(fmt.Sprintf("→ OUT  ON_UPDATE | txn=%.8s… | POST %s", req.Context.TransactionID, url), req)
 
@@ -108,6 +113,30 @@ func (s *Service) callOnUpdate(ctx context.Context, bapURI string, req OnUpdateR
 	defer resp.Body.Close() //nolint:errcheck
 	respBody, _ := io.ReadAll(resp.Body)
 	prettyLog(fmt.Sprintf("← ACK  ON_UPDATE | http=%d", resp.StatusCode), map[string]interface{}{"response": json.RawMessage(respBody)})
+}
+
+// resolveOnUpdateURL returns the ONIX BPP caller on_update endpoint.
+// Priority:
+//  1. BPP_CALLER_URL env/config (e.g. https://bpptest.remiges.tech/bpp/caller)
+//  2. Derived from BPP_URI by replacing /bpp/receiver with /bpp/caller
+func (s *Service) resolveOnUpdateURL(_ string) (string, error) {
+	base := strings.TrimSpace(s.cfg.BppCallerURL)
+	if base == "" {
+		base = strings.TrimSpace(s.cfg.BppURI)
+		if base == "" {
+			return "", fmt.Errorf("cannot resolve on_update URL: both BPP_CALLER_URL and BPP_URI are empty")
+		}
+		if strings.HasSuffix(base, "/") {
+			base = strings.TrimSuffix(base, "/")
+		}
+		if strings.HasSuffix(base, "/bpp/receiver") {
+			base = strings.TrimSuffix(base, "/bpp/receiver") + "/bpp/caller"
+		} else {
+			return "", fmt.Errorf("cannot derive caller URL from BPP_URI %q; set BPP_CALLER_URL", s.cfg.BppURI)
+		}
+	}
+	base = strings.TrimRight(base, "/")
+	return base + "/on_update", nil
 }
 
 func prettyLog(label string, v interface{}) {
