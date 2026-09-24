@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -54,10 +55,17 @@ func (s *Service) Process(ctx context.Context, req *CancelRequest) {
 	// Restore stock for all committed resources.
 	s.restoreStock(ctx, q, cancelled.ID)
 
-	contract := map[string]interface{}{
-		"id":     cancelled.ID.String(),
-		"status": map[string]string{"code": "CANCELLED"},
+	// Echo back the contract the BAP sent (it already has a valid
+	// commitments/participants/performance/consideration set, required by
+	// the Contract schema), patched with the CANCELLED status -- mirrors
+	// confirmsvc's echo-and-patch pattern rather than reconstructing a
+	// minimal contract from scratch.
+	var contract map[string]interface{}
+	if err := json.Unmarshal(req.Message.Contract, &contract); err != nil || contract == nil {
+		contract = map[string]interface{}{}
 	}
+	contract["id"] = cancelled.ID.String()
+	contract["status"] = map[string]string{"code": "CANCELLED"}
 	contractJSON, _ := json.Marshal(contract)
 
 	outMsgID := uuid.New()
@@ -110,7 +118,11 @@ func (s *Service) restoreStock(ctx context.Context, q *dbsqlc.Queries, contractI
 }
 
 func (s *Service) callOnCancel(ctx context.Context, bapURI string, req OnCancelRequest) {
-	url := bapURI + "/on_cancel"
+	url, err := s.resolveOnCancelURL(bapURI)
+	if err != nil {
+		s.lh.WithModule("cancelsvc").Err().Error(err).Log("on_cancel target resolution failed")
+		return
+	}
 	body, _ := json.Marshal(req)
 	prettyLog(fmt.Sprintf("→ OUT  ON_CANCEL | txn=%.8s… | POST %s", req.Context.TransactionID, url), req)
 
@@ -128,6 +140,30 @@ func (s *Service) callOnCancel(ctx context.Context, bapURI string, req OnCancelR
 	defer resp.Body.Close() //nolint:errcheck
 	respBody, _ := io.ReadAll(resp.Body)
 	prettyLog(fmt.Sprintf("← ACK  ON_CANCEL | http=%d", resp.StatusCode), map[string]interface{}{"response": json.RawMessage(respBody)})
+}
+
+// resolveOnCancelURL returns the ONIX BPP caller on_cancel endpoint.
+// Priority:
+//  1. BPP_CALLER_URL env/config (e.g. https://bpptest.remiges.tech/bpp/caller)
+//  2. Derived from BPP_URI by replacing /bpp/receiver with /bpp/caller
+func (s *Service) resolveOnCancelURL(_ string) (string, error) {
+	base := strings.TrimSpace(s.cfg.BppCallerURL)
+	if base == "" {
+		base = strings.TrimSpace(s.cfg.BppURI)
+		if base == "" {
+			return "", fmt.Errorf("cannot resolve on_cancel URL: both BPP_CALLER_URL and BPP_URI are empty")
+		}
+		if strings.HasSuffix(base, "/") {
+			base = strings.TrimSuffix(base, "/")
+		}
+		if strings.HasSuffix(base, "/bpp/receiver") {
+			base = strings.TrimSuffix(base, "/bpp/receiver") + "/bpp/caller"
+		} else {
+			return "", fmt.Errorf("cannot derive caller URL from BPP_URI %q; set BPP_CALLER_URL", s.cfg.BppURI)
+		}
+	}
+	base = strings.TrimRight(base, "/")
+	return base + "/on_cancel", nil
 }
 
 func prettyLog(label string, v interface{}) {
