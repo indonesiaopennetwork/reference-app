@@ -116,7 +116,11 @@ resource "google_cloud_run_v2_service" "bap" {
       }
       env {
         name  = "CDS_DISCOVER_URL"
-        value = var.cds_discover_url
+        value = var.cds_discover_url != "" ? var.cds_discover_url : "${google_cloud_run_v2_service.discovery_service.uri}/discover"
+      }
+      env {
+        name  = "DISCOVER_METHOD"
+        value = var.discover_method
       }
       env {
         # Buyer login (see bap-application/internal/auth.OptionalAuth, and

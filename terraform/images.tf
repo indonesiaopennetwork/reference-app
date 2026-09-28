@@ -12,6 +12,7 @@ locals {
     onix_bpp             = "${local.registry}/onix-bpp:${var.image_tag}"
     onix_catalog_publish = "${local.registry}/onix-catalog-publish:${var.image_tag}"
     dedi_static_server   = "${local.registry}/dedi-static-server:${var.image_tag}"
+    discovery_service    = "${local.registry}/discovery-service:${var.image_tag}"
     landing_page         = "${local.registry}/landing-page:${var.image_tag}"
     otel_collector       = "${local.registry}/otel-collector:${var.image_tag}"
   }

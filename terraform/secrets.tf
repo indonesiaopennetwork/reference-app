@@ -31,6 +31,8 @@ locals {
     "bpp-onix-signing-public-key",
     "bpp-onix-encr-private-key",
     "bpp-onix-encr-public-key",
+    "discovery-service-subscriber-key-id",
+    "discovery-service-signing-private-key",
   ]
 
   all_secret_ids = concat(["postgres-password", "zitadel-masterkey", "zitadel-admin-password"], local.externally_seeded_secret_ids)

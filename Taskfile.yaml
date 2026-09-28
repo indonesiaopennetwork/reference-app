@@ -392,6 +392,12 @@ tasks:
       - task: _redeploy-service
         vars: {CONTEXT_DIR: landing-page, IMAGE: landing-page, SERVICE: landing-page, CONTAINER: landing-page}
 
+  redeploy:discovery-service:
+    desc: Rebuild, push, and redeploy ONLY discovery-service.
+    cmds:
+      - task: _redeploy-service
+        vars: {CONTEXT_DIR: discovery-service, IMAGE: discovery-service, SERVICE: discovery-service, CONTAINER: discovery-service}
+
   redeploy:migrate-bap:
     desc: Rebuild, push, update, and run the bap migration job.
     cmds:
@@ -416,3 +422,4 @@ tasks:
       - task: redeploy:onix-catalog-publish
       - task: redeploy:dedi-static-server
       - task: redeploy:landing-page
+      - task: redeploy:discovery-service
