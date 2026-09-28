@@ -294,7 +294,7 @@ curl -s -X POST "${BPP_URL}/api/v1/catalog/publish" \
               "@context": "https://schema.beckn.io/RetailConsideration/v2.1/context.jsonld",
               "@type": "RetailConsideration", "currency": "IDR",
               "breakup": [{ "title": "Biskuit Kaleng Khong Guan", "amount": 185000, "type": "BASE_PRICE" }],
-              "totalAmount": 185000, "paymentMethods": ["PREPAID", "COD", "UPI"]
+              "totalAmount": 185000, "paymentMethods": ["PREPAID", "COD", "DIGITAL_WALLET"]
             }
           }],
           "offerAttributes": {
@@ -324,7 +324,7 @@ curl -s -X POST "${BPP_URL}/api/v1/catalog/publish" \
               "@context": "https://schema.beckn.io/RetailConsideration/v2.1/context.jsonld",
               "@type": "RetailConsideration", "currency": "IDR",
               "breakup": [{ "title": "Biskuit Roma Kelapa", "amount": 18500, "type": "BASE_PRICE" }],
-              "totalAmount": 18500, "paymentMethods": ["PREPAID", "COD", "UPI"]
+              "totalAmount": 18500, "paymentMethods": ["PREPAID", "COD", "DIGITAL_WALLET"]
             }
           }],
           "offerAttributes": {
@@ -354,7 +354,7 @@ curl -s -X POST "${BPP_URL}/api/v1/catalog/publish" \
               "@context": "https://schema.beckn.io/RetailConsideration/v2.1/context.jsonld",
               "@type": "RetailConsideration", "currency": "IDR",
               "breakup": [{ "title": "Keripik Chitato Sapi Panggang", "amount": 12000, "type": "BASE_PRICE" }],
-              "totalAmount": 12000, "paymentMethods": ["PREPAID", "COD", "UPI"]
+              "totalAmount": 12000, "paymentMethods": ["PREPAID", "COD", "DIGITAL_WALLET"]
             }
           }],
           "offerAttributes": {
@@ -384,7 +384,7 @@ curl -s -X POST "${BPP_URL}/api/v1/catalog/publish" \
               "@context": "https://schema.beckn.io/RetailConsideration/v2.1/context.jsonld",
               "@type": "RetailConsideration", "currency": "IDR",
               "breakup": [{ "title": "Keripik Qtela Singkong Pedas", "amount": 15000, "type": "BASE_PRICE" }],
-              "totalAmount": 15000, "paymentMethods": ["PREPAID", "COD", "UPI"]
+              "totalAmount": 15000, "paymentMethods": ["PREPAID", "COD", "DIGITAL_WALLET"]
             }
           }],
           "offerAttributes": {
@@ -474,7 +474,7 @@ curl -s -X POST "${BPP_URL}/api/v1/catalog/publish" \
               "@context": "https://schema.beckn.io/RetailConsideration/v2.1/context.jsonld",
               "@type": "RetailConsideration", "currency": "IDR",
               "breakup": [{ "title": "Biskuit Monde Butter Cookies", "amount": 120000, "type": "BASE_PRICE" }],
-              "totalAmount": 120000, "paymentMethods": ["PREPAID", "COD", "UPI"]
+              "totalAmount": 120000, "paymentMethods": ["PREPAID", "COD", "DIGITAL_WALLET"]
             }
           }],
           "offerAttributes": {
@@ -504,7 +504,7 @@ curl -s -X POST "${BPP_URL}/api/v1/catalog/publish" \
               "@context": "https://schema.beckn.io/RetailConsideration/v2.1/context.jsonld",
               "@type": "RetailConsideration", "currency": "IDR",
               "breakup": [{ "title": "Snack Taro Rasa Original", "amount": 22000, "type": "BASE_PRICE" }],
-              "totalAmount": 22000, "paymentMethods": ["PREPAID", "COD", "UPI"]
+              "totalAmount": 22000, "paymentMethods": ["PREPAID", "COD", "DIGITAL_WALLET"]
             }
           }],
           "offerAttributes": {
@@ -564,7 +564,7 @@ curl -s -X POST "${BPP_URL}/api/v1/catalog/publish" \
               "@context": "https://schema.beckn.io/RetailConsideration/v2.1/context.jsonld",
               "@type": "RetailConsideration", "currency": "IDR",
               "breakup": [{ "title": "Biskuit Biskuat Energy Cokelat", "amount": 12500, "type": "BASE_PRICE" }],
-              "totalAmount": 12500, "paymentMethods": ["PREPAID", "COD", "UPI"]
+              "totalAmount": 12500, "paymentMethods": ["PREPAID", "COD", "DIGITAL_WALLET"]
             }
           }],
           "offerAttributes": {
