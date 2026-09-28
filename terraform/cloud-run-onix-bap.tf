@@ -105,6 +105,16 @@ resource "google_cloud_run_v2_service" "onix_bap" {
         name  = "BAP_URL"
         value = "https://placeholder.invalid"
       }
+      env {
+        # Base URL only (no /discover suffix) -- onix-bap's own
+        # local-simple-routing-BAPCaller.yaml.tmpl appends the action name
+        # itself when routing a "url"-targeted action. Drives the same
+        # cds_discover_url override bap-application's own CDS_DISCOVER_URL
+        # uses (see cloud-run-bap.tf), just trimmed to a base when that
+        # override is a full .../discover URL.
+        name  = "DISCOVERY_SERVICE_URL"
+        value = var.cds_discover_url != "" ? trimsuffix(var.cds_discover_url, "/discover") : google_cloud_run_v2_service.discovery_service.uri
+      }
     }
 
     # otel-collector sidecar — onix-bap's otelsetup plugin ships telemetry to

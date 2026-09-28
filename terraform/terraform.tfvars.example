@@ -14,8 +14,26 @@ bpp_id = "sample-pn.your-domain.example"
 # The Beckn network you're registered on.
 network_id = "ion.id/ion-launch"
 
-# The external Beckn registry's discover endpoint (bap's outbound /discover call).
-cds_discover_url = "https://your-registry.example/beckn/discover"
+# discover_method is optional (default "GET") -- uncomment to override.
+# "GET" calls the discovery-service this module deploys directly;
+# "POST" routes discover through onix-bap as a real async Beckn action
+# (needs discovery-service to have a real registered network identity first).
+# discover_method = "GET"
+
+# cds_discover_url is optional -- leave unset to use the discovery-service
+# this module deploys. Set it to point at a different, externally-hosted
+# discovery service instead.
+# cds_discover_url = "https://your-discovery-service.example/discover"
+
+# discovery_service_subscriber_id/uri are optional -- leave unset and
+# discovery-service borrows bap's own onix-bap identity to sign its
+# on_discover callbacks (works because that identity is already
+# registered). Set both once discovery-service has its own real,
+# independently-registered network identity (also reseed the
+# discovery-service-subscriber-key-id/discovery-service-signing-private-key
+# secrets to match -- see scripts/seed-secrets.env.example).
+# discovery_service_subscriber_id  = "your-discovery-service-subscriber-id"
+# discovery_service_subscriber_uri = "https://your-discovery-service-subscriber-uri"
 
 # Custom domains — also required, no default on purpose (same reasoning as
 # above: a hardcoded default is exactly how you'd end up deploying against a

@@ -185,8 +185,30 @@ task deploy:state-bucket PROJECT_ID=<YOUR_PROJECT_ID> REGION=<YOUR_REGION>
 ### 2. Create `terraform/terraform.tfvars`
 
 Not committed (already git-ignored). Override `project_id` and supply the
-five identity variables that have no default, the Zitadel admin account,
-**and all seven domain variables** — set everything now, not later:
+identity variables that have no default, the Zitadel admin account,
+**and all seven domain variables** — set everything now, not later.
+`cds_discover_url` is optional — by default `bap`'s `CDS_DISCOVER_URL`
+points at the `discovery-service` Cloud Run service this module deploys (a
+same-project, same-operator service, not an external registry endpoint),
+computed the same way `bpp`'s `CDS_PUBLISH_URL` already is. This same
+variable also drives `onix-bap`'s own `discover` routing rule
+(`DISCOVERY_SERVICE_URL` in `cloud-run-onix-bap.tf`, used when
+`DISCOVER_METHOD=POST` routes discover through onix-bap instead of
+`bap`'s direct `GET`) — the `/discover` suffix is stripped automatically
+for that one, since onix-bap's router appends the action name itself.
+Only set `cds_discover_url` if you want both of these to use a different,
+externally-hosted discovery service instead.
+
+`discovery_service_subscriber_id`/`discovery_service_subscriber_uri` are
+also optional — left unset, discovery-service signs its `on_discover`
+callbacks as bap's own onix-bap identity (a borrowed-identity pattern
+that works because that identity is already registered; see the comment
+on these variables in `variables.tf`). The actual signing key material
+lives in the `discovery-service-subscriber-key-id`/
+`discovery-service-signing-private-key` secrets (`secrets.tf`) — reseed
+those (via `scripts/seed-secrets.env.example`) once discovery-service has
+its own real, independently-registered identity; these two variables
+only need to change alongside that reseed, not before:
 
 ```hcl
 # terraform/terraform.tfvars
@@ -195,7 +217,6 @@ region                 = "<YOUR_REGION>"
 bap_id                 = "<your registered onix-bap identity>"
 bpp_id                 = "<your registered onix-bpp identity>"
 network_id             = "<your registry's network id>"
-cds_discover_url       = "<your registry's discover URL>"
 zitadel_admin_username = "admin"
 zitadel_admin_email    = "<your email>"
 
@@ -392,7 +413,7 @@ attempting this section before step 9 succeeds will just fail trying to
 resolve URLs for services that don't exist yet.
 
 **`bpp_domain`/`bpp_domain_www` have no default** — same treatment as
-`bap_id`/`bpp_id`/`network_id`/`cds_discover_url` above, and for the same
+`bap_id`/`bpp_id`/`network_id` above, and for the same
 reason: a hardcoded default pointing at *some* domain is exactly how you'd
 end up silently deploying against a domain you don't control. `terraform
 plan` fails immediately and loudly ("no value for required variable") until

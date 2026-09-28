@@ -156,13 +156,46 @@ variable "network_id" {
   type = string
 }
 
-# cds_discover_url is the external Beckn registry's discover endpoint (bap's
-# outbound discover call). There is no equivalent cds_publish_url variable —
-# bpp's CDS_PUBLISH_URL is computed from the onix-catalog-publish Cloud Run
-# service this module deploys (see cloud-run-bpp.tf), since that's a
-# same-project, same-operator service, not an external registry endpoint.
+# cds_discover_url is an OPTIONAL override, unlike bpp's CDS_PUBLISH_URL
+# (which has no equivalent variable at all). By default (unset/empty),
+# bap's CDS_DISCOVER_URL is computed directly from the discovery-service
+# Cloud Run service this module deploys (see cloud-run-discovery-service.tf
+# and cloud-run-bap.tf) — a same-project, same-operator service. Set this
+# to point bap at a different, externally-hosted discovery service instead
+# (e.g. if you later decide to run discovery-service somewhere else, or use
+# someone else's).
 variable "cds_discover_url" {
-  type = string
+  type    = string
+  default = ""
+}
+
+variable "discover_method" {
+  description = "bap-application's DISCOVER_METHOD: \"GET\" (default) calls discovery-service directly via CDS_DISCOVER_URL; \"POST\" routes discover through onix-bap as a real async Beckn action (requires discovery-service to have a real registered network identity, not the ephemeral-key default)."
+  type        = string
+  default     = "GET"
+}
+
+# discovery_service_subscriber_id/uri are optional overrides for
+# discovery-service's own outbound on_discover signing identity (its
+# SUBSCRIBER_ID/SUBSCRIBER_URI). Left unset (the default), it borrows
+# bap's own onix-bap identity (var.bap_id / onix-bap's Cloud Run URL) --
+# the same borrowed-identity pattern local dev's .env already uses
+# (DS_ID/DS_URI), which works because onix-bap's registry lookup resolves
+# that subscriber_id to a genuinely registered key. Set both once
+# discovery-service has its own real, independently-registered network
+# identity -- the actual key material (discovery-service-subscriber-key-id/
+# discovery-service-signing-private-key secrets, see secrets.tf) is
+# reseeded separately via scripts/seed-secrets.sh, not through these vars.
+variable "discovery_service_subscriber_id" {
+  description = "Optional override for discovery-service's own outbound-signing SUBSCRIBER_ID. Leave unset to default to bap's own onix-bap identity (var.bap_id)."
+  type        = string
+  default     = ""
+}
+
+variable "discovery_service_subscriber_uri" {
+  description = "Optional override for discovery-service's own SUBSCRIBER_URI, paired with discovery_service_subscriber_id. Leave unset to default to bap's own public domain (var.bap_domain)."
+  type        = string
+  default     = ""
 }
 
 # --- bpp / DeDi static-file custom domain ---
