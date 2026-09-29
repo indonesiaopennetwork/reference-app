@@ -55,7 +55,25 @@ type Request struct {
 	// FulfillmentStatus is the fulfillment state the BPP has recorded (e.g.
 	// contract_performances), checked alongside the contract's own performance.
 	FulfillmentStatus string
+
+	// Return switches Apply from cancellation to a return of delivered items:
+	// the offer's policies.returns decides (allowed, window from DeliveredAt),
+	// restockingFee is charged, returned commitments are CLOSED "Returned",
+	// and a fully returned contract becomes COMPLETE instead of CANCELLED.
+	Return bool
+	// DeliveredAt is when the order was delivered (start of the return window).
+	DeliveredAt time.Time
+	// ReturnPerformance is the RETURN performance the CN added to request the
+	// return; Apply records it on the contract as Return_Approved.
+	ReturnPerformance map[string]any
+
+	// SettlementTerms (settlementBasis / settlementWindow) are added to the
+	// refund settlement's settlementAttributes when set.
+	SettlementTerms map[string]any
 }
+
+// ErrReturnRejected is returned when the offer's return policy refuses a return.
+var ErrReturnRejected = errors.New("return not accepted under the offer's return policy")
 
 // RequestFrom reads contractAttributes.cancellation from a CN contract.
 func RequestFrom(contract map[string]any) Request {
@@ -100,7 +118,7 @@ type Result struct {
 // reason on a copy of contract and returns the result, with the cancellation
 // recorded in contractAttributes.cancellation. contract is not modified.
 func Apply(contract map[string]any, items []Item, req Request, now time.Time) (*Result, error) {
-	if req.ReasonCode == "" {
+	if req.ReasonCode == "" && !req.Return {
 		return nil, errors.New("cancellation reason is required (contractAttributes.cancellation.reason.code)")
 	}
 	c, err := deepCopy(contract)
@@ -132,27 +150,38 @@ func Apply(contract map[string]any, items []Item, req Request, now time.Time) (*
 	var fee float64
 	for _, t := range targets {
 		cm := t.commitment
-		if cancellationForbidden(cm) {
+		if req.Return {
+			if err := ReturnBlocked(cm, stage, req.DeliveredAt, now); err != nil {
+				return nil, fmt.Errorf("%w: %v (commitment %s)", ErrReturnRejected, err, str(cm["id"]))
+			}
+			fee += restockingFee(cm, unitTotal(cm)*t.qty)
+		} else if cancellationForbidden(cm) {
 			return nil, fmt.Errorf("%w (commitment %s)", ErrNotAllowed, str(cm["id"]))
 		}
-		if stage >= stageDelivered {
-			return nil, fmt.Errorf("%w: the order is already %s -- a delivered item is returned, not cancelled (commitment %s)", ErrNotAllowed, stageName, str(cm["id"]))
-		}
-		if cutoff := str(offerCancellationPolicy(cm)["cutoffEvent"]); CutoffPassed(cutoff, stage) {
-			return nil, fmt.Errorf("%w: cutoff %s has passed (order is %s) (commitment %s)", ErrNotAllowed, cutoff, stageName, str(cm["id"]))
-		}
-		if allowed := allowedReasons(cm); len(allowed) > 0 && !allowed[req.ReasonCode] {
-			return nil, fmt.Errorf("%w: reason %s is not in the offer's allowedReasons (commitment %s)", ErrNotAllowed, req.ReasonCode, str(cm["id"]))
+		if !req.Return {
+			if stage >= stageDelivered {
+				return nil, fmt.Errorf("%w: the order is already %s -- a delivered item is returned, not cancelled (commitment %s)", ErrNotAllowed, stageName, str(cm["id"]))
+			}
+			if cutoff := str(offerCancellationPolicy(cm)["cutoffEvent"]); CutoffPassed(cutoff, stage) {
+				return nil, fmt.Errorf("%w: cutoff %s has passed (order is %s) (commitment %s)", ErrNotAllowed, cutoff, stageName, str(cm["id"]))
+			}
+			if allowed := allowedReasons(cm); len(allowed) > 0 && !allowed[req.ReasonCode] {
+				return nil, fmt.Errorf("%w: reason %s is not in the offer's allowedReasons (commitment %s)", ErrNotAllowed, req.ReasonCode, str(cm["id"]))
+			}
+			fee += cancellationFee(cm, unitTotal(cm)*t.qty)
 		}
 		qty := commitmentQty(cm)
-		fee += cancellationFee(cm, unitTotal(cm)*t.qty)
 		for _, r := range slice(cm["resources"]) {
 			if id := str(asMap(r)["id"]); id != "" {
 				res.RestoredUnits[id] += t.qty
 			}
 		}
 
-		setCommitmentStatus(cm, "CLOSED", "Cancelled")
+		closedName := "Cancelled"
+		if req.Return {
+			closedName = "Returned"
+		}
+		setCommitmentStatus(cm, "CLOSED", closedName)
 		res.Closed[str(cm["id"])] = ""
 		if remaining := qty - t.qty; remaining > 0 {
 			repl, _ := deepCopyMap(cm)
@@ -201,13 +230,17 @@ func Apply(contract map[string]any, items []Item, req Request, now time.Time) (*
 	res.Fee = round2(math.Min(fee, math.Max(0, oldTotal-newTotal)))
 	res.Refund = round2(oldTotal - newTotal - res.Fee)
 	if res.Fee > 0 {
+		prefix, feeType, feeTitle := "cancellation-", "CANCELLATION_FEE", "Cancellation fee"
+		if req.Return {
+			prefix, feeType, feeTitle = "restocking-", "RESTOCKING_FEE", "Restocking fee"
+		}
 		considerations = append(considerations, map[string]any{
-			"id":     nextID("cancellation-"+strings.TrimPrefix(rootID(str(price["id"])), "consideration-"), "c", ids),
+			"id":     nextID(prefix+strings.TrimPrefix(rootID(str(price["id"])), "consideration-"), "c", ids),
 			"status": map[string]any{"code": "ACTIVE"},
 			"considerationAttributes": map[string]any{
 				"@context": considerationContext, "@type": "ion:IONTradeConsideration",
 				"currency":    res.Currency,
-				"breakup":     []any{map[string]any{"type": "CANCELLATION_FEE", "title": "Cancellation fee", "amount": res.Fee}},
+				"breakup":     []any{map[string]any{"type": feeType, "title": feeTitle, "amount": res.Fee}},
 				"totalAmount": res.Fee,
 			},
 		})
@@ -251,14 +284,25 @@ func Apply(contract map[string]any, items []Item, req Request, now time.Time) (*
 				},
 			},
 		}
+		sa := asMap(res.RefundSettlement["settlementAttributes"])
+		for k, v := range req.SettlementTerms {
+			sa[k] = v
+		}
 		c["settlements"] = append(settlements, res.RefundSettlement)
 	}
 
 	res.Full = len(remaining) == 0
-	if res.Full {
-		c["status"] = map[string]any{"code": "CANCELLED"}
+	if req.Return {
+		if res.Full {
+			c["status"] = map[string]any{"code": "COMPLETE"}
+		}
+		recordReturn(c, req.ReturnPerformance, targets)
+	} else {
+		if res.Full {
+			c["status"] = map[string]any{"code": "CANCELLED"}
+		}
+		recordCancellation(c, req, targets)
 	}
-	recordCancellation(c, req, targets)
 	res.Contract = c
 	return res, nil
 }
@@ -303,6 +347,50 @@ func ItemsFromUpdate(stored, requested map[string]any) []Item {
 		}
 	}
 	return items
+}
+
+// ReturnRequest finds the CN's return request in an update: a RETURN
+// performance (performanceAttributes.type RETURN) that the stored contract
+// doesn't have yet. It returns that performance and the items to return --
+// commitments whose quantity the update lowers or marks CLOSED, else every
+// commitment the performance lists, in full. perf is nil for other updates.
+func ReturnRequest(stored, requested map[string]any) (perf map[string]any, items []Item) {
+	known := collectPerformanceIDs(stored)
+	for _, p := range slice(requested["performance"]) {
+		pm := asMap(p)
+		if pm != nil && str(asMap(pm["performanceAttributes"])["type"]) == "RETURN" && !known[str(pm["id"])] {
+			perf = pm
+			break
+		}
+	}
+	if perf == nil {
+		return nil, nil
+	}
+	items = ItemsFromUpdate(stored, requested)
+	if len(items) == 0 {
+		storedActive := map[string]map[string]any{}
+		for _, cm := range slice(stored["commitments"]) {
+			if m := asMap(cm); m != nil && commitmentCode(m) != "CLOSED" {
+				storedActive[str(m["id"])] = m
+			}
+		}
+		for _, id := range slice(perf["commitmentIds"]) {
+			if st, ok := storedActive[str(id)]; ok {
+				items = append(items, Item{CommitmentID: str(id), Quantity: commitmentQty(st)})
+			}
+		}
+	}
+	return perf, items
+}
+
+// RejectReturn records a refused return on a copy of stored: the CN's RETURN
+// performance is added as Return_Rejected with the reason; nothing else changes.
+func RejectReturn(stored, perf map[string]any, reason string) map[string]any {
+	c, _ := deepCopy(stored)
+	p, _ := deepCopyMap(perf)
+	p["status"] = map[string]any{"code": "Return_Rejected", "name": "Return rejected", "shortDesc": reason}
+	upsertPerformance(c, p)
+	return c
 }
 
 // ---------------------------------------------------------------------------
@@ -497,6 +585,118 @@ func CutoffPassed(cutoffEvent string, stage int) bool {
 	return false
 }
 
+// ReturnBlocked explains why a commitment can't be returned under its offer's
+// policies.returns, or returns nil: the offer must allow returns, the order
+// must be delivered, and the return window (ISO 8601, from delivery) open.
+func ReturnBlocked(cm map[string]any, stage int, deliveredAt, now time.Time) error {
+	pol := asMap(asMap(asMap(asMap(cm["offer"])["offerAttributes"])["policies"])["returns"])
+	if allowed, _ := pol["allowed"].(bool); !allowed {
+		return errors.New("the offer does not accept returns")
+	}
+	if stage < stageDelivered {
+		return errors.New("the order has not been delivered yet")
+	}
+	if w := str(pol["window"]); w != "" && !deliveredAt.IsZero() {
+		d, err := ParseISODuration(w)
+		if err != nil {
+			return fmt.Errorf("invalid return window %q: %v", w, err)
+		}
+		if closes := deliveredAt.Add(d); now.After(closes) {
+			return fmt.Errorf("the %s return window closed at %s", w, closes.UTC().Format(time.RFC3339))
+		}
+	}
+	return nil
+}
+
+// restockingFee applies the offer's policies.returns.restockingFee to the
+// amount paid for the returned units: PERCENTAGE of that amount, or FIXED.
+func restockingFee(cm map[string]any, returnedAmount float64) float64 {
+	fee := asMap(asMap(asMap(asMap(asMap(cm["offer"])["offerAttributes"])["policies"])["returns"])["restockingFee"])
+	switch str(fee["type"]) {
+	case "PERCENTAGE":
+		return round2(returnedAmount * num(fee["value"]) / 100)
+	case "FIXED":
+		return num(fee["value"])
+	}
+	return 0
+}
+
+// recordReturn adds the CN's RETURN performance to the contract as
+// Return_Approved, listing the commitments it returned.
+func recordReturn(c map[string]any, perf map[string]any, targets []target) {
+	if perf == nil {
+		perf = map[string]any{"id": nextID("return", "", collectPerformanceIDs(c))}
+	} else {
+		perf, _ = deepCopyMap(perf)
+	}
+	ids := make([]any, 0, len(targets))
+	for _, t := range targets {
+		ids = append(ids, str(t.commitment["id"]))
+	}
+	perf["commitmentIds"] = ids
+	perf["status"] = map[string]any{"code": "Return_Approved", "name": "Return approved"}
+	upsertPerformance(c, perf)
+}
+
+// upsertPerformance replaces the contract performance with perf's id, or appends it.
+func upsertPerformance(c map[string]any, perf map[string]any) {
+	perfs := slice(c["performance"])
+	for i, p := range perfs {
+		if str(asMap(p)["id"]) == str(perf["id"]) {
+			perfs[i] = perf
+			c["performance"] = perfs
+			return
+		}
+	}
+	c["performance"] = append(perfs, perf)
+}
+
+func collectPerformanceIDs(c map[string]any) map[string]bool {
+	ids := map[string]bool{}
+	for _, p := range slice(c["performance"]) {
+		ids[str(asMap(p)["id"])] = true
+	}
+	return ids
+}
+
+// ParseISODuration parses an ISO 8601 duration such as P7D, PT2H or P1W2DT3H.
+// Years count as 365 days and months as 30.
+func ParseISODuration(s string) (time.Duration, error) {
+	if !strings.HasPrefix(s, "P") || len(s) < 3 {
+		return 0, fmt.Errorf("not an ISO 8601 duration")
+	}
+	var total time.Duration
+	inTime, num := false, ""
+	units := map[bool]map[byte]time.Duration{
+		false: {'Y': 365 * 24 * time.Hour, 'M': 30 * 24 * time.Hour, 'W': 7 * 24 * time.Hour, 'D': 24 * time.Hour},
+		true:  {'H': time.Hour, 'M': time.Minute, 'S': time.Second},
+	}
+	for i := 1; i < len(s); i++ {
+		ch := s[i]
+		switch {
+		case ch == 'T':
+			inTime = true
+		case (ch >= '0' && ch <= '9') || ch == '.':
+			num += string(ch)
+		default:
+			unit, ok := units[inTime][ch]
+			if !ok || num == "" {
+				return 0, fmt.Errorf("bad component %q", string(ch))
+			}
+			var v float64
+			if _, err := fmt.Sscanf(num, "%g", &v); err != nil {
+				return 0, err
+			}
+			total += time.Duration(v * float64(unit))
+			num = ""
+		}
+	}
+	if num != "" {
+		return 0, fmt.Errorf("trailing number without unit")
+	}
+	return total, nil
+}
+
 // allowedReasons is the offer's policies.cancellation.allowedReasons as a set.
 func allowedReasons(cm map[string]any) map[string]bool {
 	out := map[string]bool{}
@@ -544,10 +744,16 @@ func cancellationFee(cm map[string]any, cancelledAmount float64) float64 {
 	return 0
 }
 
+// isFeeConsideration reports whether a consideration is a cancellation or
+// restocking fee rather than the contract's price.
+func isFeeConsideration(id string) bool {
+	return strings.HasPrefix(id, "cancellation-") || strings.HasPrefix(id, "restocking-")
+}
+
 func currentPrice(considerations []any) map[string]any {
 	for _, c := range considerations {
 		m := asMap(c)
-		if m == nil || strings.HasPrefix(str(m["id"]), "cancellation-") {
+		if m == nil || isFeeConsideration(str(m["id"])) {
 			continue
 		}
 		if str(asMap(m["status"])["code"]) != "CANCELLED" {

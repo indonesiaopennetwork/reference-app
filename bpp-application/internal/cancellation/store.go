@@ -15,6 +15,19 @@ import (
 	"github.com/ion/winroom/bpp/internal/stock"
 )
 
+// SettlementTerms builds the settlementBasis / settlementWindow attributes
+// (seller payout terms) for settlements; empty values are left out.
+func SettlementTerms(basis, window string) map[string]any {
+	t := map[string]any{}
+	if basis != "" {
+		t["settlementBasis"] = basis
+	}
+	if window != "" {
+		t["settlementWindow"] = window
+	}
+	return t
+}
+
 // ErrNotActive is returned when the contract is no longer ACTIVE.
 var ErrNotActive = errors.New("contract is not ACTIVE")
 
@@ -75,6 +88,9 @@ func Execute(ctx context.Context, pool *pgxpool.Pool, bppID string, txID uuid.UU
 		rows.Close()
 	}
 
+	if req.Return {
+		req.DeliveredAt = deliveredAt(ctx, pool, row.ID)
+	}
 	res, err := Apply(contract, items, req, time.Now())
 	if err != nil {
 		return nil, err
@@ -91,7 +107,9 @@ func Execute(ctx context.Context, pool *pgxpool.Pool, bppID string, txID uuid.UU
 	defer tx.Rollback(ctx) //nolint:errcheck
 
 	status := dbsqlc.ContractStatusACTIVE
-	if res.Full {
+	if res.Full && req.Return {
+		status = dbsqlc.ContractStatusCOMPLETE
+	} else if res.Full {
 		status = dbsqlc.ContractStatusCANCELLED
 	}
 	tag, err := tx.Exec(ctx,
@@ -167,4 +185,37 @@ func commitmentByID(contract map[string]any, id string) map[string]any {
 		}
 	}
 	return nil
+}
+
+// deliveredAt is when the contract was delivered (contracts.delivered_at, set
+// by the seller dashboard); zero when unknown, which leaves the return window
+// unchecked.
+func deliveredAt(ctx context.Context, pool *pgxpool.Pool, contractID uuid.UUID) time.Time {
+	var t *time.Time
+	if err := pool.QueryRow(ctx, `SELECT delivered_at FROM contracts WHERE id = $1`, contractID).Scan(&t); err != nil || t == nil {
+		return time.Time{}
+	}
+	return *t
+}
+
+// StoreRejectedReturn records a refused return request as the contract's
+// latest state (the RETURN performance as Return_Rejected, with the reason)
+// and returns that contract for on_update.
+func StoreRejectedReturn(ctx context.Context, pool *pgxpool.Pool, bppID string, txID uuid.UUID, perf map[string]any, reason string) (map[string]any, error) {
+	row, err := dbsqlc.New(pool).GetActiveContractByTxnID(ctx, dbsqlc.GetActiveContractByTxnIDParams{TransactionID: txID, BppID: bppID})
+	if err != nil {
+		return nil, fmt.Errorf("contract not found: %w", err)
+	}
+	stored, err := LatestContract(ctx, pool, txID, row.ContractAttributes)
+	if err != nil {
+		return nil, err
+	}
+	stored["id"] = row.ID.String()
+	stored["status"] = map[string]any{"code": string(row.Status)}
+	c := RejectReturn(stored, perf, reason)
+	b, _ := json.Marshal(c)
+	if _, err := pool.Exec(ctx, `UPDATE contracts SET contract_attributes = $1, updated_at = NOW() WHERE id = $2 AND bpp_id = $3`, b, row.ID, bppID); err != nil {
+		return nil, fmt.Errorf("store rejected return: %w", err)
+	}
+	return c, nil
 }

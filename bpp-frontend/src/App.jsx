@@ -492,8 +492,9 @@ function OrderDetailDrawer({ order, onClose }) {
     try { contractAttrs = JSON.parse(contractAttrs); } catch {}
   }
   const performances = contractAttrs?.performance || [];
-  const returnPerf = performances.find(p => p.performanceAttributes?.type === 'RETURN');
-  const returnStatus = returnPerf?.status?.code;
+  // Returns are decided by the offer's return policy when the buyer requests
+  // them -- the seller only sees the outcome.
+  const returnPerfs = performances.filter(p => p.performanceAttributes?.type === 'RETURN');
   const deliveryPerf = performances.find(p => p.performanceAttributes?.type !== 'RETURN');
   const deliveryStatus = deliveryPerf?.status?.code;
 
@@ -564,33 +565,24 @@ function OrderDetailDrawer({ order, onClose }) {
                     <section>
                       <SectionTitle>Fulfillment Actions</SectionTitle>
                       
-                      {returnStatus === 'Return_Initiated' ? (
-                        <Card className="p-4 space-y-3">
+                      {returnPerfs.length > 0 ? (
+                        <Card className="p-4 space-y-2">
                           <p className="text-sm font-semibold text-purple-400 flex items-center gap-2">
-                            <RefreshCw size={16} /> Return Requested
+                            <RefreshCw size={16} /> Returns
                           </p>
-                          <div className="flex items-center gap-3">
-                            <button 
-                              disabled={updating}
-                              onClick={() => updateStatus('Return_Approved')}
-                              className="flex-1 py-2 px-3 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50"
-                            >
-                              {updating ? 'Updating...' : 'Approve Return'}
-                            </button>
-                            <button 
-                              disabled={updating}
-                              onClick={() => updateStatus('Return_Rejected')}
-                              className="flex-1 py-2 px-3 bg-rose-500/10 text-rose-400 border border-rose-500/20 hover:bg-rose-500/20 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50"
-                            >
-                              {updating ? 'Updating...' : 'Reject Return'}
-                            </button>
-                          </div>
-                        </Card>
-                      ) : returnStatus ? (
-                        <Card className="p-4">
-                          <p className="text-sm font-semibold text-slate-300 flex items-center gap-2">
-                            <RefreshCw size={16} className="text-slate-500" /> Return Status: {returnStatus.replace(/_/g, ' ')}
-                          </p>
+                          {returnPerfs.map(rp => {
+                            const code = rp.status?.code || ''
+                            const color = code === 'Return_Approved' ? 'text-emerald-400' : code === 'Return_Rejected' ? 'text-rose-400' : 'text-amber-400'
+                            return (
+                              <div key={rp.id} className="text-xs flex items-start justify-between gap-3">
+                                <span className="text-slate-400 font-mono">{rp.id} · {(rp.commitmentIds || []).join(', ')}</span>
+                                <span className={`${color} text-right`}>
+                                  {code.replace(/_/g, ' ')}{rp.status?.shortDesc ? ` — ${rp.status.shortDesc}` : ''}
+                                </span>
+                              </div>
+                            )
+                          })}
+                          <p className="text-[10px] text-slate-500">Accepted or rejected automatically by the offer's return policy (window, restocking fee).</p>
                         </Card>
                       ) : (
                         <Card className="p-4 flex items-center gap-3">

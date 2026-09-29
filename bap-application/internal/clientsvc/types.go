@@ -103,7 +103,15 @@ type ClientCancelItemsRequest struct {
 	ReasonCode    string       `json:"reason_code" binding:"required"`
 }
 
-// CancelItem is a quantity of one commitment to cancel; quantity <= 0 means all of it.
+// ClientReturnItemsRequest — frontend returns some or all units of a delivered
+// order; sent as Beckn update with a RETURN performance. The offer's return
+// policy decides it (no manual approval).
+type ClientReturnItemsRequest struct {
+	TransactionID string       `json:"transaction_id" binding:"required"`
+	Items         []CancelItem `json:"items" binding:"required,min=1"`
+}
+
+// CancelItem is a quantity of one commitment to cancel or return; quantity <= 0 means all of it.
 type CancelItem struct {
 	CommitmentID string  `json:"commitment_id" binding:"required"`
 	Quantity     float64 `json:"quantity"`

@@ -488,6 +488,15 @@ func (h *Handler) HandleListRatings(c *gin.Context) {
 // PUT /api/v1/orders/:id/fulfillment-status
 // ---------------------------------------------------------------------------
 
+// markDelivered stamps when the order was delivered -- the start of its return
+// window (offer policies.returns.window). The first delivery time is kept.
+func (h *Handler) markDelivered(ctx context.Context, contractID uuid.UUID) {
+	if _, err := h.pool.Exec(ctx,
+		`UPDATE contracts SET delivered_at = COALESCE(delivered_at, NOW()) WHERE id = $1`, contractID); err != nil {
+		h.lh.WithModule("dashboardsvc").Warn().Error(err).Log("failed to record delivered_at")
+	}
+}
+
 // HandleUpdateFulfillmentStatus updates the contract performance status
 func (h *Handler) HandleUpdateFulfillmentStatus(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
@@ -501,6 +510,12 @@ func (h *Handler) HandleUpdateFulfillmentStatus(c *gin.Context) {
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	// Returns are decided by the offer's return policy when the buyer requests
+	// them (updatesvc), not approved by hand.
+	if strings.HasPrefix(req.Status, "Return") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "return status is set by the return policy, not manually"})
 		return
 	}
 
@@ -526,6 +541,10 @@ func (h *Handler) HandleUpdateFulfillmentStatus(c *gin.Context) {
 		return
 	}
 
+	if req.Status == "Delivered" {
+		h.markDelivered(ctx, id)
+	}
+
 	// Trigger unsolicited on_status
 	h.triggerUnsolicitedOnStatus(id, req.Status)
 
@@ -540,6 +559,7 @@ func (h *Handler) HandleUpdateFulfillmentStatus(c *gin.Context) {
 				ContractID: cid,
 			})
 			if err == nil {
+				h.markDelivered(bgCtx, cid)
 				h.triggerUnsolicitedOnStatus(cid, newStatus)
 			}
 		}(id)
@@ -562,7 +582,7 @@ func (h *Handler) triggerUnsolicitedOnStatus(contractID uuid.UUID, status string
 	}
 
 	var contractMap map[string]interface{}
-	
+
 	// If contract_attributes is present, use it. Otherwise, fall back to beckn_message_log
 	if len(row.ContractAttributes) > 0 && string(row.ContractAttributes) != "null" {
 		if err := json.Unmarshal(row.ContractAttributes, &contractMap); err != nil {
@@ -602,7 +622,7 @@ func (h *Handler) triggerUnsolicitedOnStatus(contractID uuid.UUID, status string
 
 	contractMap["id"] = row.ID.String()
 	contractMap["status"] = map[string]string{"code": string(row.Status)}
-	
+
 	isReturnStatus := status == "Return_Received" || status == "Return_Rejected" || status == "Return_Approved"
 
 	if perfs, ok := contractMap["performance"].([]interface{}); ok && len(perfs) > 0 {

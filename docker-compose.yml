@@ -449,6 +449,10 @@ services:
       BPP_CALLER_URL: http://onix-bpp:8082/bpp/caller
       CDS_PUBLISH_URL: http://onix-catalog-publish:8085/catalog/publish
 
+      # Seller payout terms written into every settlement (see .env.example).
+      SETTLEMENT_BASIS: ${SETTLEMENT_BASIS:-DELIVERY}
+      SETTLEMENT_WINDOW: ${SETTLEMENT_WINDOW:-P1D}
+
       # Same keypair as config/local-simple-bpp.yaml's keyManager — one registered identity.
       BPP_PRIVATE_KEY: ${BPP_PRIVATE_KEY}
       BPP_KEY_ID: ${BPP_KEY_ID}

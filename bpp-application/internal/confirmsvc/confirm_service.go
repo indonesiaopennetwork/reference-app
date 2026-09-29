@@ -58,6 +58,12 @@ func (s *ConfirmService) ProcessConfirm(ctx context.Context, req *ConfirmRequest
 
 	prettyLog(fmt.Sprintf("← IN   CONFIRM   | txn=%.8s… | bap=%s", req.Context.TransactionID, req.Context.BapID), req)
 
+	// The seller's payout terms go on every settlement before it is stored and echoed.
+	for i := range req.Message.Contract.Settlements {
+		st := &req.Message.Contract.Settlements[i]
+		st.SettlementAttributes = withSettlementTerms(st.SettlementAttributes, s.cfg.SettlementBasis, s.cfg.SettlementWindow)
+	}
+
 	// Transition DRAFT → ACTIVE, record settlements, and retrieve the contract UUID.
 	contractID, err := s.confirmContract(ctx, req)
 
@@ -239,6 +245,27 @@ func validateSettlements(c ConfirmContract) error {
 		}
 	}
 	return nil
+}
+
+// withSettlementTerms adds settlementBasis / settlementWindow (the seller's
+// payout terms, ONDC-style -- not yet in the ION TradeSettlement schema, which
+// allows extra properties) to a settlementAttributes object.
+func withSettlementTerms(raw json.RawMessage, basis, window string) json.RawMessage {
+	var attrs map[string]any
+	if json.Unmarshal(raw, &attrs) != nil || attrs == nil {
+		return raw
+	}
+	if basis != "" {
+		attrs["settlementBasis"] = basis
+	}
+	if window != "" {
+		attrs["settlementWindow"] = window
+	}
+	out, err := json.Marshal(attrs)
+	if err != nil {
+		return raw
+	}
+	return out
 }
 
 // completedSettlements returns a copy of settlements marked COMPLETE — with no

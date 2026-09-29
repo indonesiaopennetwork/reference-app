@@ -2,6 +2,7 @@ package cancellation
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 )
@@ -307,5 +308,113 @@ func TestDeliveredCannotBeCancelled(t *testing.T) {
 	asMap(slice(c["performance"])[0])["status"] = map[string]any{"code": "Delivered"}
 	if _, err := Apply(c, nil, reason, time.Now()); err == nil {
 		t.Fatal("delivered order: cancellation must be refused (it is a return)")
+	}
+}
+
+// delivered is the test contract delivered, with a 7-day return policy and a
+// 10% restocking fee, plus the buyer's RETURN performance.
+func delivered(t *testing.T) (map[string]any, map[string]any) {
+	c := load(t)
+	asMap(slice(c["performance"])[0])["status"] = map[string]any{"code": "Delivered"}
+	pol := asMap(asMap(asMap(asMap(slice(c["commitments"])[0])["offer"])["offerAttributes"])["policies"])
+	pol["returns"] = map[string]any{"allowed": true, "window": "P7D", "restockingFee": map[string]any{"type": "PERCENTAGE", "value": 10.0}}
+	perf := map[string]any{"id": "return-1", "status": map[string]any{"code": "Return_Initiated"},
+		"performanceAttributes": map[string]any{"type": "RETURN"}}
+	return c, perf
+}
+
+func TestReturnWithinWindow(t *testing.T) {
+	c, perf := delivered(t)
+	now := time.Now()
+	res, err := Apply(c, []Item{{CommitmentID: "commitment-cake", Quantity: 1}},
+		Request{Return: true, DeliveredAt: now.Add(-48 * time.Hour), ReturnPerformance: perf}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 1 unit = 49,950 paid; 10% restocking fee = 4,995; refund 44,955.
+	if res.Fee != 4995 || res.Refund != 44955 {
+		t.Errorf("fee=%v refund=%v, want 4995 / 44955", res.Fee, res.Refund)
+	}
+	if res.Full || str(asMap(res.Contract["status"])["code"]) == "COMPLETE" {
+		t.Error("returning 1 of 2 must leave the contract open")
+	}
+	old := byID(t, res.Contract["commitments"], "commitment-cake")
+	if commitmentCode(old) != "CLOSED" || str(asMap(asMap(old["status"])["descriptor"])["name"]) != "Returned" {
+		t.Errorf("returned commitment status = %v, want CLOSED Returned", old["status"])
+	}
+	fee := asMap(byID(t, res.Contract["consideration"], "restocking-105ad328-c1")["considerationAttributes"])
+	if str(asMap(slice(fee["breakup"])[0])["type"]) != "RESTOCKING_FEE" {
+		t.Errorf("fee consideration = %v", fee)
+	}
+	rp := byID(t, res.Contract["performance"], "return-1")
+	if str(asMap(rp["status"])["code"]) != "Return_Approved" || len(slice(rp["commitmentIds"])) != 1 {
+		t.Errorf("return performance = %v, want Return_Approved listing the returned commitment", rp)
+	}
+	if res.RestoredUnits["item-cake"] != 1 {
+		t.Errorf("restored = %v, want 1", res.RestoredUnits)
+	}
+}
+
+func TestFullReturnCompletesContract(t *testing.T) {
+	c, perf := delivered(t)
+	now := time.Now()
+	res, err := Apply(c, nil, Request{Return: true, DeliveredAt: now.Add(-time.Hour), ReturnPerformance: perf}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Full || str(asMap(res.Contract["status"])["code"]) != "COMPLETE" {
+		t.Errorf("full return: full=%v status=%v, want COMPLETE", res.Full, res.Contract["status"])
+	}
+}
+
+func TestReturnRejected(t *testing.T) {
+	now := time.Now()
+	req := func(p map[string]any, at time.Time) Request {
+		return Request{Return: true, DeliveredAt: at, ReturnPerformance: p}
+	}
+
+	c, perf := delivered(t)
+	if _, err := Apply(c, nil, req(perf, now.Add(-8*24*time.Hour)), now); !errors.Is(err, ErrReturnRejected) {
+		t.Errorf("window closed: err = %v, want ErrReturnRejected", err)
+	}
+
+	c, perf = delivered(t)
+	asMap(asMap(asMap(asMap(asMap(slice(c["commitments"])[0])["offer"])["offerAttributes"])["policies"])["returns"])["allowed"] = false
+	if _, err := Apply(c, nil, req(perf, now), now); !errors.Is(err, ErrReturnRejected) {
+		t.Errorf("returns not allowed: err = %v, want ErrReturnRejected", err)
+	}
+
+	c, perf = delivered(t)
+	asMap(slice(c["performance"])[0])["status"] = map[string]any{"code": "Shipped"}
+	if _, err := Apply(c, nil, req(perf, time.Time{}), now); !errors.Is(err, ErrReturnRejected) {
+		t.Errorf("not delivered: err = %v, want ErrReturnRejected", err)
+	}
+}
+
+func TestReturnRequestDetection(t *testing.T) {
+	stored, perf := delivered(t)
+	requested, _ := deepCopy(stored)
+	requested["performance"] = append(slice(requested["performance"]), perf)
+	setCommitmentQty(asMap(slice(requested["commitments"])[0]), 1)
+	p, items := ReturnRequest(stored, requested)
+	if p == nil || len(items) != 1 || items[0].Quantity != 1 {
+		t.Errorf("perf=%v items=%v, want the RETURN performance and 1 unit", p, items)
+	}
+	if p, _ := ReturnRequest(stored, stored); p != nil {
+		t.Error("an update without a new RETURN performance is not a return request")
+	}
+}
+
+func TestParseISODuration(t *testing.T) {
+	for in, want := range map[string]time.Duration{
+		"P7D": 7 * 24 * time.Hour, "PT2H": 2 * time.Hour, "P1W": 7 * 24 * time.Hour,
+		"P1DT12H": 36 * time.Hour, "PT30M": 30 * time.Minute,
+	} {
+		if got, err := ParseISODuration(in); err != nil || got != want {
+			t.Errorf("ParseISODuration(%s) = %v, %v; want %v", in, got, err, want)
+		}
+	}
+	if _, err := ParseISODuration("7 days"); err == nil {
+		t.Error("expected an error for a non-ISO duration")
 	}
 }
