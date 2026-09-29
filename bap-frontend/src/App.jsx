@@ -1403,14 +1403,23 @@ export default function App() {
   }, []);
 
   /* ── Discover ─────────────────────────────────────────────────────────── */
+  // A newer search must never let an older, slower one overwrite its
+  // results once it lands -- the old request is aborted outright, and
+  // if it was already in flight past that point, its AbortError is
+  // ignored rather than clearing what the newer search just showed.
+  const discoverAbortRef = useRef(null);
   const discover = useCallback((q = '') => {
+    discoverAbortRef.current?.abort();
+    const controller = new AbortController();
+    discoverAbortRef.current = controller;
+
     setIsSearching(true);
     setError(null);
     const path = q.trim()
       ? `/discover?q=${encodeURIComponent(q.trim())}`
       : `/discover`;
-    
-    apiFetch(path)
+
+    apiFetch(path, { signal: controller.signal })
       .then(r => { if (!r.ok) throw new Error(`Status ${r.status}`); return r.json(); })
       .then(data => {
         // /api/v1/discover now returns the catalog result directly, whether
@@ -1424,6 +1433,7 @@ export default function App() {
         setIsSearching(false);
       })
       .catch(e => {
+        if (e.name === 'AbortError') return; // superseded by a newer search
         setError(e.message);
         setCatalog([]);
         setIsSearching(false);
