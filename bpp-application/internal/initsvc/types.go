@@ -128,8 +128,22 @@ type Offer struct {
 	ID              string          `json:"id"`
 	ResourceIDs     []string        `json:"resourceIds,omitempty"`
 	Descriptor      *Descriptor     `json:"descriptor,omitempty"`
-	Provider        *Provider       `json:"provider,omitempty"`
-	OfferAttributes json.RawMessage `json:"offerAttributes,omitempty"`
+	Provider        *Provider            `json:"provider,omitempty"`
+	Considerations  []OfferConsideration `json:"considerations,omitempty"`
+	OfferAttributes json.RawMessage      `json:"offerAttributes,omitempty"`
+}
+
+// OfferConsideration is one of an offer's catalog prices (Offer.considerations[]).
+// Its status is a Descriptor and, unlike Contract.consideration[], optional.
+type OfferConsideration struct {
+	ID                      string                    `json:"id"`
+	Status                  *OfferConsiderationStatus `json:"status,omitempty"`
+	ConsiderationAttributes json.RawMessage           `json:"considerationAttributes,omitempty"`
+}
+
+type OfferConsiderationStatus struct {
+	Code string `json:"code,omitempty"`
+	Name string `json:"name,omitempty"`
 }
 
 type Provider struct {

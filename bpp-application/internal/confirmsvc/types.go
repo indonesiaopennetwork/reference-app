@@ -42,6 +42,7 @@ type ConfirmContract struct {
 	Commitments        []Commitment    `json:"commitments"`
 	Consideration      []Consideration `json:"consideration,omitempty"`
 	Performance        []Performance   `json:"performance,omitempty"`
+	Settlements        []Settlement    `json:"settlements,omitempty"`
 	ContractAttributes json.RawMessage `json:"contractAttributes,omitempty"`
 }
 
@@ -127,8 +128,22 @@ type Offer struct {
 	ID              string          `json:"id"`
 	ResourceIDs     []string        `json:"resourceIds,omitempty"`
 	Descriptor      *Descriptor     `json:"descriptor,omitempty"`
-	Provider        *Provider       `json:"provider,omitempty"`
-	OfferAttributes json.RawMessage `json:"offerAttributes,omitempty"`
+	Provider        *Provider            `json:"provider,omitempty"`
+	Considerations  []OfferConsideration `json:"considerations,omitempty"`
+	OfferAttributes json.RawMessage      `json:"offerAttributes,omitempty"`
+}
+
+// OfferConsideration is one of an offer's catalog prices (Offer.considerations[]).
+// Its status is a Descriptor and, unlike Contract.consideration[], optional.
+type OfferConsideration struct {
+	ID                      string                    `json:"id"`
+	Status                  *OfferConsiderationStatus `json:"status,omitempty"`
+	ConsiderationAttributes json.RawMessage           `json:"considerationAttributes,omitempty"`
+}
+
+type OfferConsiderationStatus struct {
+	Code string `json:"code,omitempty"`
+	Name string `json:"name,omitempty"`
 }
 
 type Provider struct {
@@ -144,6 +159,16 @@ type Consideration struct {
 
 type ConsiderationStatus struct {
 	Code string `json:"code"`
+}
+
+// Settlement records the discharge of a consideration. The BAP sends it on
+// confirm as payment proof; settlementAttributes carries the ION
+// TradeSettlement extension (method, settledAmount, currency, gateway, …).
+type Settlement struct {
+	ID                   string          `json:"id"`
+	ConsiderationID      string          `json:"considerationId"`
+	Status               string          `json:"status,omitempty"`
+	SettlementAttributes json.RawMessage `json:"settlementAttributes,omitempty"`
 }
 
 type Performance struct {

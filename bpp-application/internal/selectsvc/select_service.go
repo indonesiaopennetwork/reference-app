@@ -111,7 +111,7 @@ func (s *SelectService) enrichContract(ctx context.Context, req *SelectRequest) 
 	}
 
 	var allBreakup []breakupItem
-	currency := "INR"
+	currency := "IDR"
 
 	for _, c := range req.Message.Contract.Commitments {
 		enriched, unitPrice, curr, found := s.enrichCommitment(ctx, q, bppID, c)
@@ -153,6 +153,20 @@ func (s *SelectService) enrichContract(ctx context.Context, req *SelectRequest) 
 	}
 
 	return contract
+}
+
+// toOfferConsiderations maps the offer's stored catalog prices to
+// Offer.considerations[].
+func toOfferConsiderations(rows []dbsqlc.OfferConsideration) []OfferConsideration {
+	out := make([]OfferConsideration, 0, len(rows))
+	for _, r := range rows {
+		oc := OfferConsideration{ID: r.ConsiderationID, ConsiderationAttributes: r.ConsiderationAttributes}
+		if r.StatusCode != "" || r.StatusName != nil {
+			oc.Status = &OfferConsiderationStatus{Code: r.StatusCode, Name: strVal(r.StatusName)}
+		}
+		out = append(out, oc)
+	}
+	return out
 }
 
 // enrichCommitment looks up the offer and each resource in the DB.
@@ -246,6 +260,7 @@ func (s *SelectService) enrichCommitment(
 	if err != nil || len(considerations) == 0 {
 		return
 	}
+	enriched.Offer.Considerations = toOfferConsiderations(considerations)
 
 	// Use the first active consideration's totalAmount as the unit price.
 	var attrs dbConsiderationAttrs

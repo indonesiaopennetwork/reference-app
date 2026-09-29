@@ -7,6 +7,7 @@ package sqlc
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/google/uuid"
 )
@@ -38,4 +39,44 @@ func (q *Queries) ConfirmContract(ctx context.Context, arg ConfirmContractParams
 	var id uuid.UUID
 	err := row.Scan(&id)
 	return id, err
+}
+
+const upsertSettlement = `-- name: UpsertSettlement :exec
+INSERT INTO settlements (
+    id, contract_id, consideration_id, status,
+    settlement_attributes, settlement_attributes_context, settlement_attributes_type
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7
+)
+ON CONFLICT (id, contract_id) DO UPDATE SET
+    consideration_id              = EXCLUDED.consideration_id,
+    status                        = EXCLUDED.status,
+    settlement_attributes         = EXCLUDED.settlement_attributes,
+    settlement_attributes_context = EXCLUDED.settlement_attributes_context,
+    settlement_attributes_type    = EXCLUDED.settlement_attributes_type,
+    updated_at                    = NOW()
+`
+
+type UpsertSettlementParams struct {
+	ID                          string           `json:"id"`
+	ContractID                  uuid.UUID        `json:"contract_id"`
+	ConsiderationID             string           `json:"consideration_id"`
+	Status                      SettlementStatus `json:"status"`
+	SettlementAttributes        json.RawMessage  `json:"settlement_attributes"`
+	SettlementAttributesContext *string          `json:"settlement_attributes_context"`
+	SettlementAttributesType    *string          `json:"settlement_attributes_type"`
+}
+
+// Records the settlement (payment proof) the BAP supplies on confirm.
+func (q *Queries) UpsertSettlement(ctx context.Context, arg UpsertSettlementParams) error {
+	_, err := q.db.Exec(ctx, upsertSettlement,
+		arg.ID,
+		arg.ContractID,
+		arg.ConsiderationID,
+		arg.Status,
+		arg.SettlementAttributes,
+		arg.SettlementAttributesContext,
+		arg.SettlementAttributesType,
+	)
+	return err
 }
