@@ -16,6 +16,7 @@ import (
 	"github.com/remiges-tech/logharbour/logharbour"
 
 	dbsqlc "github.com/ion/winroom/bpp/db/sqlc"
+	"github.com/ion/winroom/bpp/internal/cancellation"
 	"github.com/ion/winroom/bpp/internal/config"
 	"github.com/ion/winroom/bpp/internal/httpclient"
 )
@@ -51,32 +52,12 @@ func (s *Service) Process(ctx context.Context, req *StatusRequest) {
 		return
 	}
 
-	// Fetch the most recent full contract payload for this transaction from beckn_message_log
-	var lastPayloadStr string
-	err = s.pool.QueryRow(ctx, `
-		SELECT request_payload 
-		FROM beckn_message_log 
-		WHERE transaction_id = $1 AND action IN ('on_confirm', 'confirm', 'on_init', 'init') 
-		ORDER BY created_at DESC LIMIT 1
-	`, txID).Scan(&lastPayloadStr)
+	// Latest full contract: contract_attributes (kept current by returns and
+	// cancellations), else the most recent init/confirm payload.
+	contractMap, err := cancellation.LatestContract(ctx, s.pool, txID, row.ContractAttributes)
 	if err != nil {
-		s.lh.WithModule("statussvc").Err().Error(err).Log("failed to find previous contract payload in message log")
+		s.lh.WithModule("statussvc").Err().Error(err).Log("failed to load latest contract")
 		return
-	}
-
-	var parsedReq struct {
-		Message struct {
-			Contract map[string]interface{} `json:"contract"`
-		} `json:"message"`
-	}
-	if err := json.Unmarshal([]byte(lastPayloadStr), &parsedReq); err != nil {
-		s.lh.WithModule("statussvc").Err().Error(err).Log("failed to parse previous contract payload")
-		return
-	}
-
-	contractMap := parsedReq.Message.Contract
-	if contractMap == nil {
-		contractMap = map[string]interface{}{}
 	}
 	contractMap["id"] = row.ID.String()
 	contractMap["status"] = map[string]string{"code": string(row.Status)}

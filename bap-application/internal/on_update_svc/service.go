@@ -39,6 +39,31 @@ func (s *Service) Process(ctx context.Context, req *OnUpdateRequest) {
 	}
 	contractID := extractContractID(contractJSON)
 
+	// Follow the contract's status: a partial cancellation leaves it ACTIVE
+	// (back to CONFIRMED), cancelling the last item makes it CANCELLED.
+	var contractStatus struct {
+		Status struct {
+			Code string `json:"code"`
+		} `json:"status"`
+	}
+	_ = json.Unmarshal(contractJSON, &contractStatus)
+	txnStatus := map[string]dbsqlc.TransactionStatus{
+		"ACTIVE":    dbsqlc.TransactionStatusCONFIRMED,
+		"CANCELLED": dbsqlc.TransactionStatusCANCELLED,
+	}[contractStatus.Status.Code]
+	if txnStatus != "" {
+		if err := q.UpsertTransaction(ctx, dbsqlc.UpsertTransactionParams{
+			TransactionID: txID,
+			BapID:         s.cfg.BapID,
+			NetworkID:     strPtr(req.Context.NetworkID),
+			BppID:         strPtr(req.Context.BppID),
+			BppUri:        strPtr(req.Context.BppURI),
+			Status:        txnStatus,
+		}); err != nil {
+			s.lh.WithModule("on_update_svc").Warn().Error(err).Log("upsert transaction failed")
+		}
+	}
+
 	if err := q.UpsertContractSnapshot(ctx, dbsqlc.UpsertContractSnapshotParams{
 		TransactionID: txID,
 		Action:        dbsqlc.BecknActionOnUpdate,

@@ -118,10 +118,16 @@ type quantity struct {
 	UnitQuantity float64 `json:"unitQuantity"`
 }
 
+// Descriptor is the Beckn Descriptor: every field is kept so a resource or
+// offer carries the same descriptor it was published with (media, docs, …).
 type Descriptor struct {
-	Name      string `json:"name,omitempty"`
-	ShortDesc string `json:"shortDesc,omitempty"`
-	LongDesc  string `json:"longDesc,omitempty"`
+	Code           string          `json:"code,omitempty"`
+	Name           string          `json:"name,omitempty"`
+	ShortDesc      string          `json:"shortDesc,omitempty"`
+	LongDesc       string          `json:"longDesc,omitempty"`
+	ThumbnailImage string          `json:"thumbnailImage,omitempty"`
+	Docs           json.RawMessage `json:"docs,omitempty"`
+	MediaFile      json.RawMessage `json:"mediaFile,omitempty"`
 }
 
 type Offer struct {

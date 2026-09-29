@@ -86,6 +86,7 @@ func RegisterRoutes(r *gin.Engine, pool *pgxpool.Pool, cfg *config.Config, lh *l
 		v1.GET("/status/:id", clientH.HandleStatus)
 		v1.POST("/request-status", clientH.HandleRequestStatus)
 		v1.POST("/cancel", clientH.HandleCancel)
+	v1.POST("/cancel-items", clientH.HandleCancelItems)
 		v1.POST("/update", clientH.HandleUpdate)
 		v1.POST("/rate", clientH.HandleRate)
 		v1.POST("/support", clientH.HandleSupport)

@@ -7,6 +7,9 @@ package sqlc
 
 import (
 	"context"
+	"encoding/json"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const getOffer = `-- name: GetOffer :one
@@ -97,7 +100,12 @@ func (q *Queries) GetOfferConsiderations(ctx context.Context, arg GetOfferConsid
 }
 
 const getResource = `-- name: GetResource :one
-SELECT id, catalog_id, bpp_id, descriptor_name, descriptor_code, descriptor_short_desc, descriptor_long_desc, descriptor_thumbnail_image, descriptor_docs, descriptor_media_files, resource_attributes, resource_attributes_context, resource_attributes_type, master_resource_id, search_vector, created_at, updated_at, deleted_at, provider_id FROM resources
+SELECT id, catalog_id, bpp_id, provider_id,
+       descriptor_name, descriptor_code, descriptor_short_desc, descriptor_long_desc,
+       descriptor_thumbnail_image, descriptor_docs, descriptor_media_files,
+       resource_attributes, resource_attributes_context, resource_attributes_type,
+       master_resource_id, created_at, updated_at, deleted_at
+FROM resources
 WHERE id = $1 AND bpp_id = $2 AND deleted_at IS NULL
 LIMIT 1
 `
@@ -107,14 +115,38 @@ type GetResourceParams struct {
 	BppID string `json:"bpp_id"`
 }
 
+type GetResourceRow struct {
+	ID                        string             `json:"id"`
+	CatalogID                 string             `json:"catalog_id"`
+	BppID                     string             `json:"bpp_id"`
+	ProviderID                string             `json:"provider_id"`
+	DescriptorName            *string            `json:"descriptor_name"`
+	DescriptorCode            *string            `json:"descriptor_code"`
+	DescriptorShortDesc       *string            `json:"descriptor_short_desc"`
+	DescriptorLongDesc        *string            `json:"descriptor_long_desc"`
+	DescriptorThumbnailImage  *string            `json:"descriptor_thumbnail_image"`
+	DescriptorDocs            json.RawMessage    `json:"descriptor_docs"`
+	DescriptorMediaFiles      json.RawMessage    `json:"descriptor_media_files"`
+	ResourceAttributes        json.RawMessage    `json:"resource_attributes"`
+	ResourceAttributesContext *string            `json:"resource_attributes_context"`
+	ResourceAttributesType    *string            `json:"resource_attributes_type"`
+	MasterResourceID          *string            `json:"master_resource_id"`
+	CreatedAt                 pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                 pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt                 pgtype.Timestamptz `json:"deleted_at"`
+}
+
 // Finds an active resource (product/service) by ID within this BPP.
-func (q *Queries) GetResource(ctx context.Context, arg GetResourceParams) (Resource, error) {
+// Columns are listed explicitly: search_vector (tsvector) can't be scanned
+// into the generated model, which made every lookup fail.
+func (q *Queries) GetResource(ctx context.Context, arg GetResourceParams) (GetResourceRow, error) {
 	row := q.db.QueryRow(ctx, getResource, arg.ID, arg.BppID)
-	var i Resource
+	var i GetResourceRow
 	err := row.Scan(
 		&i.ID,
 		&i.CatalogID,
 		&i.BppID,
+		&i.ProviderID,
 		&i.DescriptorName,
 		&i.DescriptorCode,
 		&i.DescriptorShortDesc,
@@ -126,11 +158,9 @@ func (q *Queries) GetResource(ctx context.Context, arg GetResourceParams) (Resou
 		&i.ResourceAttributesContext,
 		&i.ResourceAttributesType,
 		&i.MasterResourceID,
-		&i.SearchVector,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
-		&i.ProviderID,
 	)
 	return i, err
 }

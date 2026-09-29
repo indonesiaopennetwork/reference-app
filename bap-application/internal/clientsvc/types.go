@@ -20,6 +20,9 @@ type SelectItem struct {
 	// OfferConsiderations is the offer's considerations[] (pricing) exactly as
 	// the discover response carried it; sent on as offer.considerations.
 	OfferConsiderations json.RawMessage `json:"offer_considerations,omitempty"`
+	// Resource is the resource's descriptor / resourceAttributes as discover
+	// returned them; sent on in commitments[].resources[].
+	Resource json.RawMessage `json:"resource,omitempty"`
 	// BppID and BppURI are populated from the catalog's bppId/bppUri fields in the
 	// discover response. They override the server-config defaults so the select is
 	// routed to the BPP that actually owns the resource.
@@ -86,6 +89,24 @@ type ClientDiscoverRequest struct {
 // ClientCancelRequest — frontend initiates Cancel.
 type ClientCancelRequest struct {
 	TransactionID string `json:"transaction_id" binding:"required"`
+	// ReasonCode is an ION cancellation reason (e.g. CHANGE_OF_MIND), sent as
+	// contractAttributes.cancellation.reason.code.
+	ReasonCode string `json:"reason_code" binding:"required"`
+}
+
+// ClientCancelItemsRequest — frontend cancels some or all units of a confirmed
+// order. Cancelling everything still active is sent as /cancel; anything less
+// as /update (a partial cancellation).
+type ClientCancelItemsRequest struct {
+	TransactionID string       `json:"transaction_id" binding:"required"`
+	Items         []CancelItem `json:"items" binding:"required,min=1"`
+	ReasonCode    string       `json:"reason_code" binding:"required"`
+}
+
+// CancelItem is a quantity of one commitment to cancel; quantity <= 0 means all of it.
+type CancelItem struct {
+	CommitmentID string  `json:"commitment_id" binding:"required"`
+	Quantity     float64 `json:"quantity"`
 }
 
 // ClientRequestStatusRequest — frontend triggers a Beckn status request.

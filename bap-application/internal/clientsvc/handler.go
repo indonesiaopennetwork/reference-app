@@ -168,6 +168,23 @@ func (h *ClientHandler) HandleCancel(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "CANCEL_SENT"})
 }
 
+// HandleCancelItems cancels some or all of an order's items: a full cancellation
+// goes out as Beckn cancel, a partial one as Beckn update.
+func (h *ClientHandler) HandleCancelItems(c *gin.Context) {
+	var req ClientCancelItemsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	status, err := h.svc.CancelItems(c.Request.Context(), &req)
+	if err != nil {
+		h.lh.WithModule("client_handler").Err().Error(err).Log("cancel items failed")
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": status})
+}
+
 // HandleUpdate triggers a Beckn update request.
 func (h *ClientHandler) HandleUpdate(c *gin.Context) {
 	var req ClientUpdateRequest

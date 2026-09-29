@@ -185,6 +185,11 @@ func (h *ClientHandler) HandleListOrders(c *gin.Context) {
 		// Extract item name, price, and return status from the contract snapshot for quick display
 		var contractData struct {
 			Commitments []struct {
+				Resources []struct {
+					Descriptor struct {
+						Name string `json:"name"`
+					} `json:"descriptor"`
+				} `json:"resources"`
 				Offer struct {
 					Descriptor struct {
 						Name string `json:"name"`
@@ -210,9 +215,15 @@ func (h *ClientHandler) HandleListOrders(c *gin.Context) {
 		if len(item.Contract) > 2 {
 			if err := json.Unmarshal(item.Contract, &contractData); err == nil {
 				if len(contractData.Commitments) > 0 {
-					item.ItemName = contractData.Commitments[0].Offer.Descriptor.Name
-					item.ItemPrice = contractData.Commitments[0].CommitmentAttributes.Price.Value
-					item.Currency = contractData.Commitments[0].CommitmentAttributes.Price.Currency
+					// The product (resource) name; fall back to the offer name for
+					// orders placed before commitments carried resource descriptors.
+					cm := contractData.Commitments[0]
+					item.ItemName = cm.Offer.Descriptor.Name
+					if len(cm.Resources) > 0 && cm.Resources[0].Descriptor.Name != "" {
+						item.ItemName = cm.Resources[0].Descriptor.Name
+					}
+					item.ItemPrice = cm.CommitmentAttributes.Price.Value
+					item.Currency = cm.CommitmentAttributes.Price.Currency
 				}
 				
 				// Extract return status if any
