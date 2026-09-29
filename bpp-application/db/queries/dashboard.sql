@@ -189,11 +189,16 @@ WHERE offer_id = $1
 
 -- name: ListRecentMessages :many
 SELECT
+    id,
+    message_id,
     action,
     direction,
     ack_status,
     transaction_id,
     url,
+    error_message,
+    request_payload,
+    response_payload,
     created_at
 FROM beckn_message_log
 WHERE bpp_id = $1

@@ -506,11 +506,16 @@ func (q *Queries) ListOffers(ctx context.Context, arg ListOffersParams) ([]ListO
 const listRecentMessages = `-- name: ListRecentMessages :many
 
 SELECT
+    id,
+    message_id,
     action,
     direction,
     ack_status,
     transaction_id,
     url,
+    error_message,
+    request_payload,
+    response_payload,
     created_at
 FROM beckn_message_log
 WHERE bpp_id = $1
@@ -524,12 +529,17 @@ type ListRecentMessagesParams struct {
 }
 
 type ListRecentMessagesRow struct {
-	Action        BecknAction        `json:"action"`
-	Direction     MessageDirection   `json:"direction"`
-	AckStatus     NullAckStatus      `json:"ack_status"`
-	TransactionID pgtype.UUID        `json:"transaction_id"`
-	Url           *string            `json:"url"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	ID              uuid.UUID          `json:"id"`
+	MessageID       uuid.UUID          `json:"message_id"`
+	Action          BecknAction        `json:"action"`
+	Direction       MessageDirection   `json:"direction"`
+	AckStatus       NullAckStatus      `json:"ack_status"`
+	TransactionID   pgtype.UUID        `json:"transaction_id"`
+	Url             *string            `json:"url"`
+	ErrorMessage    *string            `json:"error_message"`
+	RequestPayload  json.RawMessage    `json:"request_payload"`
+	ResponsePayload json.RawMessage    `json:"response_payload"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 }
 
 // ============================================================
@@ -545,11 +555,16 @@ func (q *Queries) ListRecentMessages(ctx context.Context, arg ListRecentMessages
 	for rows.Next() {
 		var i ListRecentMessagesRow
 		if err := rows.Scan(
+			&i.ID,
+			&i.MessageID,
 			&i.Action,
 			&i.Direction,
 			&i.AckStatus,
 			&i.TransactionID,
 			&i.Url,
+			&i.ErrorMessage,
+			&i.RequestPayload,
+			&i.ResponsePayload,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err

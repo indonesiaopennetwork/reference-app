@@ -422,12 +422,13 @@ func (h *Handler) HandleGetCatalog(c *gin.Context) {
 }
 
 // ---------------------------------------------------------------------------
-// POST /api/v1/catalogs/:id/products  — add a single resource + offer
+// POST /api/v1/catalogs/:id/products  — add a single resource, and optionally
+// an offer for it (the dashboard adds offers separately via /offers)
 // ---------------------------------------------------------------------------
 
 type AddProductRequest struct {
 	Resource catalog.Resource `json:"resource" binding:"required"`
-	Offer    catalog.Offer    `json:"offer"    binding:"required"`
+	Offer    *catalog.Offer   `json:"offer,omitempty"`
 }
 
 func (h *Handler) HandleAddProduct(c *gin.Context) {
@@ -489,64 +490,9 @@ func (h *Handler) HandleAddProduct(c *gin.Context) {
 		return
 	}
 
-	// Upsert offer provider if provided -- forced to the caller's own
-	// provider regardless of what ID was submitted. UpsertProvider is an
-	// upsert keyed only on (id, bpp_id); trusting a client-supplied ID here
-	// would let any seller silently rename another seller's provider.
-	var offerProviderID *string
-	if req.Offer.Provider != nil {
-		if err := q.UpsertProvider(ctx, dbsqlc.UpsertProviderParams{
-			ID:             providerID,
-			BppID:          bppID,
-			DescriptorName: req.Offer.Provider.Descriptor.Name,
-		}); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "upsert offer provider: " + err.Error()})
-			return
-		}
-		offerProviderID = strPtr(providerID)
-	}
-
-	// Insert offer.
-	oAttrsCtx, oAttrsType := extractContextType(req.Offer.OfferAttributes)
-	var validityStart, validityEnd pgtype.Timestamptz
-	if req.Offer.Validity != nil {
-		validityStart = parseTimestampStr(req.Offer.Validity.StartDate)
-		validityEnd = parseTimestampStr(req.Offer.Validity.EndDate)
-	}
-	if err := q.InsertOffer(ctx, dbsqlc.InsertOfferParams{
-		ID:                     req.Offer.ID,
-		CatalogID:              catalogID,
-		BppID:                  bppID,
-		ProviderID:             offerProviderID,
-		DescriptorName:         strPtr(req.Offer.Descriptor.Name),
-		DescriptorCode:         strPtr(req.Offer.Descriptor.Code),
-		DescriptorShortDesc:    strPtr(req.Offer.Descriptor.ShortDesc),
-		ResourceIds:            req.Offer.ResourceIDs,
-		OfferAttributes:        req.Offer.OfferAttributes,
-		OfferAttributesContext: strPtr(oAttrsCtx),
-		OfferAttributesType:    strPtr(oAttrsType),
-		ValidityStart:          validityStart,
-		ValidityEnd:            validityEnd,
-	}); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "insert offer: " + err.Error()})
-		return
-	}
-
-	// Insert considerations.
-	for _, consid := range req.Offer.Considerations {
-		cAttrsCtx, cAttrsType := extractContextType(consid.ConsiderationAttributes)
-		if err := q.InsertOfferConsideration(ctx, dbsqlc.InsertOfferConsiderationParams{
-			OfferID:                        req.Offer.ID,
-			CatalogID:                      catalogID,
-			BppID:                          bppID,
-			ConsiderationID:                consid.ID,
-			StatusCode:                     considerationStatusCode(consid.Status),
-			StatusName:                     strPtr(consid.Status.Name),
-			ConsiderationAttributes:        consid.ConsiderationAttributes,
-			ConsiderationAttributesContext: strPtr(cAttrsCtx),
-			ConsiderationAttributesType:    strPtr(cAttrsType),
-		}); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "insert consideration: " + err.Error()})
+	if req.Offer != nil {
+		if err := h.insertOffer(ctx, q, catalogID, providerID, req.Offer); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 	}
@@ -556,6 +502,73 @@ func (h *Handler) HandleAddProduct(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+// insertOffer stores an offer, its provider link, and its considerations
+// within the caller's transaction.
+func (h *Handler) insertOffer(ctx context.Context, q *dbsqlc.Queries, catalogID, providerID string, offer *catalog.Offer) error {
+	bppID := h.cfg.BppID
+
+	// Upsert offer provider if provided -- forced to the caller's own
+	// provider regardless of what ID was submitted. UpsertProvider is an
+	// upsert keyed only on (id, bpp_id); trusting a client-supplied ID here
+	// would let any seller silently rename another seller's provider.
+	var offerProviderID *string
+	if offer.Provider != nil {
+		if err := q.UpsertProvider(ctx, dbsqlc.UpsertProviderParams{
+			ID:             providerID,
+			BppID:          bppID,
+			DescriptorName: offer.Provider.Descriptor.Name,
+		}); err != nil {
+			return fmt.Errorf("upsert offer provider: %w", err)
+		}
+		offerProviderID = strPtr(providerID)
+	}
+
+	// Insert offer.
+	oAttrsCtx, oAttrsType := extractContextType(offer.OfferAttributes)
+	var validityStart, validityEnd pgtype.Timestamptz
+	if offer.Validity != nil {
+		validityStart = parseTimestampStr(offer.Validity.StartDate)
+		validityEnd = parseTimestampStr(offer.Validity.EndDate)
+	}
+	if err := q.InsertOffer(ctx, dbsqlc.InsertOfferParams{
+		ID:                     offer.ID,
+		CatalogID:              catalogID,
+		BppID:                  bppID,
+		ProviderID:             offerProviderID,
+		DescriptorName:         strPtr(offer.Descriptor.Name),
+		DescriptorCode:         strPtr(offer.Descriptor.Code),
+		DescriptorShortDesc:    strPtr(offer.Descriptor.ShortDesc),
+		ResourceIds:            offer.ResourceIDs,
+		OfferAttributes:        offer.OfferAttributes,
+		OfferAttributesContext: strPtr(oAttrsCtx),
+		OfferAttributesType:    strPtr(oAttrsType),
+		ValidityStart:          validityStart,
+		ValidityEnd:            validityEnd,
+	}); err != nil {
+		return fmt.Errorf("insert offer: %w", err)
+	}
+
+	// Insert considerations.
+	for _, consid := range offer.Considerations {
+		cAttrsCtx, cAttrsType := extractContextType(consid.ConsiderationAttributes)
+		if err := q.InsertOfferConsideration(ctx, dbsqlc.InsertOfferConsiderationParams{
+			OfferID:                        offer.ID,
+			CatalogID:                      catalogID,
+			BppID:                          bppID,
+			ConsiderationID:                consid.ID,
+			StatusCode:                     considerationStatusCode(consid.Status),
+			StatusName:                     strPtr(consid.Status.Name),
+			ConsiderationAttributes:        consid.ConsiderationAttributes,
+			ConsiderationAttributesContext: strPtr(cAttrsCtx),
+			ConsiderationAttributesType:    strPtr(cAttrsType),
+		}); err != nil {
+			return fmt.Errorf("insert consideration: %w", err)
+		}
+	}
+
+	return nil
 }
 
 // ---------------------------------------------------------------------------

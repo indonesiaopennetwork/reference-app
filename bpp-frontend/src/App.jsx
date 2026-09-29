@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, Fragment } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   LayoutDashboard, ShoppingBag, Package, Radio, MessageSquare,
@@ -8,6 +8,7 @@ import {
   Activity, Zap, Store, Calendar, Tag, BarChart2, Inbox,
   ArrowRight, Circle, Star, Ticket, Ban, Wand2,
   BookOpen, FolderOpen, Send, ArrowLeft, ExternalLink, LogOut,
+  ChevronDown, Copy, Check,
 } from 'lucide-react'
 import { captureTokenFromUrl, getToken, clearToken, redirectToLogin, logout } from './auth.js'
 
@@ -50,6 +51,13 @@ function useApi(path, deps = []) {
   }, [path, ...deps]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { load() }, [load])
   return { data, loading, error, reload: load }
+}
+
+// The logged-in seller's own provider ({id, name}) -- /providers is scoped to
+// it server-side. Used to fill provider fields instead of hard-coded seeds.
+function useOwnProvider() {
+  const { data } = useApi('/providers')
+  return data?.items?.[0] || null
 }
 
 const fmtDate = ts => {
@@ -556,14 +564,14 @@ function OrderDetailDrawer({ order, onClose }) {
                           let attrs = c.consideration_attributes
                           try { if (typeof attrs === 'string') attrs = JSON.parse(attrs) } catch { }
                           const price = attrs?.price || attrs?.totalAmount
-                          const currency = attrs?.currency || 'INR'
+                          const currency = attrs?.currency || 'IDR'
                           return (
                             <Card key={i} className="p-4">
                               <div className="flex items-center justify-between mb-2">
                                 <span className="text-xs font-semibold text-slate-300">{c.status_code}</span>
                                 {price && (
                                   <span className="text-lg font-bold" style={{ color: '#00b8e6' }}>
-                                    {currency === 'INR' ? '₹' : ''}{Number(price).toLocaleString()}
+                                    {currency === 'IDR' ? 'Rp' : currency === 'INR' ? '₹' : ''}{Number(price).toLocaleString()}
                                   </span>
                                 )}
                               </div>
@@ -1033,13 +1041,19 @@ const EMPTY_RESOURCE = () => ({
   net_qty_value: '', net_qty_unit: 'ML',
 })
 
+// RetailOffer 2.1 policies.returns.method / policies.replacement.method enum.
+const RETURN_METHODS = ['SELLER_PICKUP', 'BUYER_SHIP', 'DROP_OFF']
+// RetailOffer 2.1 policies.returns.restockingFee.type enum.
+const FEE_TYPES = ['PERCENTAGE', 'FIXED']
+
 const EMPTY_OFFER = () => ({
-  id: '', name: '', short_desc: '', resource_ids: '', price: '', currency: 'INR',
+  id: '', name: '', short_desc: '', resource_ids: '', price: '', currency: 'IDR',
   validity_start: '', validity_end: '',
   // offer attributes
   offer_context: 'https://schema.ion.id/release1/schema/extension/trade/TradeOffer/v1/context.jsonld',
   // policies
   returns_allowed: true, returns_window: 'P7D', returns_method: 'SELLER_PICKUP',
+  returns_fee_type: '', returns_fee_value: '',
   cancel_allowed: true, cancel_window: 'PT2H', cancel_event: 'BEFORE_PACKING',
   replace_allowed: true, replace_window: 'P7D', replace_method: 'SELLER_PICKUP', replace_subject_avail: true,
   // payment & serviceability
@@ -1233,7 +1247,13 @@ function buildOfferAttrs(o) {
 
   if (hasPolicies) {
     attrs.policies = {
-      returns: { allowed: !!o.returns_allowed, ...(o.returns_allowed ? { window: o.returns_window, method: o.returns_method } : {}) },
+      returns: {
+        allowed: !!o.returns_allowed,
+        ...(o.returns_allowed ? { window: o.returns_window, method: o.returns_method } : {}),
+        // RetailOffer 2.1 policies.returns.restockingFee: { type: PERCENTAGE|FIXED, value }
+        ...(o.returns_allowed && o.returns_fee_type && o.returns_fee_value !== '' && o.returns_fee_value != null
+          ? { restockingFee: { type: o.returns_fee_type, value: Number(o.returns_fee_value) } } : {}),
+      },
       cancellation: { allowed: !!o.cancel_allowed, ...(o.cancel_allowed ? { window: o.cancel_window, cutoffEvent: o.cancel_event } : {}) },
       replacement: { allowed: !!o.replace_allowed, ...(o.replace_allowed ? { window: o.replace_window, method: o.replace_method, subjectToAvailability: !!o.replace_subject_avail } : {}) },
     }
@@ -1262,6 +1282,7 @@ function PublishPage({ onNav }) {
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(false)
   const [autoFillIdx, setAutoFillIdx] = useState(0)
+  const ownProvider = useOwnProvider()
   // track which resource/offer "advanced" sections are expanded
   const [resOpen, setResOpen] = useState({})
   const [offOpen, setOffOpen] = useState({})
@@ -1275,6 +1296,7 @@ function PublishPage({ onNav }) {
 
     setForm({
       ...seed,
+      ...(ownProvider ? { provider_id: ownProvider.id, provider_name: ownProvider.name } : {}),
       catalog_id: uid(seed.catalog_id),
       resources: seed.resources.map(r => ({ ...r, id: uid(r.id) })),
       offers: seed.offers.map(o => ({
@@ -1636,12 +1658,12 @@ function PublishPage({ onNav }) {
                     </div>
                     <div><label className={labelCls}>Price</label>
                       <div className="relative">
-                        <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500 text-sm">₹</span>
-                        <input className={inputCls + ' pl-7'} value={o.price} onChange={e => setOfferField(i, 'price', e.target.value)} placeholder="799" />
+                        <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500 text-sm">Rp</span>
+                        <input className={inputCls + ' pl-9'} value={o.price} onChange={e => setOfferField(i, 'price', e.target.value)} placeholder="799" />
                       </div>
                     </div>
                     <div><label className={labelCls}>Currency</label>
-                      <input className={inputCls} value={o.currency} onChange={e => setOfferField(i, 'currency', e.target.value)} placeholder="INR" />
+                      <input className={inputCls} value={o.currency} onChange={e => setOfferField(i, 'currency', e.target.value)} placeholder="IDR" />
                     </div>
                     <div><label className={labelCls}>Validity Start</label>
                       <input type="datetime-local" className={inputCls} value={o.validity_start} onChange={e => setOfferField(i, 'validity_start', e.target.value)} />
@@ -1675,8 +1697,19 @@ function PublishPage({ onNav }) {
                             </div>
                             <div><label className={labelCls}>Method</label>
                               <select className={inputCls} value={o.returns_method} onChange={e => setOfferField(i, 'returns_method', e.target.value)}>
-                                {['SELLER_PICKUP', 'BUYER_DROP', 'REVERSE_PICKUP'].map(m => <option key={m}>{m}</option>)}
+                                {RETURN_METHODS.map(m => <option key={m}>{m}</option>)}
                               </select>
+                            </div>
+                            <div><label className={labelCls}>Restocking Fee</label>
+                              <select className={inputCls} value={o.returns_fee_type || ''} onChange={e => setOfferField(i, 'returns_fee_type', e.target.value)}>
+                                <option value="">None</option>
+                                {FEE_TYPES.map(t => <option key={t}>{t}</option>)}
+                              </select>
+                            </div>
+                            <div><label className={labelCls}>{o.returns_fee_type === 'PERCENTAGE' ? 'Fee (%)' : 'Fee Amount'}</label>
+                              <input type="number" min="0" step="any" className={inputCls} disabled={!o.returns_fee_type}
+                                value={o.returns_fee_value ?? ''} onChange={e => setOfferField(i, 'returns_fee_value', e.target.value)}
+                                placeholder={o.returns_fee_type === 'PERCENTAGE' ? '10' : '5000'} />
                             </div>
                           </div>
                         )}
@@ -1719,7 +1752,7 @@ function PublishPage({ onNav }) {
                             </div>
                             <div><label className={labelCls}>Method</label>
                               <select className={inputCls} value={o.replace_method} onChange={e => setOfferField(i, 'replace_method', e.target.value)}>
-                                {['SELLER_PICKUP', 'BUYER_DROP', 'REVERSE_PICKUP'].map(m => <option key={m}>{m}</option>)}
+                                {RETURN_METHODS.map(m => <option key={m}>{m}</option>)}
                               </select>
                             </div>
                             <div className="col-span-2">
@@ -1857,7 +1890,7 @@ function PublishPage({ onNav }) {
                           {o.timing_days.length < 7 && <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.06] text-slate-400">{o.timing_days.join(', ')}</span>}
                         </div>
                       </div>
-                      {o.price && <span className="shrink-0 text-xs font-bold" style={{ color: '#00b8e6' }}>₹{o.price} {o.currency}</span>}
+                      {o.price && <span className="shrink-0 text-xs font-bold" style={{ color: '#00b8e6' }}>{o.price} {o.currency}</span>}
                     </div>
                   ))}
                 </div>
@@ -1908,6 +1941,12 @@ function MessagesPage() {
   const [filter, setFilter] = useState('')
   const [dirFilter, setDirFilter] = useState('ALL')
   const { data, loading, error, reload } = useApi(`/messages?limit=${limit}`, [limit])
+  const [expanded, setExpanded] = useState(() => new Set())
+  const toggle = key => setExpanded(prev => {
+    const next = new Set(prev)
+    next.has(key) ? next.delete(key) : next.add(key)
+    return next
+  })
 
   const items = (data?.items ?? []).filter(m => {
     const matchText = !filter || String(m.action).includes(filter.toLowerCase()) || String(m.transaction_id).includes(filter)
@@ -1932,17 +1971,17 @@ function MessagesPage() {
 
       {/* Quick stats */}
       {!loading && items.length > 0 && (
-        <div className="grid grid-cols-3 gap-3 mb-5">
-          <Card className="p-4 flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center text-sm" style={{ background: 'rgba(0,184,230,0.15)' }}>📨</div>
+        <div className="grid grid-cols-3 gap-2 sm:gap-3 mb-5">
+          <Card className="p-3 sm:p-4 flex items-center gap-3">
+            <div className="hidden sm:flex w-8 h-8 rounded-lg items-center justify-center text-sm" style={{ background: 'rgba(0,184,230,0.15)' }}>📨</div>
             <div><p className="text-[11px] text-slate-500">Total</p><p className="text-lg font-bold text-white">{items.length}</p></div>
           </Card>
-          <Card className="p-4 flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center text-sm" style={{ background: 'rgba(16,185,129,0.15)' }}>✅</div>
+          <Card className="p-3 sm:p-4 flex items-center gap-3">
+            <div className="hidden sm:flex w-8 h-8 rounded-lg items-center justify-center text-sm" style={{ background: 'rgba(16,185,129,0.15)' }}>✅</div>
             <div><p className="text-[11px] text-slate-500">ACK</p><p className="text-lg font-bold text-emerald-400">{ackCount}</p></div>
           </Card>
-          <Card className="p-4 flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center text-sm" style={{ background: 'rgba(239,68,68,0.15)' }}>❌</div>
+          <Card className="p-3 sm:p-4 flex items-center gap-3">
+            <div className="hidden sm:flex w-8 h-8 rounded-lg items-center justify-center text-sm" style={{ background: 'rgba(239,68,68,0.15)' }}>❌</div>
             <div><p className="text-[11px] text-slate-500">NACK</p><p className="text-lg font-bold text-red-400">{nackCount}</p></div>
           </Card>
         </div>
@@ -1971,55 +2010,236 @@ function MessagesPage() {
           className="bg-slate-900 border border-white/[0.08] rounded-xl px-3 py-2 text-sm text-slate-300 focus:outline-none focus:border-cyan-500/40 cursor-pointer">
           {[25, 50, 100, 200].map(n => <option key={n} value={n}>{n} rows</option>)}
         </select>
+        {items.length > 0 && (
+          <button onClick={() => setExpanded(expanded.size ? new Set() : new Set(items.map((m, i) => m.id || i)))}
+            className="px-3 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white border border-white/[0.08] transition-colors">
+            {expanded.size ? 'Collapse all' : 'Expand all'}
+          </button>
+        )}
       </div>
 
       <Card>
-        {loading ? <LoadingSpinner label="Loading messages…" /> : (
-          <div className="overflow-x-auto"><table className="w-full text-sm min-w-[500px]">
-            <thead>
-              <tr className="text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-white/[0.06]">
-                <th className="text-left px-5 py-3">Action</th>
-                <th className="text-left px-5 py-3">Direction</th>
-                <th className="text-left px-5 py-3">Status</th>
-                <th className="text-left px-5 py-3">Txn ID</th>
-                <th className="text-left px-5 py-3">URL</th>
-                <th className="text-left px-5 py-3">Time</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-white/[0.04]">
-              {items.map((m, idx) => {
-                const meta = ACTION_META[m.action] || { color: '#94a3b8', bg: 'rgba(148,163,184,0.08)', label: m.action?.toUpperCase() }
-                const ack = m.ack_status?.ack_status || m.ack_status
-                return (
-                  <tr key={idx} className="hover:bg-white/[0.025] transition-colors">
-                    <td className="px-5 py-2.5">
-                      <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-[11px] font-bold font-mono"
-                        style={{ background: meta.bg, color: meta.color }}>
-                        {meta.label}
-                      </span>
-                    </td>
-                    <td className="px-5 py-2.5">
-                      <span className={`text-xs font-medium ${m.direction === 'INBOUND' ? 'text-cyan-400' : 'text-violet-400'}`}>
-                        {m.direction === 'INBOUND' ? '↓ IN' : '↑ OUT'}
-                      </span>
-                    </td>
-                    <td className="px-5 py-2.5"><StatusBadge status={ack} /></td>
-                    <td className="px-5 py-2.5 font-mono text-[11px] text-slate-500">
-                      {m.transaction_id ? String(m.transaction_id).slice(0, 8) + '…' : '—'}
-                    </td>
-                    <td className="px-5 py-2.5 text-xs text-slate-500 max-w-[180px] truncate" title={m.url}>{m.url || '—'}</td>
-                    <td className="px-5 py-2.5 text-xs text-slate-500">{fmtDate(m.created_at?.Time || m.created_at)}</td>
+        {loading ? <LoadingSpinner label="Loading messages…" /> : !items.length ? (
+          <div className="px-5 py-12 text-center text-sm text-slate-500">No messages found</div>
+        ) : (
+          <>
+            {/* Desktop / tablet: table with expandable payload rows */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-white/[0.06]">
+                    <th className="w-10 px-3 py-3" />
+                    <th className="text-left px-4 py-3">Action</th>
+                    <th className="text-left px-4 py-3">Direction</th>
+                    <th className="text-left px-4 py-3">Status</th>
+                    <th className="text-left px-4 py-3">Txn ID</th>
+                    <th className="text-left px-4 py-3 hidden lg:table-cell">URL</th>
+                    <th className="text-left px-4 py-3">Time</th>
+                    <th className="text-left px-4 py-3">Payload</th>
                   </tr>
+                </thead>
+                <tbody>
+                  {items.map((m, idx) => {
+                    const key = m.id || idx
+                    const open = expanded.has(key)
+                    return (
+                      <Fragment key={key}>
+                        <tr onClick={() => toggle(key)}
+                          className={`cursor-pointer border-t border-white/[0.04] transition-colors ${open ? 'bg-white/[0.035]' : 'hover:bg-white/[0.025]'}`}>
+                          <td className="px-3 py-2.5 text-slate-500">
+                            <ChevronDown size={14} className={`transition-transform ${open ? 'rotate-180 text-cyan-400' : ''}`} />
+                          </td>
+                          <td className="px-4 py-2.5"><ActionBadge action={m.action} /></td>
+                          <td className="px-4 py-2.5"><DirectionLabel direction={m.direction} /></td>
+                          <td className="px-4 py-2.5"><StatusBadge status={ackOf(m)} /></td>
+                          <td className="px-4 py-2.5 font-mono text-[11px] text-slate-500">{shortTxn(m.transaction_id)}</td>
+                          <td className="px-4 py-2.5 text-xs text-slate-500 max-w-[180px] truncate hidden lg:table-cell" title={m.url}>{m.url || '—'}</td>
+                          <td className="px-4 py-2.5 text-xs text-slate-500 whitespace-nowrap">{fmtDate(m.created_at?.Time || m.created_at)}</td>
+                          <td className="px-4 py-2.5 max-w-[260px]">
+                            <span className="block truncate font-mono text-[11px] text-slate-500" title="Click to expand">
+                              {payloadPreview(m.request_payload)}
+                            </span>
+                          </td>
+                        </tr>
+                        {open && (
+                          <tr className="bg-white/[0.035]">
+                            <td colSpan={8} className="px-4 pb-4 pt-1"><PayloadPanel message={m} /></td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile: stacked cards */}
+            <div className="md:hidden divide-y divide-white/[0.05]">
+              {items.map((m, idx) => {
+                const key = m.id || idx
+                const open = expanded.has(key)
+                return (
+                  <div key={key} className={open ? 'bg-white/[0.035]' : ''}>
+                    <button onClick={() => toggle(key)} className="w-full text-left px-4 py-3 flex items-start gap-3">
+                      <div className="flex-1 min-w-0 space-y-1.5">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <ActionBadge action={m.action} />
+                          <DirectionLabel direction={m.direction} />
+                          <StatusBadge status={ackOf(m)} />
+                        </div>
+                        <div className="flex items-center justify-between gap-2 text-[11px] text-slate-500">
+                          <span className="font-mono">{shortTxn(m.transaction_id)}</span>
+                          <span className="whitespace-nowrap">{fmtDate(m.created_at?.Time || m.created_at)}</span>
+                        </div>
+                      </div>
+                      <ChevronDown size={16} className={`mt-1 shrink-0 text-slate-500 transition-transform ${open ? 'rotate-180 text-cyan-400' : ''}`} />
+                    </button>
+                    {open && <div className="px-4 pb-4"><PayloadPanel message={m} /></div>}
+                  </div>
                 )
               })}
-              {!items.length && (
-                <tr><td colSpan={6} className="px-5 py-12 text-center text-slate-500">No messages found</td></tr>
-              )}
-            </tbody>
-          </table>
-          </div>
+            </div>
+          </>
         )}
       </Card>
+    </div>
+  )
+}
+
+const ackOf = m => m.ack_status?.ack_status || m.ack_status
+const shortTxn = id => (id ? String(id).slice(0, 8) + '…' : '—')
+
+// One-line preview of a payload for the collapsed row.
+const payloadPreview = p => {
+  if (p == null) return '—'
+  const s = typeof p === 'string' ? p : JSON.stringify(p)
+  return s.length > 120 ? s.slice(0, 120) + '…' : s
+}
+
+function ActionBadge({ action }) {
+  const meta = ACTION_META[action] || { color: '#94a3b8', bg: 'rgba(148,163,184,0.08)', label: action?.toUpperCase() }
+  return (
+    <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-[11px] font-bold font-mono"
+      style={{ background: meta.bg, color: meta.color }}>
+      {meta.label}
+    </span>
+  )
+}
+
+function DirectionLabel({ direction }) {
+  return (
+    <span className={`text-xs font-medium whitespace-nowrap ${direction === 'INBOUND' ? 'text-cyan-400' : 'text-violet-400'}`}>
+      {direction === 'INBOUND' ? '↓ IN' : '↑ OUT'}
+    </span>
+  )
+}
+
+// Collapsible JSON tree: click the ▸/▾ toggle (or the collapsed summary) on
+// any object or array to fold it. Everything starts expanded.
+function JsonNode({ name, value, depth, last }) {
+  const [open, setOpen] = useState(true)
+  const isArr = Array.isArray(value)
+  const isObj = value !== null && typeof value === 'object'
+  const comma = last ? '' : ','
+  const label = name !== undefined && (
+    <><span className="text-sky-300">"{name}"</span><span className="text-slate-500">: </span></>
+  )
+  const indent = { paddingLeft: depth ? 14 : 0 }
+
+  if (!isObj) {
+    const color = typeof value === 'string' ? 'text-emerald-300'
+      : typeof value === 'number' ? 'text-amber-300'
+      : typeof value === 'boolean' ? 'text-violet-300' : 'text-slate-500'
+    return <div style={indent}>{label}<span className={color}>{JSON.stringify(value)}</span><span className="text-slate-500">{comma}</span></div>
+  }
+
+  const entries = isArr ? value.map((v, i) => [i, v]) : Object.entries(value)
+  const [openCh, closeCh] = isArr ? ['[', ']'] : ['{', '}']
+  const toggle = e => { e.stopPropagation(); setOpen(o => !o) }
+  const toggler = entries.length > 0 && (
+    <button onClick={toggle} className="inline-block w-3 -ml-3 text-slate-500 hover:text-cyan-400" aria-label={open ? 'Collapse' : 'Expand'}>
+      {open ? '▾' : '▸'}
+    </button>
+  )
+
+  if (!entries.length) {
+    return <div style={indent}>{label}<span className="text-slate-400">{openCh}{closeCh}</span><span className="text-slate-500">{comma}</span></div>
+  }
+
+  if (!open) {
+    return (
+      <div style={indent}>
+        {toggler}{label}
+        <button onClick={toggle} className="text-slate-400 hover:text-cyan-400">
+          {openCh}<span className="px-1 text-slate-500 italic">{entries.length} {isArr ? 'items' : 'keys'}</span>{closeCh}
+        </button>
+        <span className="text-slate-500">{comma}</span>
+      </div>
+    )
+  }
+
+  return (
+    <div style={indent}>
+      <div>{toggler}{label}<span className="text-slate-400">{openCh}</span></div>
+      {entries.map(([k, v], i) => (
+        <JsonNode key={k} name={isArr ? undefined : k} value={v} depth={depth + 1} last={i === entries.length - 1} />
+      ))}
+      <div><span className="text-slate-400">{closeCh}</span><span className="text-slate-500">{comma}</span></div>
+    </div>
+  )
+}
+
+// Expanded view of a message: request / response payload tabs, error details,
+// pretty-printed JSON with copy-to-clipboard.
+function PayloadPanel({ message: m }) {
+  const tabs = [
+    { id: 'request', label: 'Request', data: m.request_payload },
+    ...(m.response_payload != null ? [{ id: 'response', label: 'Response', data: m.response_payload }] : []),
+  ]
+  const [tab, setTab] = useState('request')
+  const [copied, setCopied] = useState(false)
+  const current = tabs.find(t => t.id === tab) || tabs[0]
+  const text = current.data == null ? '' : JSON.stringify(current.data, null, 2)
+
+  const copy = async e => {
+    e.stopPropagation()
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch { }
+  }
+
+  return (
+    <div className="rounded-xl border border-white/[0.07] bg-slate-950/60 overflow-hidden" onClick={e => e.stopPropagation()}>
+      <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-white/[0.06] flex-wrap">
+        <div className="flex gap-1">
+          {tabs.map(t => (
+            <button key={t.id} onClick={() => setTab(t.id)}
+              className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors ${current.id === t.id ? 'text-white bg-white/[0.08]' : 'text-slate-400 hover:text-slate-200'}`}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-3 text-[11px] text-slate-500 min-w-0">
+          {m.message_id && <span className="font-mono truncate hidden sm:inline" title="Message ID">msg {String(m.message_id).slice(0, 8)}…</span>}
+          {text && (
+            <button onClick={copy} className="flex items-center gap-1 text-slate-400 hover:text-white transition-colors">
+              {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />} {copied ? 'Copied' : 'Copy'}
+            </button>
+          )}
+        </div>
+      </div>
+      {m.error_message && (
+        <div className="px-3 py-2 text-xs text-red-300 bg-red-500/10 border-b border-red-500/20 break-words">{m.error_message}</div>
+      )}
+      {text ? (
+        <div className="max-h-[28rem] overflow-auto p-3 text-[11px] leading-relaxed font-mono text-slate-300 whitespace-pre">
+          <JsonNode value={current.data} depth={0} last />
+        </div>
+      ) : (
+        <div className="p-3 text-xs text-slate-500">No payload recorded</div>
+      )}
     </div>
   )
 }
@@ -2346,6 +2566,7 @@ function CreateCatalogPage({ onNav }) {
   })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+  const ownProvider = useOwnProvider()
 
   const labelCls = 'block text-[11px] uppercase tracking-widest text-slate-500 font-semibold mb-1'
   const inputCls = 'w-full px-3 py-2 rounded-lg text-sm text-white placeholder-slate-600 border border-white/[0.08] bg-slate-900 focus:outline-none focus:border-blue-500/50 transition-colors'
@@ -2359,7 +2580,11 @@ function CreateCatalogPage({ onNav }) {
     const now = new Date()
     const start = now.toISOString().slice(0, 16)
     const end = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 16)
-    setForm({ ...seed, id: `${seed.id}-${suffix}`, validity_start: start, validity_end: end })
+    setForm({
+      ...seed,
+      ...(ownProvider ? { provider_id: ownProvider.id, provider_name: ownProvider.name } : {}),
+      id: `${seed.id}-${suffix}`, validity_start: start, validity_end: end,
+    })
   }
 
   const handleSubmit = async (e) => {
@@ -2661,7 +2886,7 @@ const DAYS_OF_WEEK = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN']
 const PRODUCT_AUTOFILL_POOL = [
   {
     res: { id: 'item-keripik-singkong', name: 'Keripik Singkong Balado (Spicy Cassava Chips)', short_desc: 'Crispy cassava chips with balado seasoning', long_desc: 'Keripik singkong renyah dengan bumbu balado khas Minang yang pedas manis. (Crispy cassava chips with authentic Minang sweet and spicy balado seasoning.)', product_highlights: '- Terbuat dari singkong segar pilihan (Made from fresh selected cassava)\n- Bumbu balado asli minang (Authentic Minang balado seasoning)\n- Tanpa pengawet buatan (No artificial preservatives)', specifications: '- Berat Bersih (Net Weight): 150g\n- Kemasan (Packaging): Plastik Ziplock (Ziplock Plastic)\n- Bahan Utama (Main Ingredient): Singkong, Cabai (Cassava, Chili)', stock_quantity: '50', media_url: 'https://images.unsplash.com/photo-1621939514649-280e2ee25f60?w=400', brand: 'Chitato', origin_country: 'ID', weight_value: '150', weight_unit: 'G', color: 'Golden', material: 'Cassava' },
-    off: { id: 'offer-keripik-singkong', name: 'Keripik Singkong Balado', price: '25000', currency: 'IDR', cod_available: true, returns_allowed: true, returns_window: 'P7D', returns_method: 'SELLER_PICKUP', cancel_allowed: true, cancel_window: 'PT2H', cancel_event: 'BEFORE_PACKING', replace_allowed: false, max_distance: '20', timing_days: ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'], timing_start: '09:00', timing_end: '21:00', offer_context: 'https://schema.ion.id/release1/schema/extension/trade/TradeOffer/v1/context.jsonld' }
+    off: { id: 'offer-keripik-singkong', name: 'Keripik Singkong Balado', price: '25000', currency: 'IDR', cod_available: true, returns_allowed: true, returns_window: 'P7D', returns_method: 'SELLER_PICKUP', returns_fee_type: 'PERCENTAGE', returns_fee_value: '10', cancel_allowed: true, cancel_window: 'PT2H', cancel_event: 'BEFORE_PACKING', replace_allowed: false, max_distance: '20', timing_days: ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'], timing_start: '09:00', timing_end: '21:00', offer_context: 'https://schema.ion.id/release1/schema/extension/trade/TradeOffer/v1/context.jsonld' }
   },
   {
     res: { id: 'item-bolu-pisang', name: 'Bolu Pisang Cokelat (Chocolate Banana Cake)', short_desc: 'Soft banana cake with chocolate chips', long_desc: 'Bolu pisang panggang yang lembut dipadukan dengan taburan cokelat lezat di atasnya. (Soft baked banana cake topped with delicious chocolate chips.)', product_highlights: '- Dibuat dengan pisang ambon segar (Made with fresh Ambon bananas)\n- Tekstur lembut dan lumer di mulut (Soft texture that melts in the mouth)\n- Taburan cokelat premium (Premium chocolate chips)', specifications: '- Berat Bersih (Net Weight): 400g\n- Kemasan (Packaging): Kardus Makanan (Food Box)\n- Bahan Utama (Main Ingredient): Tepung, Pisang, Cokelat (Flour, Banana, Chocolate)', stock_quantity: '30', media_url: 'https://images.unsplash.com/photo-1578985545062-69928b1d9587?w=400', brand: 'HomeMade', origin_country: 'ID', weight_value: '400', weight_unit: 'G', color: 'Brown', material: 'Flour' },
@@ -2724,7 +2949,7 @@ function OfferForm({ off, oSet, offOpen, setOffOpen, catalogId, showResourcePick
         </div>
         <div><label className={labelCls}>Currency</label>
           <select className={inputCls} value={off.currency} onChange={e => oSet('currency', e.target.value)}>
-            {['INR', 'USD', 'EUR', 'SGD', 'MYR', 'IDR'].map(c => <option key={c} className="bg-slate-900">{c}</option>)}
+            {['IDR', 'INR', 'USD', 'EUR', 'SGD', 'MYR'].map(c => <option key={c} className="bg-slate-900">{c}</option>)}
           </select>
         </div>
         <div><label className={labelCls}>Validity Start</label>
@@ -2763,8 +2988,19 @@ function OfferForm({ off, oSet, offOpen, setOffOpen, catalogId, showResourcePick
                   </div>
                   <div><label className={labelCls}>Method</label>
                     <select className={inputCls} value={off.returns_method} onChange={e => oSet('returns_method', e.target.value)}>
-                      {['SELLER_PICKUP', 'BUYER_RETURN', 'DROP_AT_STORE'].map(m => <option key={m} className="bg-slate-900">{m}</option>)}
+                      {RETURN_METHODS.map(m => <option key={m} className="bg-slate-900">{m}</option>)}
                     </select>
+                  </div>
+                  <div><label className={labelCls}>Restocking Fee</label>
+                    <select className={inputCls} value={off.returns_fee_type || ''} onChange={e => oSet('returns_fee_type', e.target.value)}>
+                      <option value="" className="bg-slate-900">None</option>
+                      {FEE_TYPES.map(t => <option key={t} className="bg-slate-900">{t}</option>)}
+                    </select>
+                  </div>
+                  <div><label className={labelCls}>{off.returns_fee_type === 'PERCENTAGE' ? 'Fee (%)' : 'Fee Amount'}</label>
+                    <input type="number" min="0" step="any" className={inputCls} disabled={!off.returns_fee_type}
+                      value={off.returns_fee_value ?? ''} onChange={e => oSet('returns_fee_value', e.target.value)}
+                      placeholder={off.returns_fee_type === 'PERCENTAGE' ? '10' : '5000'} />
                   </div>
                 </div>
               )}
@@ -2868,8 +3104,7 @@ function AddProductPage({ onNav, catalogId }) {
     const resourceAttrs = buildResourceAttrs(res)
     const mediaFile = res.media_url ? [{ uri: res.media_url, mimeType: 'image/jpeg' }] : []
 
-    // We use /products but with a minimal auto-generated placeholder offer so backend accepts it
-    const offerId = `offer-${res.id}`
+    // Resource only -- the real offer is created on the next (add_offer) page.
     try {
       await apiFetch(`/catalogs/${catalogId}/products`, {
         method: 'POST',
@@ -2879,11 +3114,6 @@ function AddProductPage({ onNav, catalogId }) {
             descriptor: { name: res.name, shortDesc: res.short_desc, longDesc: res.long_desc, mediaFile },
             stockQuantity: res.stock_quantity ? Number(res.stock_quantity) : 0,
             ...(resourceAttrs ? { resourceAttributes: resourceAttrs } : {}),
-          },
-          offer: {
-            id: offerId,
-            descriptor: { name: res.name },
-            resourceIds: [res.id],
           },
         }),
       })
