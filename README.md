@@ -29,6 +29,9 @@ For background on ION itself, see
   asynchronously as the seller's app responds.
 - **View order history and any past order's detail** — every order shown is
   scoped to your own logged-in identity.
+- **Request a change to a confirmed order** — edit the delivery and contact
+  details; the change is sent to the seller for review and only takes effect
+  once they approve it. See [UPDATE_FLOW.md](UPDATE_FLOW.md).
 - **Cancel an order** — a cancellation request is sent to the seller the
   same way the original order was.
 - **Rate a completed order** — feedback is recorded against that
@@ -44,6 +47,9 @@ For background on ION itself, see
   selling and at what price.
 - **Orders** — manage incoming contracts and respond to buyer actions,
   scoped to your own seller profile.
+- **Change requests** — review buyer-requested changes to confirmed orders
+  and approve or reject each one; nothing is applied to an order without
+  your decision. See [UPDATE_FLOW.md](UPDATE_FLOW.md).
 
 See [TECHNICAL_ARTIFACT.md](TECHNICAL_ARTIFACT.md) for exactly how a request
 moves through the system for each of these.
@@ -66,3 +72,7 @@ moves through the system for each of these.
   end-to-end system) → [INFRA_SETUP.md](INFRA_SETUP.md#1-local-development-docker-compose)
 - **Deploy to your own fresh GCP project** →
   [terraform/README.md](terraform/README.md#deploy-to-your-fresh-gcp-project)
+- **The update flow** (how a buyer changes a confirmed order, how the seller
+  approves or rejects it, and why the buyer's approved/declined readout has
+  to be inferred rather than read off the wire) →
+  [UPDATE_FLOW.md](UPDATE_FLOW.md)
