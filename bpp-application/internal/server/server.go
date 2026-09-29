@@ -1,7 +1,9 @@
 package server
 
 import (
+	"context"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -18,6 +20,7 @@ import (
 	"github.com/ion/winroom/bpp/internal/dashboardsvc"
 	"github.com/ion/winroom/bpp/internal/initsvc"
 	"github.com/ion/winroom/bpp/internal/ratesvc"
+	"github.com/ion/winroom/bpp/internal/reconsvc"
 	"github.com/ion/winroom/bpp/internal/selectsvc"
 	"github.com/ion/winroom/bpp/internal/statussvc"
 	"github.com/ion/winroom/bpp/internal/supportsvc"
@@ -65,6 +68,9 @@ func RegisterRoutes(svc *service.Service, cfg *config.Config, verifier *auth.Ver
 	registerTransactionRoutes(svc, webhook, pool, cfg)
 	registerFulfillmentRoutes(svc, webhook, pool, cfg)
 	registerPostFulfillmentRoutes(svc, webhook, pool, cfg)
+	// /webhook/on_reconcile — the BAP's reconciliation outcome (Beckn extension,
+	// docs/specs/reconcile.yaml); the BPP sends /reconcile from the dashboard.
+	webhook.POST("/on_reconcile", reconsvc.NewHandler(pool, cfg, svc.LogHarbour).HandleOnReconcile)
 	registerBecknCatalogRoutes(svc, webhook)
 }
 
@@ -154,6 +160,8 @@ func registerProviderCatalogRoutes(svc *service.Service, g *gin.RouterGroup, poo
 // handler's use of auth.ProviderIDFromContext.
 func registerDashboardRoutes(v1 *gin.RouterGroup, pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.Logger, verifier *auth.Verifier) {
 	h := dashboardsvc.NewHandler(pool, cfg, lh)
+	// Shipped → Delivered after a minute, swept from the database (survives restarts).
+	go h.RunAutoDelivery(context.Background(), 10*time.Second)
 
 	dash := v1.Group("")
 	dash.Use(auth.RequireSeller(verifier, pool))
@@ -182,7 +190,18 @@ func registerDashboardRoutes(v1 *gin.RouterGroup, pool *pgxpool.Pool, cfg *confi
 	dash.GET("/catalogs/:id/resources", h.HandleGetCatalogResources)
 	dash.POST("/catalogs/:id/products", h.HandleAddProduct)
 	dash.POST("/catalogs/:id/offers", h.HandleAddOffer)
+	// Edit one product / offer of a catalog before (re)publishing.
+	dash.GET("/catalogs/:id/resources/:rid", h.HandleGetResource)
+	dash.PUT("/catalogs/:id/resources/:rid", h.HandleUpdateResource)
+	dash.GET("/catalogs/:id/offers/:oid", h.HandleGetOffer)
+	dash.PUT("/catalogs/:id/offers/:oid", h.HandleUpdateOffer)
 	dash.POST("/catalogs/:id/publish", h.HandlePublishCatalog)
+
+	// Settlement reconciliation with BAPs (sent manually for now; an
+	// end-of-day job will call the same send).
+	rh := reconsvc.NewHandler(pool, cfg, lh)
+	dash.GET("/reconciliation", rh.HandleOverview)
+	dash.POST("/reconciliation/send", rh.HandleSend)
 }
 
 // ---------------------------------------------------------------------------

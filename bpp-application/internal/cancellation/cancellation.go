@@ -281,6 +281,8 @@ func Apply(contract map[string]any, items []Item, req Request, now time.Time) (*
 				"refund": map[string]any{
 					"amount": res.Refund, "method": method,
 					"timelineDays": refundTimelineDays, "status": "INITIATED",
+					// Who pays it (see docs/specs/reconcile.yaml, RefundSource).
+					"source": RefundSource(payment),
 				},
 			},
 		}
@@ -761,6 +763,18 @@ func currentPrice(considerations []any) map[string]any {
 		}
 	}
 	return nil
+}
+
+// RefundSource is who pays a refund against payment: the payment gateway,
+// from the funds it still holds, until that payment has been released to the
+// provider by an agreed reconciliation (reconciliationStatus AGREED or
+// ADJUSTED); after that the provider pays it from its own account.
+func RefundSource(payment map[string]any) string {
+	switch str(asMap(payment["settlementAttributes"])["reconciliationStatus"]) {
+	case "AGREED", "ADJUSTED":
+		return "PROVIDER"
+	}
+	return "PAYMENT_GATEWAY"
 }
 
 // paymentSettlement is the first settlement that is not itself a refund.

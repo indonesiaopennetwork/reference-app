@@ -1168,6 +1168,7 @@ const ACTION_LABELS = {
   on_status: { icon: '📊', label: 'Status Update', color: 'text-slate-400' },
   update: { icon: '✏️', label: 'Update Requested', color: 'text-sky-400' },
   on_update: { icon: '🔄', label: 'Order Updated', color: 'text-sky-400' },
+  reconcile: { icon: '🏦', label: 'Seller Settlement', color: 'text-emerald-400' },
 };
 
 // Items of a confirmed order with per-item cancellation: pick a quantity and

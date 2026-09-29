@@ -418,3 +418,38 @@ func TestParseISODuration(t *testing.T) {
 		t.Error("expected an error for a non-ISO duration")
 	}
 }
+
+func TestRefundSource(t *testing.T) {
+	refundSource := func(res *Result) string {
+		return str(asMap(asMap(res.RefundSettlement["settlementAttributes"])["refund"])["source"])
+	}
+
+	// Not reconciled yet: the gateway still holds the funds and refunds them.
+	res, err := Apply(load(t), []Item{{CommitmentID: "commitment-cake", Quantity: 1}}, reason, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := refundSource(res); got != "PAYMENT_GATEWAY" {
+		t.Errorf("unreconciled: source = %s, want PAYMENT_GATEWAY", got)
+	}
+
+	// Payment released by an agreed reconciliation: the provider refunds.
+	c, perf := delivered(t)
+	pay := asMap(asMap(slice(c["settlements"])[0])["settlementAttributes"])
+	pay["reconciliationId"], pay["reconciliationStatus"] = "recon-2026-09-30", "AGREED"
+	now := time.Now()
+	res, err = Apply(c, []Item{{CommitmentID: "commitment-cake", Quantity: 1}},
+		Request{Return: true, DeliveredAt: now.Add(-time.Hour), ReturnPerformance: perf}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := refundSource(res); got != "PROVIDER" {
+		t.Errorf("reconciled: source = %s, want PROVIDER", got)
+	}
+
+	// Still PENDING in a reconciliation: not released yet.
+	pay["reconciliationStatus"] = "PENDING"
+	if got := RefundSource(asMap(slice(c["settlements"])[0])); got != "PAYMENT_GATEWAY" {
+		t.Errorf("pending reconciliation: source = %s, want PAYMENT_GATEWAY", got)
+	}
+}
