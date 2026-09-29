@@ -116,6 +116,33 @@ if [ -z "${CLIENT_ID:-}" ] || [ "$CLIENT_ID" = "null" ]; then
   exit 1
 fi
 
+# SMTP: configured here (not via ZITADEL_DEFAULTINSTANCE_SMTPCONFIGURATION_*
+# in docker-compose.yml) because a config seeded that way -- or one whose
+# password was set afterwards via PUT .../password -- fails every send with
+# CRYPT-mNsQwe / "535 Authentication failed". Only a config created in one
+# call with its password works, so any existing one is replaced.
+env_val() { grep "^$1=" .env | head -n1 | cut -d= -f2-; }
+SMTP_HOST="$(env_val ZITADEL_SMTP_HOST)"
+if [ -n "$SMTP_HOST" ]; then
+  echo "Configuring SMTP (${SMTP_HOST})..."
+  for OLD_ID in $(api /admin/v1/smtp/_search '{}' | jq -r '.result[]?.id'); do
+    api "/admin/v1/smtp/${OLD_ID}/_deactivate" '{}' >/dev/null 2>&1 || true
+    curl -sf -X DELETE "${BASE_URL}/admin/v1/smtp/${OLD_ID}" \
+      -H "Authorization: Bearer ${PAT}" >/dev/null
+  done
+  SMTP_BODY="$(jq -n \
+    --arg host "$SMTP_HOST" \
+    --arg user "$(env_val ZITADEL_SMTP_USER)" \
+    --arg password "$(env_val ZITADEL_SMTP_PASSWORD)" \
+    --arg from "$(env_val ZITADEL_SMTP_FROM)" \
+    --arg name "$(env_val ZITADEL_SMTP_FROM_NAME)" \
+    --arg tls "$(env_val ZITADEL_SMTP_TLS)" \
+    '{host: $host, user: $user, password: $password, senderAddress: $from, senderName: $name, tls: ($tls == "true")}')"
+  SMTP_ID="$(api /admin/v1/smtp "$SMTP_BODY" | jq -r '.id')"
+  api "/admin/v1/smtp/${SMTP_ID}/_activate" '{}' >/dev/null
+  echo "SMTP config ${SMTP_ID} created and activated."
+fi
+
 if grep -q '^ZITADEL_CLIENT_ID=' .env; then
   sed -i.bak "s|^ZITADEL_CLIENT_ID=.*|ZITADEL_CLIENT_ID=${CLIENT_ID}|" .env && rm -f .env.bak
 else

@@ -74,6 +74,31 @@ tasks:
         fi
 
   # ───────────────────────────────────────────────────────────────────────
+  # Local development — mirrors INFRA_SETUP.md §1b-1c. Requires a filled-in
+  # .env (copied from .env.example), plus envsubst, curl, and jq.
+  # ───────────────────────────────────────────────────────────────────────
+
+  local:up:
+    desc: >-
+      Bring up the full stack locally with Docker Compose: render the onix
+      configs from .env, start Postgres + Zitadel, run the Zitadel setup
+      script, then build and start everything else (the migrate-bap/
+      migrate-bpp compose jobs apply the DB schema). Safe to re-run.
+    preconditions:
+      - sh: test -f .env
+        msg: ".env not found -- copy .env.example to .env and fill in your keys first (INFRA_SETUP.md §1b)."
+    cmds:
+      - ./scripts/render-onix-config.sh
+      - docker compose up -d --wait postgres zitadel
+      - ./scripts/setup-zitadel.sh
+      - docker compose up -d --build
+
+  local:down:
+    desc: Stop and remove the local Docker Compose stack (volumes are kept).
+    cmds:
+      - docker compose down
+
+  # ───────────────────────────────────────────────────────────────────────
   # Fresh deploy — mirrors README.md "Deploy to your fresh GCP project"
   # steps 0-9. Run in order. Steps 0/2/4 aren't here (a one-time backend.tf
   # text edit, a tfvars file, and real secret key material — nothing to
