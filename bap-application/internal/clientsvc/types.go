@@ -53,6 +53,24 @@ type ClientStatusResponse struct {
 	Status        string          `json:"status"`
 	Contract      json.RawMessage `json:"contract,omitempty"` // Latest snapshot
 	UpdatedAt     time.Time       `json:"updated_at"`
+
+	// UpdateRequest carries the outcome of the buyer's most recent change
+	// request, when there is one. It rides along on the status poll so the
+	// checkout screen can tell the buyer what the seller decided.
+	//
+	// Without it the buyer only ever sees the transaction return to
+	// CONFIRMED, which is identical whether the seller approved or
+	// rejected -- on_update has no field for the decision, so it's
+	// reconstructed server-side (see internal/on_update_svc/classify.go).
+	UpdateRequest *ClientUpdateOutcome `json:"update_request,omitempty"`
+}
+
+// ClientUpdateOutcome is the buyer-facing view of one change request.
+type ClientUpdateOutcome struct {
+	// Outcome is PENDING / APPLIED / DECLINED / MODIFIED / ABANDONED.
+	Outcome   string     `json:"outcome"`
+	CreatedAt time.Time  `json:"created_at"`
+	DecidedAt *time.Time `json:"decided_at,omitempty"`
 }
 
 // BecknRequest is the base structure for outbound Beckn calls (select/init/confirm).
@@ -101,10 +119,10 @@ type ClientUpdateRequest struct {
 
 // RatingInput mirrors the Beckn ratingInput shape.
 type RatingInput struct {
-	ID                    string          `json:"id" binding:"required"`
-	RatingCategory        string          `json:"ratingCategory,omitempty"`
-	Descriptor            json.RawMessage `json:"descriptor,omitempty"`
-	Range                 json.RawMessage `json:"range" binding:"required"`
+	ID                     string          `json:"id" binding:"required"`
+	RatingCategory         string          `json:"ratingCategory,omitempty"`
+	Descriptor             json.RawMessage `json:"descriptor,omitempty"`
+	Range                  json.RawMessage `json:"range" binding:"required"`
 	FeedbackFormSubmission json.RawMessage `json:"feedbackFormSubmission,omitempty"`
 }
 

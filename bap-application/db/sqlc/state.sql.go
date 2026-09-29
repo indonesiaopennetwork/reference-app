@@ -219,6 +219,68 @@ func (q *Queries) ListTransactions(ctx context.Context, arg ListTransactionsPara
 	return items, nil
 }
 
+const markCancelSentIfConfirmed = `-- name: MarkCancelSentIfConfirmed :execrows
+UPDATE transactions
+SET status = 'CANCEL_SENT', updated_at = NOW()
+WHERE transaction_id = $1
+  AND status = 'CONFIRMED'
+`
+
+// Same compare-and-swap technique as MarkUpdateSentIfConfirmed, applied to
+// Cancel: only a CONFIRMED transaction can be cancelled, which as a side
+// effect also blocks cancelling one with an update currently in flight
+// (UPDATE_SENT) -- Cancel and Update share one mutual-exclusion window via
+// the same status column, rather than needing a separate lock per pair of
+// actions.
+func (q *Queries) MarkCancelSentIfConfirmed(ctx context.Context, transactionID uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, markCancelSentIfConfirmed, transactionID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const markUpdateReceivedIfPending = `-- name: MarkUpdateReceivedIfPending :execrows
+UPDATE transactions
+SET status = 'CONFIRMED', updated_at = NOW()
+WHERE transaction_id = $1
+  AND status = 'UPDATE_SENT'
+`
+
+// Atomically transitions UPDATE_SENT -> CONFIRMED on a received on_update.
+// 0 rows affected means this callback doesn't correspond to an update this
+// transaction is currently waiting on (a duplicate/replayed/stale
+// on_update, or an unsolicited one) -- the caller uses that to skip
+// overwriting the committed contract snapshot with it.
+func (q *Queries) MarkUpdateReceivedIfPending(ctx context.Context, transactionID uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, markUpdateReceivedIfPending, transactionID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const markUpdateSentIfConfirmed = `-- name: MarkUpdateSentIfConfirmed :execrows
+UPDATE transactions
+SET status = 'UPDATE_SENT', updated_at = NOW()
+WHERE transaction_id = $1
+  AND status = 'CONFIRMED'
+`
+
+// Atomically transitions CONFIRMED -> UPDATE_SENT. The WHERE status =
+// 'CONFIRMED' predicate doubles as a compare-and-swap: it returns 0 rows
+// affected (not an error) if the transaction is already mid-update
+// (UPDATE_SENT), terminal (CANCELLED/COMPLETE), or never confirmed at all --
+// giving Update() a single atomic check for both "invalid state" and
+// "another update already in flight" without a separate lock.
+func (q *Queries) MarkUpdateSentIfConfirmed(ctx context.Context, transactionID uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, markUpdateSentIfConfirmed, transactionID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const upsertContractSnapshot = `-- name: UpsertContractSnapshot :exec
 INSERT INTO contract_snapshots (transaction_id, action, contract_id, contract)
 VALUES ($1, $2, $3, $4)

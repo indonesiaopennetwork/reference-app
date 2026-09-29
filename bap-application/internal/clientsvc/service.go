@@ -18,6 +18,7 @@ import (
 
 	dbsqlc "github.com/ion/winroom/bap/db/sqlc"
 	"github.com/ion/winroom/bap/internal/config"
+	"github.com/ion/winroom/bap/internal/contractx"
 	"github.com/ion/winroom/bap/internal/discoverwait"
 	"github.com/ion/winroom/bap/internal/httpclient"
 )
@@ -45,10 +46,18 @@ type ClientService struct {
 
 func NewClientService(pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.Logger, registry *discoverwait.Registry) *ClientService {
 	return &ClientService{
-		pool:     pool,
-		cfg:      cfg,
-		lh:       lh,
-		client:   httpclient.New(30 * time.Second),
+		pool: pool,
+		cfg:  cfg,
+		lh:   lh,
+		// 60s, not 10s: onix validates every outbound action against the
+		// ION Extended Schemas, fetching a ~19-document $ref graph from
+		// schema.ion.id on a COLD cache. Measured cold cost for a full
+		// contract is ~9-22s; warm is single-digit milliseconds. A 10s
+		// budget failed the first call after any onix restart -- which
+		// looked like a broken endpoint rather than a slow one. onix
+		// caches for 24h, so this ceiling is only ever reached once.
+		// See UPDATE_FLOW.md and docker-compose.yml's schema notes.
+		client:   httpclient.New(60 * time.Second),
 		registry: registry,
 	}
 }
@@ -745,73 +754,66 @@ func (s *ClientService) RequestStatus(ctx context.Context, req *ClientRequestSta
 		return fmt.Errorf("no snapshot for txn %s: %w", txnID, err)
 	}
 
-	// Extract the full contract from the snapshot so the adapter gets
-	// the required `commitments` array and other required fields.
-	var contractEnvelope struct {
-		Message struct {
-			Contract json.RawMessage `json:"contract"`
-		} `json:"message"`
-	}
-	var contractPayload json.RawMessage
-	if err := json.Unmarshal(snapshot.Contract, &contractEnvelope); err == nil && len(contractEnvelope.Message.Contract) > 2 {
-		contractPayload = contractEnvelope.Message.Contract
-	} else {
-		contractPayload = snapshot.Contract
-	}
-
+	// Send the full contract, not a {"id": ...} stub -- see
+	// contractFromSnapshot for why a stub is rejected outright.
 	msgJSON, _ := json.Marshal(map[string]interface{}{
-		"contract": json.RawMessage(contractPayload),
+		"contract": contractFromSnapshot(snapshot.Contract),
 	})
 	becknReq := BecknRequest{
 		Context: s.newContext("status", req.TransactionID, msgID.String(), bppID, bppURI),
 		Message: json.RawMessage(msgJSON),
 	}
-	err = q.UpsertTransaction(ctx, dbsqlc.UpsertTransactionParams{
-		TransactionID: txnID,
-		BapID:         s.cfg.BapID,
-		NetworkID:     &s.cfg.NetworkID,
-		BppID:         &bppID,
-		BppUri:        &bppURI,
-		Status:        dbsqlc.TransactionStatusSTATUSSENT,
-	})
-	if err != nil {
-		return err
-	}
+	// Deliberately does NOT move the transaction's status.
+	//
+	// Asking "where is my order?" is a READ. It used to write
+	// STATUS_SENT, which was a one-way trapdoor: nothing ever moved a
+	// transaction back out of it (on_status doesn't touch the status, and
+	// the sweep only recovers UPDATE_SENT), while both Update and Cancel
+	// gate on CONFIRMED. So a single tap on "Check Status" permanently
+	// blocked every remaining action on that order.
+	//
+	// The STATUS_SENT enum value is kept for the existing rows that hold
+	// it and for wire/UI compatibility, but nothing should write it again:
+	// a query has no business changing the lifecycle state of the thing it
+	// is querying.
 	return s.sendToBPP(ctx, s.cfg.BapCallerURL, "status", txnID, msgID, s.cfg.NetworkID, becknReq)
 }
 
 // Cancel sends a Beckn cancel request for an active transaction.
+// Cancel sends a Beckn cancel request for an active transaction.
+//
+// Guarded by the same CONFIRMED -> CANCEL_SENT compare-and-swap technique
+// Update uses for its own CONFIRMED -> UPDATE_SENT transition (see
+// MarkCancelSentIfConfirmed) -- since both actions gate on the transaction
+// being CONFIRMED and nothing else, this also blocks cancelling a
+// transaction while one of its own updates is still in flight
+// (UPDATE_SENT), rather than letting the two race against each other.
 func (s *ClientService) Cancel(ctx context.Context, req *ClientCancelRequest) error {
-	txnID, _ := uuid.Parse(req.TransactionID)
+	txnID, err := uuid.Parse(req.TransactionID)
+	if err != nil {
+		return fmt.Errorf("%w: %q: %v", ErrInvalidTransactionID, req.TransactionID, err)
+	}
 	msgID := uuid.New()
 	q := dbsqlc.New(s.pool)
 
 	txn, err := q.GetTransaction(ctx, txnID)
 	if err != nil {
-		return fmt.Errorf("transaction %s not found: %w", req.TransactionID, err)
+		return fmt.Errorf("%w: %s", ErrTransactionNotFound, req.TransactionID)
 	}
 	bppID, bppURI := s.resolveBPP(txn)
 
+	// Read-only preconditions first -- the CAS transition (below) is the
+	// last thing before delivery, deliberately, so a failure here (no
+	// snapshot yet) never leaves the transaction stranded at CANCEL_SENT
+	// with nothing to roll it back.
 	snapshot, err := q.GetLatestContractSnapshot(ctx, txnID)
 	if err != nil {
 		return fmt.Errorf("no snapshot for txn %s: %w", txnID, err)
 	}
 
-	// Extract the full contract from the snapshot so the adapter gets
-	// the required `commitments` array and other required fields.
-	var contractEnvelope struct {
-		Message struct {
-			Contract json.RawMessage `json:"contract"`
-		} `json:"message"`
-	}
-	var contractPayload json.RawMessage
-	if err := json.Unmarshal(snapshot.Contract, &contractEnvelope); err == nil &&
-		len(contractEnvelope.Message.Contract) > 2 {
-		contractPayload = contractEnvelope.Message.Contract
-	} else {
-		// Snapshot already IS the contract object (not wrapped in message)
-		contractPayload = snapshot.Contract
-	}
+	// Full contract, so the adapter gets the required `commitments` array
+	// and everything else Contract mandates -- see contractFromSnapshot.
+	contractPayload := contractFromSnapshot(snapshot.Contract)
 
 	msgJSON, _ := json.Marshal(map[string]interface{}{
 		"contract": json.RawMessage(contractPayload),
@@ -820,49 +822,193 @@ func (s *ClientService) Cancel(ctx context.Context, req *ClientCancelRequest) er
 		Context: s.newContext("cancel", req.TransactionID, msgID.String(), bppID, bppURI),
 		Message: json.RawMessage(msgJSON),
 	}
-	err = q.UpsertTransaction(ctx, dbsqlc.UpsertTransactionParams{
-		TransactionID: txnID,
-		BapID:         s.cfg.BapID,
-		NetworkID:     &s.cfg.NetworkID,
-		BppID:         &bppID,
-		BppUri:        &bppURI,
-		Status:        dbsqlc.TransactionStatusCANCELSENT,
-	})
+
+	rows, err := q.MarkCancelSentIfConfirmed(ctx, txnID)
 	if err != nil {
+		return fmt.Errorf("check cancel eligibility for txn %s: %w", req.TransactionID, err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("%w: transaction %s is %s (or an update is currently in flight)", ErrInvalidUpdateState, req.TransactionID, txn.Status)
+	}
+
+	if err := s.sendToBPP(ctx, s.cfg.BapCallerURL, "cancel", txnID, msgID, s.cfg.NetworkID, becknReq); err != nil {
+		// Same reasoning as Update's own rollback: delivery never happened,
+		// so don't strand the transaction at CANCEL_SENT forever -- a
+		// retry needs it back at CONFIRMED to pass MarkCancelSentIfConfirmed
+		// again.
+		if rbErr := q.UpsertTransaction(ctx, dbsqlc.UpsertTransactionParams{
+			TransactionID: txnID,
+			BapID:         s.cfg.BapID,
+			NetworkID:     &s.cfg.NetworkID,
+			BppID:         &bppID,
+			BppUri:        &bppURI,
+			Status:        dbsqlc.TransactionStatusCONFIRMED,
+		}); rbErr != nil {
+			s.lh.WithModule("client_svc").Warn().Error(rbErr).Log("failed to roll back CANCEL_SENT after send failure")
+		}
 		return err
 	}
-	return s.sendToBPP(ctx, s.cfg.BapCallerURL, "cancel", txnID, msgID, s.cfg.NetworkID, becknReq)
+	return nil
 }
 
 // Update sends a Beckn update request with partial contract changes.
-func (s *ClientService) Update(ctx context.Context, req *ClientUpdateRequest) error {
-	txnID, _ := uuid.Parse(req.TransactionID)
+//
+// Guards against several edge cases the plain select/init/confirm/cancel
+// pattern doesn't need to: an update on a transaction that was never
+// confirmed (or already CANCELLED/COMPLETE) is rejected outright
+// (ErrInvalidUpdateState), and MarkUpdateSentIfConfirmed's CONFIRMED ->
+// UPDATE_SENT transition is a compare-and-swap on the transactions row --
+// it also rejects a second concurrent Update call for the same transaction
+// (it'd see 0 rows affected, since the first call already flipped the
+// status away from CONFIRMED), without needing an explicit lock.
+//
+// buyerSubject, when non-nil, scopes the lookup to that buyer -- a
+// transaction that exists but belongs to someone else is treated exactly
+// like one that doesn't exist (ErrTransactionNotFound), same reasoning as
+// GetStatusForBuyer: a buyer must not be able to distinguish "not yours"
+// from "doesn't exist" by probing transaction IDs. nil preserves the
+// existing best-effort-auth behavior used by every other action here.
+func (s *ClientService) Update(ctx context.Context, req *ClientUpdateRequest, buyerSubject *string) error {
+	txnID, err := uuid.Parse(req.TransactionID)
+	if err != nil {
+		return fmt.Errorf("%w: %q: %v", ErrInvalidTransactionID, req.TransactionID, err)
+	}
 	msgID := uuid.New()
 	q := dbsqlc.New(s.pool)
 
-	txn, err := q.GetTransaction(ctx, txnID)
-	if err != nil {
-		return fmt.Errorf("transaction %s not found: %w", req.TransactionID, err)
+	var txn dbsqlc.GetTransactionRow
+	if buyerSubject != nil {
+		owned, err := q.GetTransactionForBuyer(ctx, dbsqlc.GetTransactionForBuyerParams{
+			TransactionID: txnID,
+			BuyerSubject:  buyerSubject,
+		})
+		if err != nil {
+			return fmt.Errorf("%w: %s", ErrTransactionNotFound, req.TransactionID)
+		}
+		txn = dbsqlc.GetTransactionRow{
+			TransactionID: owned.TransactionID,
+			BapID:         owned.BapID,
+			NetworkID:     owned.NetworkID,
+			BppID:         owned.BppID,
+			BppUri:        owned.BppUri,
+			Status:        owned.Status,
+		}
+	} else {
+		txn, err = q.GetTransaction(ctx, txnID)
+		if err != nil {
+			return fmt.Errorf("%w: %s", ErrTransactionNotFound, req.TransactionID)
+		}
 	}
 	bppID, bppURI := s.resolveBPP(txn)
+
+	// Refuse a request that asks for nothing BEFORE touching any state:
+	// no quota spent, no CONFIRMED -> UPDATE_SENT transition, nothing sent
+	// to the seller. A no-op reached the seller as a blank "No changes to
+	// delivery details" request, which costs them a decision for no reason.
+	//
+	// Compared against the latest snapshot, which is the contract the
+	// buyer's form was populated from. If either side has no delivery
+	// block the request is allowed through -- see
+	// contractx.DeliveryDetailsUnchanged on why an unprovable case must
+	// not be refused.
+	if snapshot, snapErr := q.GetLatestContractSnapshot(ctx, txnID); snapErr == nil {
+		if contractx.DeliveryDetailsUnchanged(snapshot.Contract, req.Contract) {
+			return ErrNoChangeRequested
+		}
+	}
+
+	// Cap the total number of change requests before doing anything else.
+	// Checked ahead of the CAS so a refused request never consumes the
+	// CONFIRMED -> UPDATE_SENT transition and leave the order stuck.
+	priorRequests, err := q.CountUpdateRequests(ctx, txnID)
+	if err != nil {
+		return fmt.Errorf("count existing update requests for txn %s: %w", req.TransactionID, err)
+	}
+	if priorRequests >= MaxUpdateRequestsPerOrder {
+		return fmt.Errorf("%w: %d of %d already used for transaction %s",
+			ErrTooManyUpdateRequests, priorRequests, MaxUpdateRequestsPerOrder, req.TransactionID)
+	}
+
+	rows, err := q.MarkUpdateSentIfConfirmed(ctx, txnID)
+	if err != nil {
+		return fmt.Errorf("check update eligibility for txn %s: %w", req.TransactionID, err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("%w: transaction %s is %s (or an update is already in flight)", ErrInvalidUpdateState, req.TransactionID, txn.Status)
+	}
 
 	msgJSON, _ := json.Marshal(map[string]interface{}{"contract": req.Contract})
 	becknReq := BecknRequest{
 		Context: s.newContext("update", req.TransactionID, msgID.String(), bppID, bppURI),
 		Message: json.RawMessage(msgJSON),
 	}
-	err = q.UpsertTransaction(ctx, dbsqlc.UpsertTransactionParams{
-		TransactionID: txnID,
-		BapID:         s.cfg.BapID,
-		NetworkID:     &s.cfg.NetworkID,
-		BppID:         &bppID,
-		BppUri:        &bppURI,
-		Status:        dbsqlc.TransactionStatusUPDATESENT,
+
+	// Remember exactly what the buyer proposed, before sending it. This is
+	// what lets on_update_svc later tell the buyer whether the seller
+	// approved or rejected the change -- on_update's wire shape has no
+	// field that says so, and a rejection comes back as the unchanged
+	// contract, so the decision is only recoverable by comparing the
+	// callback against this proposal and the pre-update snapshot. See
+	// migration 012_update_requests.sql.
+	//
+	// Recorded after the CONFIRMED -> UPDATE_SENT compare-and-swap so the
+	// partial unique index (one PENDING row per transaction) can never be
+	// reached by a request that was going to be refused anyway.
+	// Any PENDING tracking row still sitting here is stale by definition:
+	// MarkUpdateSentIfConfirmed only succeeded because the transaction was
+	// CONFIRMED, which means no update was actually in flight. Such rows
+	// come from an earlier request whose on_update never arrived (the
+	// sweep would eventually retire them, but only after 48h).
+	//
+	// They must be cleared BEFORE inserting, because the partial unique
+	// index allows only one PENDING row per transaction -- otherwise the
+	// insert below fails, the new request goes untracked, and a later
+	// on_update resolves the OLD row, showing the buyer the wrong proposal.
+	if _, err := q.AbandonPendingUpdateRequests(ctx, []uuid.UUID{txnID}); err != nil {
+		s.lh.WithModule("client_svc").Warn().Error(err).Log("failed to retire stale pending update requests before inserting a new one")
+	}
+
+	proposedContract := req.Contract
+	if len(proposedContract) == 0 {
+		proposedContract = json.RawMessage("null")
+	}
+	updateReqID, err := q.InsertUpdateRequest(ctx, dbsqlc.InsertUpdateRequestParams{
+		TransactionID:    txnID,
+		MessageID:        msgID,
+		ProposedContract: proposedContract,
 	})
 	if err != nil {
+		// Non-fatal: the update itself is still valid and worth sending.
+		// The buyer just won't get a decision readout for this one -- it
+		// degrades to the pre-existing behaviour (status returns to
+		// CONFIRMED with no explanation) rather than blocking the change.
+		s.lh.WithModule("client_svc").Warn().Error(err).Log("failed to record update request; proceeding without decision tracking")
+	}
+
+	if err := s.sendToBPP(ctx, s.cfg.BapCallerURL, "update", txnID, msgID, s.cfg.NetworkID, becknReq); err != nil {
+		// Nothing is in flight, so the tracking row must not stay PENDING
+		// -- otherwise the buyer sees "awaiting seller review" forever for
+		// a request that was never delivered.
+		if _, abErr := q.AbandonPendingUpdateRequests(ctx, []uuid.UUID{txnID}); abErr != nil {
+			s.lh.WithModule("client_svc").Warn().Error(abErr).Log(fmt.Sprintf("failed to abandon update request %s after send failure", updateReqID))
+		}
+		// Delivery to the BPP never happened -- there's no update in
+		// flight to wait for, so undo the CONFIRMED -> UPDATE_SENT
+		// transition rather than stranding the transaction in a state
+		// that blocks every future update attempt.
+		if rbErr := q.UpsertTransaction(ctx, dbsqlc.UpsertTransactionParams{
+			TransactionID: txnID,
+			BapID:         s.cfg.BapID,
+			NetworkID:     &s.cfg.NetworkID,
+			BppID:         &bppID,
+			BppUri:        &bppURI,
+			Status:        dbsqlc.TransactionStatusCONFIRMED,
+		}); rbErr != nil {
+			s.lh.WithModule("client_svc").Warn().Error(rbErr).Log("failed to roll back UPDATE_SENT after send failure")
+		}
 		return err
 	}
-	return s.sendToBPP(ctx, s.cfg.BapCallerURL, "update", txnID, msgID, s.cfg.NetworkID, becknReq)
+	return nil
 }
 
 // Rate sends a Beckn rate request with the provided rating inputs.
@@ -1001,6 +1147,7 @@ func (s *ClientService) GetStatus(ctx context.Context, txnIDStr string) (*Client
 	if snapshot.ID != [16]byte{} {
 		resp.Contract = snapshot.Contract
 	}
+	resp.UpdateRequest = s.latestUpdateOutcome(ctx, txnID)
 
 	return resp, nil
 }
@@ -1035,6 +1182,7 @@ func (s *ClientService) GetStatusForBuyer(ctx context.Context, txnIDStr, buyerSu
 	if snapshot.ID != [16]byte{} {
 		resp.Contract = snapshot.Contract
 	}
+	resp.UpdateRequest = s.latestUpdateOutcome(ctx, txnID)
 
 	return resp, nil
 }
@@ -1235,4 +1383,51 @@ func errStrPtr(err error) *string {
 	}
 	s := err.Error()
 	return &s
+}
+
+// latestUpdateOutcome returns the buyer-facing outcome of the most recent
+// change request on this transaction, or nil when the buyer has never
+// requested one. Best-effort: a lookup failure costs the decision readout,
+// never the status response itself.
+func (s *ClientService) latestUpdateOutcome(ctx context.Context, txnID uuid.UUID) *ClientUpdateOutcome {
+	ur, err := dbsqlc.New(s.pool).GetLatestUpdateRequest(ctx, txnID)
+	if err != nil {
+		return nil
+	}
+	out := &ClientUpdateOutcome{
+		Outcome:   string(ur.Outcome),
+		CreatedAt: ur.CreatedAt.Time,
+	}
+	if ur.DecidedAt.Valid {
+		t := ur.DecidedAt.Time
+		out.DecidedAt = &t
+	}
+	return out
+}
+
+// contractFromSnapshot returns the Contract object to put in an outbound
+// message, given a stored contract_snapshots row.
+//
+// Snapshots are stored in two shapes depending on which callback wrote
+// them: some are the raw Contract, others the whole `{"message":{"contract":
+// …}}` envelope. This unwraps either.
+//
+// Why the FULL contract and never a stub: beckn's Contract schema requires
+// `commitments` (among others) and is `additionalProperties: false`, so a
+// hand-built `{"id": "..."}` is rejected by onix with
+// SCH_SCHEMA_VALIDATION_FAILED / `property "commitments" is missing`. That
+// is exactly the bug that made every /request-status call fail while
+// /cancel worked -- cancel already did this, status did not. Sharing one
+// helper is what stops them drifting apart again.
+func contractFromSnapshot(raw json.RawMessage) json.RawMessage {
+	var envelope struct {
+		Message struct {
+			Contract json.RawMessage `json:"contract"`
+		} `json:"message"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err == nil && len(envelope.Message.Contract) > 2 {
+		return envelope.Message.Contract
+	}
+	// The snapshot already IS the contract object.
+	return raw
 }

@@ -17,6 +17,7 @@ import (
 	"github.com/ion/winroom/bap/internal/auth"
 	"github.com/ion/winroom/bap/internal/config"
 	"github.com/ion/winroom/bap/internal/server"
+	"github.com/ion/winroom/bap/internal/sweep"
 )
 
 func main() {
@@ -91,6 +92,13 @@ func main() {
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+	// Recovers transactions abandoned mid-update (see internal/sweep's own
+	// package doc) -- a single background goroutine, stopped on shutdown
+	// alongside everything else.
+	sweepCtx, stopSweep := context.WithCancel(context.Background())
+	defer stopSweep()
+	go sweep.RunLoop(sweepCtx, pool, lh, sweep.DefaultInterval, sweep.DefaultStaleAfter)
 
 	go func() {
 		if err := r.Run(addr); err != nil {

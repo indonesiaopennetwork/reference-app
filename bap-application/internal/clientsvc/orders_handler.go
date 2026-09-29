@@ -7,8 +7,10 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	dbsqlc "github.com/ion/winroom/bap/db/sqlc"
 	"github.com/ion/winroom/bap/internal/auth"
 )
 
@@ -26,6 +28,16 @@ func (h *ClientHandler) HandleGetOrder(c *gin.Context) {
 	}
 	buyerSubject, hasBuyer := auth.SubjectFromContext(c)
 	if !hasBuyer {
+		// A token that was sent but didn't verify (expired, or issued by a
+		// different Zitadel) is an authentication problem, not a missing
+		// order -- say so, so the frontend's 401 handler can drop the dead
+		// token and send the buyer back through login. Answering 404 here
+		// instead leaves them staring at "order not found" on an order
+		// that plainly exists, with no way to recover.
+		if auth.TokenRejected(c) {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "session expired, please sign in again"})
+			return
+		}
 		c.JSON(http.StatusNotFound, gin.H{"error": "order not found"})
 		return
 	}
@@ -66,12 +78,70 @@ func (h *ClientHandler) HandleGetOrder(c *gin.Context) {
 		}
 	}
 
+	// The buyer's most recent change request and what the seller decided
+	// about it. on_update carries no approved/rejected field, so this is
+	// the only place a buyer can find out the difference -- see
+	// internal/on_update_svc.classifyOutcome. Absent when the buyer has
+	// never requested a change on this order.
+	//
+	// There is deliberately no rejection reason here: the seller's reason
+	// is recorded on the BPP side (contract_update_requests.reject_reason)
+	// and has nowhere to travel on the on_update wire. A seller who wants
+	// the buyer to know why uses the existing support channel.
+	// The buyer's change-request history, newest first, capped at
+	// BuyerUpdateHistoryLimit. Showing the history (not just the latest) is
+	// what lets a buyer see they already asked for this and were told why --
+	// which is the point of carrying the seller's reason at all.
+	var updateRequest gin.H
+	updateRequests := []gin.H{}
+	var requestsUsed int64
+	if txnUUID, err := uuid.Parse(txnID); err == nil {
+		q := dbsqlc.New(h.svc.pool)
+		if n, err := q.CountUpdateRequests(c.Request.Context(), txnUUID); err == nil {
+			requestsUsed = n
+		}
+		rows, err := q.ListUpdateRequestsForTransaction(c.Request.Context(), dbsqlc.ListUpdateRequestsForTransactionParams{
+			TransactionID: txnUUID,
+			Limit:         BuyerUpdateHistoryLimit,
+		})
+		if err == nil {
+			for _, ur := range rows {
+				item := gin.H{
+					"outcome":           string(ur.Outcome),
+					"proposed_contract": ur.ProposedContract,
+					"created_at":        ur.CreatedAt.Time.UTC().Format(time.RFC3339),
+				}
+				if ur.DecidedAt.Valid {
+					item["decided_at"] = ur.DecidedAt.Time.UTC().Format(time.RFC3339)
+				}
+				if ur.DecisionReasonCode != nil {
+					item["reason_code"] = *ur.DecisionReasonCode
+				}
+				if ur.DecisionReasonText != nil {
+					item["reason"] = *ur.DecisionReasonText
+				}
+				updateRequests = append(updateRequests, item)
+			}
+		}
+		// update_request (singular) stays as the newest entry so existing
+		// callers keep working.
+		if len(updateRequests) > 0 {
+			updateRequest = updateRequests[0]
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"transaction_id": resp.TransactionID,
-		"status":         resp.Status,
-		"updated_at":     resp.UpdatedAt.UTC().Format(time.RFC3339),
-		"contract":       resp.Contract,
-		"snapshots":      snapshots,
+		"transaction_id":  resp.TransactionID,
+		"status":          resp.Status,
+		"updated_at":      resp.UpdatedAt.UTC().Format(time.RFC3339),
+		"contract":        resp.Contract,
+		"snapshots":       snapshots,
+		"update_request":  updateRequest,
+		"update_requests": updateRequests,
+		"update_quota": gin.H{
+			"used": requestsUsed,
+			"max":  MaxUpdateRequestsPerOrder,
+		},
 	})
 }
 
@@ -85,6 +155,14 @@ func (h *ClientHandler) HandleListOrders(c *gin.Context) {
 
 	buyerSubject, hasBuyer := auth.SubjectFromContext(c)
 	if !hasBuyer {
+		// Same reasoning as HandleGetOrder: a rejected token is a dead
+		// session, not an empty order history. Returning an empty page
+		// here is what made an expired token look like "you've never
+		// ordered anything".
+		if auth.TokenRejected(c) {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "session expired, please sign in again"})
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{"items": []any{}, "total": 0, "page": 1, "limit": 20})
 		return
 	}

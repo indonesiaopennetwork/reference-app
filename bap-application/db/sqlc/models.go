@@ -212,6 +212,51 @@ func (ns NullTransactionStatus) Value() (driver.Value, error) {
 	return string(ns.TransactionStatus), nil
 }
 
+type UpdateOutcome string
+
+const (
+	UpdateOutcomePENDING   UpdateOutcome = "PENDING"
+	UpdateOutcomeAPPLIED   UpdateOutcome = "APPLIED"
+	UpdateOutcomeDECLINED  UpdateOutcome = "DECLINED"
+	UpdateOutcomeMODIFIED  UpdateOutcome = "MODIFIED"
+	UpdateOutcomeABANDONED UpdateOutcome = "ABANDONED"
+)
+
+func (e *UpdateOutcome) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = UpdateOutcome(s)
+	case string:
+		*e = UpdateOutcome(s)
+	default:
+		return fmt.Errorf("unsupported scan type for UpdateOutcome: %T", src)
+	}
+	return nil
+}
+
+type NullUpdateOutcome struct {
+	UpdateOutcome UpdateOutcome `json:"update_outcome"`
+	Valid         bool          `json:"valid"` // Valid is true if UpdateOutcome is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullUpdateOutcome) Scan(value interface{}) error {
+	if value == nil {
+		ns.UpdateOutcome, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.UpdateOutcome.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullUpdateOutcome) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.UpdateOutcome), nil
+}
+
 // Registered BAP subscribers. Seeded at startup from BAP_ID / BAP_URI env vars.
 type BapIdentity struct {
 	BapID      string             `json:"bap_id"`
@@ -286,4 +331,19 @@ type Transaction struct {
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 	BuyerSubject  *string            `json:"buyer_subject"`
+}
+
+// Buyer-side record of outbound /update requests and the seller decision inferred from the matching on_update callback. Never authoritative for contract state -- contract_snapshots is.
+type UpdateRequest struct {
+	ID               uuid.UUID          `json:"id"`
+	TransactionID    uuid.UUID          `json:"transaction_id"`
+	MessageID        uuid.UUID          `json:"message_id"`
+	ProposedContract json.RawMessage    `json:"proposed_contract"`
+	Outcome          UpdateOutcome      `json:"outcome"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	DecidedAt        pgtype.Timestamptz `json:"decided_at"`
+	// Descriptor.code from the seller's updateDecision.reason, e.g. ALREADY_DISPATCHED. NULL when the seller's app sent no reason.
+	DecisionReasonCode *string `json:"decision_reason_code"`
+	// Human-readable reason text from the seller, shown to the buyer as-is.
+	DecisionReasonText *string `json:"decision_reason_text"`
 }

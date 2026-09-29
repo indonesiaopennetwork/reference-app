@@ -2,6 +2,7 @@ package clientsvc
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -162,7 +163,7 @@ func (h *ClientHandler) HandleCancel(c *gin.Context) {
 	}
 	if err := h.svc.Cancel(c.Request.Context(), &req); err != nil {
 		h.lh.WithModule("client_handler").Err().Error(err).Log("cancel failed")
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(sentinelErrorStatus(err), gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "CANCEL_SENT"})
@@ -175,12 +176,50 @@ func (h *ClientHandler) HandleUpdate(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if err := h.svc.Update(c.Request.Context(), &req); err != nil {
+	// A token that failed verification must not fall through to the
+	// nil-buyerSubject path: that path means "no identity was offered" and
+	// deliberately skips buyer scoping, so accepting a rejected token here
+	// would let a bad token buy MORE access than sending none at all.
+	if auth.TokenRejected(c) {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "session expired, please sign in again"})
+		return
+	}
+	var buyerSubject *string
+	if sub, ok := auth.SubjectFromContext(c); ok {
+		buyerSubject = &sub
+	}
+	if err := h.svc.Update(c.Request.Context(), &req, buyerSubject); err != nil {
 		h.lh.WithModule("client_handler").Err().Error(err).Log("update failed")
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(sentinelErrorStatus(err), gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "UPDATE_SENT"})
+}
+
+// sentinelErrorStatus maps Update's and Cancel's sentinel errors to the
+// HTTP status code that best reflects them, instead of collapsing every
+// failure into a generic 500 -- a malformed transaction ID or an action
+// rejected for being in the wrong state are client errors, not server
+// errors.
+func sentinelErrorStatus(err error) int {
+	switch {
+	case errors.Is(err, ErrNoChangeRequested):
+		// The buyer asked for nothing -- a client-side mistake, and
+		// nothing about the order conflicts, so 400 rather than 409.
+		return http.StatusBadRequest
+	case errors.Is(err, ErrTooManyUpdateRequests):
+		// Well-formed request, but the order has used up its allowance --
+		// a conflict with current state, not a malformed input.
+		return http.StatusConflict
+	case errors.Is(err, ErrInvalidTransactionID):
+		return http.StatusBadRequest
+	case errors.Is(err, ErrTransactionNotFound):
+		return http.StatusNotFound
+	case errors.Is(err, ErrInvalidUpdateState):
+		return http.StatusConflict
+	default:
+		return http.StatusInternalServerError
+	}
 }
 
 // HandleRate submits ratings for a completed order.
