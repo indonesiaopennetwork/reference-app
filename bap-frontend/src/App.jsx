@@ -8,6 +8,7 @@ import {
   User, Phone, Home, ChevronLeft, Banknote,
   Ban, MessageSquare, RefreshCw, ThumbsUp,
   History, Wand2, ExternalLink, ChevronDown, ChevronUp, LogOut,
+  PencilLine, AlertTriangle,
 } from 'lucide-react';
 import { captureTokenFromUrl, getToken, clearToken, redirectToLogin, logout } from './auth.js';
 
@@ -495,13 +496,32 @@ function StarRating({ value, onChange }) {
   );
 }
 
-function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoading, onInit, onConfirm, onDone, onCancel, onRate, onSupport, onRequestStatus }) {
+function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoading, onInit, onConfirm, onDone, onCancel, onRate, onSupport, onRequestStatus, onRequestUpdate }) {
   const [ratingValue, setRatingValue] = useState(0);
   const [ratingFeedback, setRatingFeedback] = useState('');
   const [showRatingForm, setShowRatingForm] = useState(false);
   const [showSupportForm, setShowSupportForm] = useState(false);
   const [supportDesc, setSupportDesc] = useState('');
+  const [showUpdateForm, setShowUpdateForm] = useState(false);
+  const [updateFields, setUpdateFields] = useState(null);
   const status = transaction?.status;
+
+  // Pre-fill the "Request Change" form from current billing whenever it's
+  // opened, so re-opening after a previous edit starts from the latest
+  // values rather than stale ones from the first open.
+  const openUpdateForm = () => {
+    setUpdateFields({
+      name: billing.name || '',
+      phone: billing.phone || '',
+      streetAddress: billing.streetAddress || '',
+      addressLocality: billing.addressLocality || '',
+      addressRegion: billing.addressRegion || '',
+      postalCode: billing.postalCode || '',
+    });
+    setShowUpdateForm(true);
+    setShowRatingForm(false);
+    setShowSupportForm(false);
+  };
 
   // Parse BPP-confirmed quote from on_select
   const confirmedQuote = (status === 'QUOTE_RECEIVED' && transaction?.contract)
@@ -528,6 +548,7 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
     CANCELLED: 3,
     RATE_SENT: 3,
     SUPPORT_SENT: 3,
+    UPDATE_SENT: 3,
   }[status] ?? 0;
 
   return (
@@ -823,6 +844,93 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
               </button>
             </div>
 
+            {/* The seller's verdict on the buyer's last change request.
+              * Without this the buyer just sees the order flip back to
+              * CONFIRMED, which looks identical whether the change was
+              * approved or rejected. Hidden once they open the form again. */}
+            {!showUpdateForm && transaction?.update_request
+              && transaction.update_request.outcome !== 'PENDING' && (
+              <UpdateOutcomeBanner request={transaction.update_request} />
+            )}
+
+            <button onClick={() => (showUpdateForm ? setShowUpdateForm(false) : openUpdateForm())}
+              className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-semibold bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 hover:bg-cyan-500/20 transition-all">
+              <PencilLine className="w-3.5 h-3.5" /> Request Change
+            </button>
+
+            {/* Inline update (Request Change) form */}
+            <AnimatePresence>
+              {showUpdateForm && updateFields && (
+                <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
+                  className="rounded-xl border border-cyan-500/20 bg-cyan-500/5 px-4 py-3 space-y-3">
+                  <p className="text-xs font-semibold text-cyan-300 flex items-center gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5" /> Edit delivery / contact details
+                  </p>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    Changes are sent to the seller for review before they take effect.
+                  </p>
+                  <div className="relative">
+                    <User className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500" />
+                    <input
+                      type="text" placeholder="Full name"
+                      value={updateFields.name}
+                      onChange={e => setUpdateFields(p => ({ ...p, name: e.target.value }))}
+                      className="w-full bg-slate-900 border border-white/10 rounded-lg pl-9 pr-3 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-cyan-500/40 transition-colors"
+                    />
+                  </div>
+                  <div className="relative">
+                    <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500" />
+                    <input
+                      type="tel" placeholder="Phone number"
+                      value={updateFields.phone}
+                      onChange={e => setUpdateFields(p => ({ ...p, phone: e.target.value }))}
+                      className="w-full bg-slate-900 border border-white/10 rounded-lg pl-9 pr-3 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-cyan-500/40 transition-colors"
+                    />
+                  </div>
+                  <div className="relative">
+                    <Home className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500" />
+                    <input
+                      type="text" placeholder="Street address"
+                      value={updateFields.streetAddress}
+                      onChange={e => setUpdateFields(p => ({ ...p, streetAddress: e.target.value }))}
+                      className="w-full bg-slate-900 border border-white/10 rounded-lg pl-9 pr-3 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-cyan-500/40 transition-colors"
+                    />
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <input
+                      type="text" placeholder="City"
+                      value={updateFields.addressLocality}
+                      onChange={e => setUpdateFields(p => ({ ...p, addressLocality: e.target.value }))}
+                      className="w-full bg-slate-900 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-cyan-500/40 transition-colors"
+                    />
+                    <input
+                      type="text" placeholder="State"
+                      value={updateFields.addressRegion}
+                      onChange={e => setUpdateFields(p => ({ ...p, addressRegion: e.target.value }))}
+                      className="w-full bg-slate-900 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-cyan-500/40 transition-colors"
+                    />
+                  </div>
+                  <input
+                    type="text" placeholder="Pincode"
+                    value={updateFields.postalCode}
+                    onChange={e => setUpdateFields(p => ({ ...p, postalCode: e.target.value }))}
+                    className="w-full bg-slate-900 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-cyan-500/40 transition-colors"
+                  />
+                  {sameDeliveryFields(updateFields, billing) && (
+                    <p className="text-[11px] text-amber-300/80">
+                      Nothing changed yet — edit a detail above to request a change.
+                    </p>
+                  )}
+                  <button
+                    disabled={isLoading || sameDeliveryFields(updateFields, billing)}
+                    onClick={() => { onRequestUpdate(updateFields); setShowUpdateForm(false); }}
+                    className="w-full py-2 rounded-lg text-xs font-bold bg-cyan-600 hover:bg-cyan-500 text-white disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-all">
+                    {isLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <><PencilLine className="w-3.5 h-3.5" /> Submit Change Request</>}
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
             {/* Inline rating form */}
             <AnimatePresence>
               {showRatingForm && !transaction.rated && (
@@ -901,6 +1009,31 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
                 <Sparkles className="w-4 h-4" /> Back to Shopping
               </button>
             )}
+          </motion.div>
+        )}
+
+        {/* ── Step: Update sent — awaiting seller review ─────────────── */}
+        {status === 'UPDATE_SENT' && (
+          <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+            className="flex flex-col items-center gap-3 py-6 text-center">
+            <div className="w-16 h-16 rounded-full bg-cyan-500/15 border-2 border-cyan-500/40 flex items-center justify-center">
+              <Loader2 className="w-9 h-9 text-cyan-400 animate-spin" />
+            </div>
+            <p className="font-bold text-cyan-300 text-lg">Change Requested</p>
+            <p className="text-xs text-slate-400 max-w-[24rem]">
+              Your requested change has been sent to the seller for review. A person
+              has to approve it, so this can take hours — you can safely leave this
+              page and come back. We check every 20 seconds.
+            </p>
+            {transaction?.update_request?.created_at && (
+              <p className="text-[11px] text-slate-500">
+                Requested {fmtOrderDate(transaction.update_request.created_at)}
+              </p>
+            )}
+            <button onClick={onRequestStatus}
+              className="mt-1 flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-blue-500/10 text-blue-300 border border-blue-500/20 hover:bg-blue-500/20 transition-all">
+              <RefreshCw className="w-3.5 h-3.5" /> Check Status
+            </button>
           </motion.div>
         )}
       </div>
@@ -1040,25 +1173,356 @@ const ACTION_LABELS = {
   on_confirm: { icon: '🎉', label: 'Order Placed', color: 'text-emerald-400' },
   cancel: { icon: '🚫', label: 'Cancel Requested', color: 'text-rose-400' },
   on_cancel: { icon: '❌', label: 'Order Cancelled', color: 'text-rose-400' },
+  update: { icon: '✏️', label: 'Change Requested', color: 'text-cyan-400' },
+  // Deliberately neutral wording: on_update is the seller's *reply*, and
+  // the wire payload alone doesn't say whether it approved or rejected the
+  // change. The decision is shown by the banner above, which uses the
+  // server-side comparison in update_request.outcome instead of guessing
+  // from the snapshot. See bap-application/internal/on_update_svc.
+  on_update: { icon: '📝', label: 'Seller Responded', color: 'text-cyan-400' },
   rate: { icon: '⭐', label: 'Rated', color: 'text-amber-400' },
   on_rate: { icon: '⭐', label: 'Rating Confirmed', color: 'text-amber-400' },
   on_status: { icon: '📊', label: 'Status Update', color: 'text-slate-400' },
   on_update: { icon: '🔄', label: 'Order Updated', color: 'text-sky-400' },
 };
 
+/* Copy for each outcome the server can report for a buyer's change request.
+ *
+ * These five states exist because Beckn v2's on_update callback carries a
+ * contract and nothing else -- no approved/rejected field, and nowhere to
+ * put a rejection reason. bap-application recovers the decision by
+ * comparing the returned contract against what the buyer proposed and the
+ * pre-update contract (see internal/on_update_svc/classify.go), so the
+ * wording here has to stay faithful to what that comparison can actually
+ * prove:
+ *   - MODIFIED must not claim the seller approved or rejected anything.
+ *   - DECLINED must not promise a reason; the seller's reason lives in
+ *     their own dashboard and cannot travel over on_update.
+ */
+const UPDATE_OUTCOME_META = {
+  PENDING: {
+    // Static Clock, NOT a spinner. This panel reads the request once from
+    // the database when it opens -- nothing is in flight, so a spinning
+    // loader told the buyer the page was busy when it was simply waiting
+    // on a human. See ORDER_DETAIL_REFRESH_MS for the (slow) refresh.
+    icon: Clock,
+    tone: 'bg-cyan-500/10 text-cyan-300 border-cyan-500/20',
+    title: 'Waiting for the seller',
+    body: 'A person at the seller has to review this, so it can take a while. You can close this and come back — nothing is lost.',
+  },
+  APPLIED: {
+    icon: CheckCircle2,
+    tone: 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20',
+    title: 'Change approved',
+    body: 'The seller accepted your change. The order details below are up to date.',
+  },
+  DECLINED: {
+    icon: Ban,
+    tone: 'bg-rose-500/10 text-rose-300 border-rose-500/20',
+    title: 'Change declined',
+    body: 'The seller kept the original order details — their reason is below, so please read it before asking again.',
+  },
+  MODIFIED: {
+    icon: AlertTriangle,
+    tone: 'bg-amber-500/10 text-amber-300 border-amber-500/20',
+    title: 'Seller responded with different details',
+    body: 'The seller replied with terms that match neither your request nor the original order. Review the details below.',
+  },
+  ABANDONED: {
+    icon: AlertTriangle,
+    tone: 'bg-slate-500/10 text-slate-300 border-slate-500/20',
+    title: 'Change request timed out',
+    body: 'No response came back from the seller, so the request was closed. Your order is unchanged and you can request the change again.',
+  },
+};
+
+// requestedDeliveryDetails pulls the delivery block out of the contract the
+// buyer proposed, so the banner can show them their own ask ("you asked for
+// this phone number") instead of only a timestamp. Reads the same path
+// bap-frontend's Request Change form writes and the seller's screen
+// compares -- performance[].performanceAttributes.deliveryDetails.
+function requestedDeliveryDetails(proposedContract) {
+  try {
+    const c = typeof proposedContract === 'string' ? JSON.parse(proposedContract) : proposedContract;
+    for (const perf of c?.performance || []) {
+      const dd = perf?.performanceAttributes?.deliveryDetails;
+      if (dd) return dd;
+    }
+  } catch { /* a malformed proposal just means no summary */ }
+  return null;
+}
+
+// buildContractWithDelivery returns a copy of `contract` with the buyer's
+// delivery/contact fields applied to every performance entry.
+//
+// Single implementation on purpose: both places a buyer can request a
+// change (the live checkout panel and the order detail view) must produce
+// byte-identical payloads, and /update has PUT semantics so the whole
+// contract is replaced by whatever this returns. Two copies of this logic
+// would drift, and a drift here silently changes what the seller is asked
+// to approve. It mirrors the server's own patchPerformanceDelivery at Init
+// time, and preserves @context/@type -- dropping those makes onix reject
+// the resulting on_update with `property "@context" is missing`.
+function buildContractWithDelivery(contract, f, country = 'IN') {
+  const raw = typeof contract === 'string' ? JSON.parse(contract) : contract;
+  if (!raw) throw new Error('No contract on file for this order');
+  const next = JSON.parse(JSON.stringify(raw));
+  for (const perf of next.performance || []) {
+    const attrs = perf.performanceAttributes || (perf.performanceAttributes = {});
+    attrs.deliveryDetails = {
+      address: {
+        streetAddress: f.streetAddress,
+        addressLocality: f.addressLocality,
+        addressRegion: f.addressRegion,
+        postalCode: f.postalCode,
+        addressCountry: country,
+      },
+      contact: { name: f.name, phone: f.phone },
+    };
+  }
+  return next;
+}
+
+// deliveryFieldsUnchanged reports whether the form values match what the
+// order already holds -- i.e. submitting would ask the seller for nothing.
+//
+// Mirrors the server's guard (clientsvc.ErrNoChangeRequested) so the button
+// is disabled rather than the buyer discovering the refusal after a round
+// trip. The server remains authoritative; this is only the fast, local
+// version of the same rule.
+// sameDeliveryFields compares the six buyer-editable delivery fields,
+// trimmed. One implementation, used by both change-request forms.
+const DELIVERY_FORM_FIELDS = ['name', 'phone', 'streetAddress', 'addressLocality', 'addressRegion', 'postalCode'];
+
+function sameDeliveryFields(a, b) {
+  return DELIVERY_FORM_FIELDS.every(k => ((a?.[k] ?? '') + '').trim() === ((b?.[k] ?? '') + '').trim());
+}
+
+function deliveryFieldsUnchanged(contract, f) {
+  const dd = requestedDeliveryDetails(contract);
+  if (!dd) return false; // nothing to compare -> let the server decide
+  const a = dd.address || {}, c = dd.contact || {};
+  return sameDeliveryFields(f, {
+    name: c.name, phone: c.phone,
+    streetAddress: a.streetAddress, addressLocality: a.addressLocality,
+    addressRegion: a.addressRegion, postalCode: a.postalCode,
+  });
+}
+
+function RequestedDetails({ proposedContract }) {
+  const dd = requestedDeliveryDetails(proposedContract);
+  if (!dd) return null;
+  const a = dd.address || {};
+  const c = dd.contact || {};
+  const rows = [
+    ['Name', c.name],
+    ['Phone', c.phone],
+    ['Address', [a.streetAddress, a.addressLocality, a.addressRegion, a.postalCode].filter(Boolean).join(', ')],
+  ].filter(([, v]) => v);
+  if (!rows.length) return null;
+  return (
+    <div className="mt-2 pt-2 border-t border-white/[0.06] space-y-1">
+      <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">You asked for</p>
+      {rows.map(([k, v]) => (
+        <div key={k} className="flex items-start justify-between gap-3">
+          <span className="text-[11px] text-slate-500 shrink-0">{k}</span>
+          <span className="text-[11px] text-slate-300 text-right break-words">{v}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function UpdateOutcomeBanner({ request }) {
+  if (!request) return null;
+  const meta = UPDATE_OUTCOME_META[request.outcome];
+  if (!meta) return null;
+  const Icon = meta.icon;
+  return (
+    <div className={`rounded-xl px-4 py-3 flex items-start gap-3 border ${meta.tone}`}>
+      <Icon className={`w-4.5 h-4.5 shrink-0 mt-0.5 ${meta.spin ? 'animate-spin' : ''}`} />
+      <div className="space-y-0.5">
+        <p className="text-xs font-bold">{meta.title}</p>
+        <p className="text-[11px] text-slate-400 leading-relaxed">{meta.body}</p>
+        <p className="text-[10px] text-slate-500 pt-0.5">
+          Requested {fmtOrderDate(request.created_at)}
+          {request.decided_at && ` · Answered ${fmtOrderDate(request.decided_at)}`}
+        </p>
+        {request.reason && (
+          <div className="mt-2 rounded-lg bg-black/20 px-2.5 py-2">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-0.5">Seller's reason</p>
+            <p className="text-[11px] text-slate-300">{request.reason}</p>
+          </div>
+        )}
+        <RequestedDetails proposedContract={request.proposed_contract} />
+      </div>
+    </div>
+  );
+}
+
+// How often the open order-detail panel re-reads itself from the server.
+//
+// One hour, deliberately. The only thing that changes here without the
+// buyer doing anything is a seller deciding on a change request, and that
+// is a human action measured in hours -- there is nothing to gain from
+// polling faster, and a change-request screen that quietly issued
+// thousands of background requests is a mistake this app has already made
+// once (see the 2s poll that used to run against UPDATE_SENT).
+//
+// The buyer is never made to wait on it: the panel fetches immediately on
+// open, and the Refresh button forces a read whenever they want one.
+const ORDER_DETAIL_REFRESH_MS = 60 * 60 * 1000;
+
+/* ── Request Change, from the order detail view ────────────────────────────
+ * The checkout side-panel has its own inline form tied to live checkout
+ * state. This is the one a buyer reaches from order history, hours or days
+ * later, which is when most change requests actually happen -- they only
+ * notice the wrong phone number once the order is already placed.
+ *
+ * Self-contained on purpose: it takes the order's current contract, patches
+ * only the delivery block (mirroring the server's own patchPerformanceDelivery
+ * at Init time), and submits the whole contract back, because /update has PUT
+ * semantics. */
+function OrderDetailRequestChange({ txnId, contract, onDone }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const existing = requestedDeliveryDetails(contract) || {};
+  const a = existing.address || {};
+  const c = existing.contact || {};
+  const [f, setF] = useState({
+    name: c.name || '', phone: c.phone || '',
+    streetAddress: a.streetAddress || '', addressLocality: a.addressLocality || '',
+    addressRegion: a.addressRegion || '', postalCode: a.postalCode || '',
+  });
+
+  const unchanged = deliveryFieldsUnchanged(contract, f);
+
+  const submit = async () => {
+    if (unchanged) return; // guarded by the disabled button; belt and braces
+    setBusy(true);
+    try {
+      const next = buildContractWithDelivery(contract, f);
+      const r = await apiFetch('/update', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transaction_id: txnId, contract: next }),
+      });
+      if (!r.ok) {
+        const e = await r.json().catch(() => ({}));
+        throw new Error(e.error || 'Change request failed');
+      }
+      setOpen(false);
+      onDone();
+    } catch (e) { alert('Request Change failed: ' + e.message); }
+    finally { setBusy(false); }
+  };
+
+  const field = (key, label, Icon) => (
+    <div className="relative">
+      {Icon && <Icon className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500" />}
+      <input value={f[key]} placeholder={label}
+        onChange={e => setF(p => ({ ...p, [key]: e.target.value }))}
+        className={`w-full bg-slate-900 border border-white/10 rounded-lg ${Icon ? 'pl-9' : 'px-3'} pr-3 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-cyan-500/40 transition-colors`} />
+    </div>
+  );
+
+  return (
+    <div className="space-y-2">
+      <button onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-semibold bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 hover:bg-cyan-500/20 transition-all">
+        <PencilLine className="w-3.5 h-3.5" /> {open ? 'Cancel' : 'Request a change'}
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
+            className="rounded-xl border border-cyan-500/20 bg-cyan-500/5 px-4 py-3 space-y-3">
+            <p className="text-[11px] text-slate-400">
+              Edit your delivery or contact details. The seller reviews the change before it takes effect.
+            </p>
+            {field('name', 'Full name', User)}
+            {field('phone', 'Phone number', Phone)}
+            {field('streetAddress', 'Street address', Home)}
+            <div className="grid grid-cols-2 gap-2">
+              {field('addressLocality', 'City')}
+              {field('addressRegion', 'State')}
+            </div>
+            {field('postalCode', 'Pincode')}
+            {unchanged && (
+              <p className="text-[11px] text-amber-300/80">
+                Nothing changed yet — edit a detail above to request a change.
+              </p>
+            )}
+            <button disabled={busy || unchanged} onClick={submit}
+              className="w-full py-2 rounded-lg text-xs font-bold bg-cyan-600 hover:bg-cyan-500 text-white disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-all">
+              {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <><PencilLine className="w-3.5 h-3.5" /> Submit change request</>}
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
 function OrderDetailPanel({ txnId, onBack }) {
   const [detail, setDetail] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
   const [returning, setReturning] = useState(false);
+  const [lastLoaded, setLastLoaded] = useState(null);
+
+  // background=true keeps the existing content on screen while re-reading,
+  // so an hourly refresh never blanks the panel the buyer is looking at.
+  const load = useCallback((background = false) => {
+    if (background) setRefreshing(true); else { setLoading(true); setError(null); }
+    return apiFetch(`/orders/${txnId}`)
+      .then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(e.error || 'Failed')))
+      .then(d => { setDetail(d); setLastLoaded(new Date()); })
+      .catch(e => { if (!background) setError(String(e)); })
+      .finally(() => { setLoading(false); setRefreshing(false); });
+  }, [txnId]);
+
+  useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
-    setLoading(true); setError(null);
-    apiFetch(`/orders/${txnId}`)
-      .then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(e.error || 'Failed')))
-      .then(d => { setDetail(d); setLoading(false); })
-      .catch(e => { setError(String(e)); setLoading(false); });
-  }, [txnId]);
+    const id = setInterval(() => load(true), ORDER_DETAIL_REFRESH_MS);
+    return () => clearInterval(id);
+  }, [load]);
+
+  // One handler per action, each named for the single thing it does.
+  // `acting` tracks which one is in flight so only that button spins.
+  const [acting, setActing] = useState(null);
+
+  const post = async (label, path, body, okMessage) => {
+    setActing(label);
+    try {
+      const r = await apiFetch(path, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) {
+        const e = await r.json().catch(() => ({}));
+        throw new Error(e.error || r.statusText);
+      }
+      if (okMessage) alert(okMessage);
+      await load(true);
+    } catch (e) {
+      alert(`${label === 'cancel' ? 'Cancel' : 'Check status'} failed: ${e.message}`);
+    } finally {
+      setActing(null);
+    }
+  };
+
+  // A status check is a read -- it asks the seller where the order is and
+  // refreshes this view. It must not change the order's own state; the
+  // backend used to park the transaction at STATUS_SENT, which blocked
+  // every later action on it.
+  const onCheckStatus = () => post('status', '/request-status', { transaction_id: txnId },
+    'Status requested — this view will update when the seller responds.');
+
+  const onCancelOrder = () => {
+    if (!window.confirm('Cancel this order? This cannot be undone.')) return;
+    return post('cancel', '/cancel', { transaction_id: txnId });
+  };
 
   if (loading) return (
     <div className="flex-1 flex items-center justify-center">
@@ -1087,6 +1551,19 @@ function OrderDetailPanel({ txnId, onBack }) {
   }
   // Fallback to top-level contract
   if (!bestContract) bestContract = parseContractDetail(detail.contract);
+
+  // The raw contract to patch when requesting a change -- the newest
+  // snapshot that actually carries delivery details, falling back to the
+  // top-level contract. parseContractDetail's output is display-shaped and
+  // cannot be submitted back, so this deliberately uses the raw JSON.
+  const rawSnapshots = [...snaps].reverse();
+  const bestContractRaw =
+    rawSnapshots.find(x => requestedDeliveryDetails(x.contract))?.contract
+    ?? detail.contract;
+
+  const history = detail.update_requests || [];
+  const quota = detail.update_quota || { used: history.length, max: 5 };
+  const quotaLeft = Math.max(0, (quota.max ?? 5) - (quota.used ?? 0));
 
   const fmt = (amount, cur) => {
     if (amount == null) return '—';
@@ -1169,6 +1646,94 @@ function OrderDetailPanel({ txnId, onBack }) {
           >
             {returning ? 'Initiating...' : 'Return Order'}
           </button>
+        </div>
+      )}
+
+      {/* Change-request outcome */}
+      <UpdateOutcomeBanner request={detail.update_request} />
+
+      {/* Explicit, buyer-controlled refresh. The panel also re-reads itself
+        * hourly (ORDER_DETAIL_REFRESH_MS) because the only thing that moves
+        * on its own is a seller's decision. */}
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[10px] text-slate-600">
+          {refreshing ? 'Checking…' : lastLoaded ? `Last checked ${fmtOrderDate(lastLoaded.toISOString())}` : ''}
+        </span>
+        <button onClick={() => load(true)} disabled={refreshing}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-semibold bg-white/[0.04] text-slate-300 border border-white/10 hover:border-white/25 disabled:opacity-50 transition-all">
+          <RefreshCw className={`w-3 h-3 ${refreshing ? 'animate-spin' : ''}`} /> Refresh
+        </button>
+      </div>
+
+      {/* Raise a change from the order itself. This is where a buyer
+        * actually notices a wrong phone number or address -- hours after
+        * checkout, looking at the order -- so the action belongs here and
+        * not only in the live checkout panel.
+        *
+        * Shown only while the order is CONFIRMED: not while a change is
+        * already in flight (UPDATE_SENT, one at a time), not once
+        * cancelled, and not once the allowance is spent. */}
+      {/* ── Per-order actions ──────────────────────────────────────────
+        * One button per flow, each doing exactly one thing. These used to
+        * live only in the live checkout side-panel, which meant that once
+        * a buyer navigated to their order history there was no way to act
+        * on an order at all -- and acting on an order days later is the
+        * normal case, not the exception.
+        *
+        * Each is gated on the order actually being actionable: CONFIRMED
+        * only. A change already in flight (UPDATE_SENT) or a cancelled
+        * order shows no actions, and the reason is stated rather than the
+        * buttons silently vanishing. */}
+      {detail.status === 'CONFIRMED' ? (
+        <div className="rounded-xl border border-white/[0.07] px-4 py-3 space-y-2.5" style={{ background: 'rgba(255,255,255,0.02)' }}>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Actions</p>
+
+          <div className="grid grid-cols-2 gap-2">
+            <button onClick={onCheckStatus} disabled={acting === 'status'}
+              className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-semibold bg-blue-500/10 text-blue-300 border border-blue-500/20 hover:bg-blue-500/20 disabled:opacity-50 transition-all">
+              {acting === 'status' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />} Check status
+            </button>
+            <button onClick={onCancelOrder} disabled={acting === 'cancel'}
+              className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-semibold bg-rose-500/10 text-rose-300 border border-rose-500/20 hover:bg-rose-500/20 disabled:opacity-50 transition-all">
+              {acting === 'cancel' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Ban className="w-3.5 h-3.5" />} Cancel order
+            </button>
+          </div>
+
+          {quotaLeft > 0 ? (
+            <OrderDetailRequestChange txnId={detail.transaction_id} contract={bestContractRaw} onDone={() => load(true)} />
+          ) : (
+            <p className="text-[11px] text-amber-300/80">
+              All {quota.max} change requests used for this order.
+            </p>
+          )}
+          <p className="text-[10px] text-slate-600">
+            {quotaLeft} of {quota.max} change requests left
+          </p>
+        </div>
+      ) : (
+        <p className="text-[11px] text-slate-500 rounded-xl border border-white/[0.07] px-4 py-2.5">
+          {detail.status === 'UPDATE_SENT'
+            ? 'A change request is already with the seller. You can raise another once they decide.'
+            : detail.status === 'CANCEL_SENT'
+              ? 'A cancellation is being processed for this order.'
+              : `No actions available while this order is ${detail.status.replace(/_/g, ' ').toLowerCase()}.`}
+        </p>
+      )}
+
+      {/* Earlier attempts, so a buyer can see what they already asked and
+        * what the seller said -- the point of showing the reason at all. */}
+      {history.length > 1 && (
+        <div className="rounded-xl border border-white/[0.07] px-4 py-3 space-y-2" style={{ background: 'rgba(255,255,255,0.02)' }}>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Earlier change requests</p>
+          {history.slice(1).map((h, i) => (
+            <div key={i} className="flex items-start justify-between gap-3 border-t border-white/[0.04] pt-2 first:border-0 first:pt-0">
+              <div className="min-w-0">
+                <p className="text-[11px] text-slate-300">{UPDATE_OUTCOME_META[h.outcome]?.title || h.outcome}</p>
+                {h.reason && <p className="text-[10px] text-slate-500 break-words">{h.reason}</p>}
+              </div>
+              <span className="text-[10px] text-slate-600 shrink-0">{fmtOrderDate(h.created_at)}</span>
+            </div>
+          ))}
         </div>
       )}
 
@@ -1582,10 +2147,23 @@ export default function App() {
   const cartCount = cart.reduce((s, i) => s + i.qty, 0);
   const cartTotal = cart.reduce((s, i) => s + i.price * i.qty, 0);
 
-  /* ── Transaction polling ─────────────────────────────────────────────── */
+  /* ── Transaction polling ───────────────────────────────────────────────
+   * Two things here are deliberate:
+   *
+   * 1. The interval scales with what we're waiting for. select/init/confirm
+   *    resolve in seconds, so 2s is right. UPDATE_SENT waits on a HUMAN
+   *    seller and can legitimately sit for hours -- polling that at 2s was
+   *    firing ~1,800 needless requests an hour.
+   * 2. The deps are the id and status, NOT the whole transaction object.
+   *    Each poll does setTransaction({...p, ...d}), which returns a fresh
+   *    object every time even when nothing changed -- depending on the
+   *    object meant tearing down and rebuilding the interval on every
+   *    single tick.
+   */
+  const pollMs = transaction?.status === 'UPDATE_SENT' ? 20000 : 2000;
   useEffect(() => {
     const terminalStatuses = ['CONFIRMED', 'CANCELLED'];
-    if (!transaction || terminalStatuses.includes(transaction.status)) return;
+    if (!transaction?.id || terminalStatuses.includes(transaction.status)) return;
     const id = setInterval(() => {
       apiFetch(`/status/${transaction.id}`)
         .then(r => r.json())
@@ -1598,9 +2176,9 @@ export default function App() {
           });
         })
         .catch(() => { });
-    }, 2000);
+    }, pollMs);
     return () => clearInterval(id);
-  }, [transaction]);
+  }, [transaction?.id, transaction?.status, pollMs]);
 
   /* ── Beckn: Select (single product from modal) ───────────────────────── */
   const handleSelectProduct = async (product) => {
@@ -1777,6 +2355,37 @@ export default function App() {
       setTransaction(p => ({ ...p, supportTicketStatus: d.status || 'SUPPORT_SENT' }));
       alert('Support ticket created! The seller will get back to you.');
     } catch (e) { alert('Support request failed: ' + e.message); }
+    finally { setIsLoading(false); }
+  };
+
+  /* ── Beckn: Update (Request Change) ────────────────────────────────────
+   * PUT semantics: the server replaces contract_attributes wholesale, so
+   * this fetches the buyer's latest full contract, patches only the
+   * delivery/contact fields (mirroring the server's own
+   * patchPerformanceDelivery used at Init time), and submits the complete
+   * contract back. The seller must approve before it takes effect --
+   * status flips to UPDATE_SENT immediately, and CheckoutFlow's dedicated
+   * UPDATE_SENT step tells the buyer to check back later. */
+  const handleRequestUpdate = async (fields) => {
+    if (!transaction) return;
+    setIsLoading(true);
+    try {
+      const r = await apiFetch(`/orders/${transaction.id}`);
+      if (!r.ok) throw new Error(await r.text());
+      const detail = await r.json();
+      const rawContract = buildContractWithDelivery(detail.contract, fields);
+
+      const ur = await apiFetch(`/update`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transaction_id: transaction.id, contract: rawContract }),
+      });
+      if (!ur.ok) {
+        const err = await ur.json().catch(() => ({ error: ur.statusText }));
+        throw new Error(err.error || 'Update request failed');
+      }
+      setBilling(p => ({ ...p, ...fields }));
+      setTransaction(p => ({ ...p, status: 'UPDATE_SENT' }));
+    } catch (e) { alert('Request Change failed: ' + e.message); }
     finally { setIsLoading(false); }
   };
 
@@ -2294,6 +2903,7 @@ export default function App() {
                   onRate={handleRate}
                   onSupport={handleSupport}
                   onRequestStatus={handleRequestStatus}
+                  onRequestUpdate={handleRequestUpdate}
                 />
               )}
             </motion.aside>
