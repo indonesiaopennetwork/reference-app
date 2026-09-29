@@ -973,6 +973,10 @@ const STATUS_COLORS = {
   INIT_SENT: { bg: 'bg-blue-500/10', text: 'text-blue-400', border: 'border-blue-500/20' },
   CONFIRM_SENT: { bg: 'bg-amber-500/10', text: 'text-amber-400', border: 'border-amber-500/20' },
   CANCEL_SENT: { bg: 'bg-rose-500/10', text: 'text-rose-400', border: 'border-rose-500/20' },
+  UPDATE_SENT: { bg: 'bg-purple-500/10', text: 'text-purple-400', border: 'border-purple-500/20' },
+  Return_Initiated: { bg: 'bg-yellow-500/10', text: 'text-yellow-400', border: 'border-yellow-500/20' },
+  Return_Approved: { bg: 'bg-green-500/10', text: 'text-green-400', border: 'border-green-500/20' },
+  Return_Rejected: { bg: 'bg-red-500/10', text: 'text-red-400', border: 'border-red-500/20' },
 };
 
 function fmtOrderDate(iso) {
@@ -1015,7 +1019,15 @@ function parseContractDetail(contract) {
   // Status
   const statusCode = contract.status?.code || '';
 
-  return { items, price, currency, breakup, buyer, seller, statusCode, id: contract.id };
+  // Performance (replaces fulfillments in Beckn v2)
+  const performances = contract.performance || [];
+  let fulfillmentStatus = performances[0]?.status?.code || '';
+  const returnPerformance = performances.find(p => p.performanceAttributes?.type === 'RETURN');
+  if (returnPerformance && returnPerformance.status?.code) {
+    fulfillmentStatus = returnPerformance.status.code;
+  }
+
+  return { items, price, currency, breakup, buyer, seller, statusCode, fulfillmentStatus, id: contract.id };
 }
 
 const ACTION_LABELS = {
@@ -1030,12 +1042,14 @@ const ACTION_LABELS = {
   rate: { icon: '⭐', label: 'Rated', color: 'text-amber-400' },
   on_rate: { icon: '⭐', label: 'Rating Confirmed', color: 'text-amber-400' },
   on_status: { icon: '📊', label: 'Status Update', color: 'text-slate-400' },
+  on_update: { icon: '🔄', label: 'Order Updated', color: 'text-sky-400' },
 };
 
 function OrderDetailPanel({ txnId, onBack }) {
   const [detail, setDetail] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [returning, setReturning] = useState(false);
 
   useEffect(() => {
     setLoading(true); setError(null);
@@ -1079,6 +1093,49 @@ function OrderDetailPanel({ txnId, onBack }) {
     catch { return `${cur || 'INR'} ${amount}`; }
   };
 
+  const handleReturn = async () => {
+    setReturning(true);
+    try {
+      let rawContract = {};
+      const snaps = detail.snapshots || [];
+      if (snaps.length > 0) {
+        const lastSnap = snaps[snaps.length - 1].contract;
+        rawContract = lastSnap.message?.contract || lastSnap;
+      } else {
+        rawContract = detail.contract;
+      }
+
+      const retContract = {
+        ...rawContract,
+        id: bestContract.id,
+        performance: [
+          ...(rawContract.performance || []),
+          { 
+            id: "return-1",
+            performanceAttributes: {
+              "@context": "https://schema.ion.id/release1/schema/extension/trade/TradePerformance/v1/context.jsonld",
+              "@type": "ion:IONTradePerformance",
+              "type": "RETURN",
+              "supportedPerformanceModes": ["DELIVERY"]
+            },
+            status: { code: "Return_Initiated" } 
+          }
+        ]
+      };
+      await apiFetch('/update', {
+        method: 'POST',
+        body: JSON.stringify({ transaction_id: txnId, contract: retContract })
+      });
+      alert('Return initiated! The BPP has been notified.');
+    } catch (e) {
+      alert('Return failed: ' + e.message);
+    } finally {
+      setReturning(false);
+    }
+  };
+
+  const canReturn = bestContract?.fulfillmentStatus === 'Delivered';
+
   return (
     <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
 
@@ -1097,6 +1154,22 @@ function OrderDetailPanel({ txnId, onBack }) {
           <p className="text-[10px] text-slate-500">{fmtOrderDate(detail.updated_at)}</p>
         </div>
       </div>
+
+      {canReturn && (
+        <div className="rounded-xl border border-white/[0.07] px-4 py-3 bg-purple-500/10 flex items-center justify-between">
+          <div>
+            <p className="text-xs font-bold text-purple-400">Order Delivered</p>
+            <p className="text-[10px] text-purple-400/70 mt-0.5">You can now initiate a return.</p>
+          </div>
+          <button 
+            disabled={returning}
+            onClick={handleReturn}
+            className="px-3 py-1.5 bg-purple-500 text-white rounded-lg text-xs font-bold hover:bg-purple-600 transition-colors disabled:opacity-50"
+          >
+            {returning ? 'Initiating...' : 'Return Order'}
+          </button>
+        </div>
+      )}
 
       {/* IDs */}
       <div className="rounded-xl border border-white/[0.07] px-4 py-3 space-y-2" style={{ background: 'rgba(255,255,255,0.02)' }}>
@@ -1192,16 +1265,51 @@ function OrderDetailPanel({ txnId, onBack }) {
           <div className="px-4 py-3 space-y-3">
             {snaps.map((s, i) => {
               const al = ACTION_LABELS[s.action] || { icon: '•', label: s.action, color: 'text-slate-500' };
+              let displayLabel = al.label;
+              let displayIcon = al.icon;
+              let displayColor = al.color;
+              
+              if (s.action === 'on_status' || s.action === 'on_update' || s.action === 'update') {
+                const parsedSn = parseContractDetail(s.contract);
+                const fs = parsedSn.fulfillmentStatus?.toLowerCase() || '';
+                
+                if (fs === 'packed') {
+                  displayLabel = 'Order Packed';
+                  displayIcon = '📦';
+                  displayColor = 'text-orange-400';
+                } else if (fs === 'shipped') {
+                  displayLabel = 'Order Shipped';
+                  displayIcon = '🚚';
+                  displayColor = 'text-blue-400';
+                } else if (fs === 'delivered') {
+                  displayLabel = 'Order Delivered';
+                  displayIcon = '📬';
+                  displayColor = 'text-emerald-400';
+                } else if (fs === 'return_initiated') {
+                  displayLabel = 'Return Requested';
+                  displayIcon = '🔄';
+                  displayColor = 'text-purple-400';
+                } else if (fs === 'return_approved') {
+                  displayLabel = 'Return Approved';
+                  displayIcon = '✅';
+                  displayColor = 'text-emerald-400';
+                } else if (fs === 'return_rejected') {
+                  displayLabel = 'Return Rejected';
+                  displayIcon = '❌';
+                  displayColor = 'text-rose-400';
+                }
+              }
+              
               return (
                 <div key={i} className="flex items-start gap-3">
                   <div className="flex flex-col items-center shrink-0">
-                    <div className={`w-7 h-7 rounded-full flex items-center justify-center text-base bg-slate-800 border border-white/[0.07] ${al.color}`}>
-                      {al.icon}
+                    <div className={`w-7 h-7 rounded-full flex items-center justify-center text-base bg-slate-800 border border-white/[0.07] ${displayColor}`}>
+                      {displayIcon}
                     </div>
                     {i < snaps.length - 1 && <div className="w-px h-4 bg-white/[0.06] mt-1" />}
                   </div>
                   <div className="flex-1 pb-1">
-                    <p className={`text-xs font-semibold ${al.color}`}>{al.label}</p>
+                    <p className={`text-xs font-semibold ${displayColor}`}>{displayLabel}</p>
                     <p className="text-[10px] text-slate-600">{fmtOrderDate(s.created_at)}</p>
                   </div>
                 </div>

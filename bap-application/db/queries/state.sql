@@ -17,11 +17,7 @@ ON CONFLICT (transaction_id) DO UPDATE SET
 -- name: UpsertContractSnapshot :exec
 -- Stores (or replaces) the full contract JSON for a given (transaction_id, action).
 INSERT INTO contract_snapshots (transaction_id, action, contract_id, contract)
-VALUES ($1, $2, $3, $4)
-ON CONFLICT (transaction_id, action) DO UPDATE SET
-    contract_id = EXCLUDED.contract_id,
-    contract    = EXCLUDED.contract,
-    updated_at  = NOW();
+VALUES ($1, $2, $3, $4);
 
 -- name: GetTransaction :one
 -- Returns the transaction row for the given transaction UUID.

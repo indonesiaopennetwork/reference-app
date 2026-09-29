@@ -83,6 +83,7 @@ SELECT
     c.bap_id,
     c.bap_uri,
     c.domain,
+    c.contract_attributes,
     c.created_at,
     c.updated_at
 FROM contracts c

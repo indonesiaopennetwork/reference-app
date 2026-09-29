@@ -51,15 +51,37 @@ func (s *Service) Process(ctx context.Context, req *StatusRequest) {
 		return
 	}
 
-	// Build a minimal contract payload reflecting current status.
-	contract := map[string]interface{}{
-		"id":     row.ID.String(),
-		"status": map[string]string{"code": string(row.Status)},
+	// Fetch the most recent full contract payload for this transaction from beckn_message_log
+	var lastPayloadStr string
+	err = s.pool.QueryRow(ctx, `
+		SELECT request_payload 
+		FROM beckn_message_log 
+		WHERE transaction_id = $1 AND action IN ('on_confirm', 'confirm', 'on_init', 'init') 
+		ORDER BY created_at DESC LIMIT 1
+	`, txID).Scan(&lastPayloadStr)
+	if err != nil {
+		s.lh.WithModule("statussvc").Err().Error(err).Log("failed to find previous contract payload in message log")
+		return
 	}
-	if row.ContractAttributes != nil {
-		contract["contractAttributes"] = json.RawMessage(row.ContractAttributes)
+
+	var parsedReq struct {
+		Message struct {
+			Contract map[string]interface{} `json:"contract"`
+		} `json:"message"`
 	}
-	contractJSON, _ := json.Marshal(contract)
+	if err := json.Unmarshal([]byte(lastPayloadStr), &parsedReq); err != nil {
+		s.lh.WithModule("statussvc").Err().Error(err).Log("failed to parse previous contract payload")
+		return
+	}
+
+	contractMap := parsedReq.Message.Contract
+	if contractMap == nil {
+		contractMap = map[string]interface{}{}
+	}
+	contractMap["id"] = row.ID.String()
+	contractMap["status"] = map[string]string{"code": string(row.Status)}
+
+	contractJSON, _ := json.Marshal(contractMap)
 
 	outMsgID := uuid.New()
 	onStatusReq := OnStatusRequest{

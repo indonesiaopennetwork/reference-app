@@ -162,6 +162,7 @@ func registerDashboardRoutes(v1 *gin.RouterGroup, pool *pgxpool.Pool, cfg *confi
 
 	dash.GET("/orders", h.HandleListOrders)
 	dash.GET("/orders/:id", h.HandleGetOrder)
+	dash.PUT("/orders/:id/fulfillment-status", h.HandleUpdateFulfillmentStatus)
 
 	inv := dash.Group("/inventory")
 	inv.GET("/resources", h.HandleListResources)
