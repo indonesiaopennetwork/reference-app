@@ -3,6 +3,7 @@ package dashboardsvc
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -488,6 +489,59 @@ func (h *Handler) HandleListRatings(c *gin.Context) {
 // PUT /api/v1/orders/:id/fulfillment-status
 // ---------------------------------------------------------------------------
 
+// autoDeliverAfter is how long an order stays Shipped before it is marked
+// Delivered (a stand-in for a real logistics partner's delivery event).
+const autoDeliverAfter = time.Minute
+
+// RunAutoDelivery marks orders Delivered once they have been Shipped for
+// autoDeliverAfter, every interval until ctx is done. It works from the
+// database (contract_performances), so orders shipped before a restart are
+// still delivered after it.
+func (h *Handler) RunAutoDelivery(ctx context.Context, interval time.Duration) {
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		h.deliverShipped(ctx)
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+func (h *Handler) deliverShipped(ctx context.Context) {
+	rows, err := h.pool.Query(ctx, `
+		SELECT DISTINCT cp.contract_id FROM contract_performances cp
+		  JOIN contracts c ON c.id = cp.contract_id
+		 WHERE cp.status_code = 'Shipped' AND cp.updated_at <= NOW() - $1::interval
+		   AND c.bpp_id = $2 AND c.status = 'ACTIVE' AND c.deleted_at IS NULL`,
+		fmt.Sprintf("%d seconds", int(autoDeliverAfter.Seconds())), h.cfg.BppID)
+	if err != nil {
+		h.lh.WithModule("dashboardsvc").Warn().Error(err).Log("auto-delivery sweep failed")
+		return
+	}
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
+		}
+	}
+	rows.Close()
+
+	q := sqlc.New(h.pool)
+	delivered := "Delivered"
+	for _, id := range ids {
+		if err := q.UpdatePerformanceStatus(ctx, sqlc.UpdatePerformanceStatusParams{StatusCode: &delivered, ContractID: id}); err != nil {
+			h.lh.WithModule("dashboardsvc").Warn().Error(err).Log("auto-delivery failed for " + id.String())
+			continue
+		}
+		h.markDelivered(ctx, id)
+		h.triggerUnsolicitedOnStatus(id, delivered)
+	}
+}
+
 // markDelivered stamps when the order was delivered -- the start of its return
 // window (offer policies.returns.window). The first delivery time is kept.
 func (h *Handler) markDelivered(ctx context.Context, contractID uuid.UUID) {
@@ -548,22 +602,8 @@ func (h *Handler) HandleUpdateFulfillmentStatus(c *gin.Context) {
 	// Trigger unsolicited on_status
 	h.triggerUnsolicitedOnStatus(id, req.Status)
 
-	// If Shipped, schedule Delivered after 10 mins
-	if req.Status == "Shipped" {
-		go func(cid uuid.UUID) {
-			time.Sleep(1 * time.Minute)
-			bgCtx := context.Background()
-			newStatus := "Delivered"
-			err := q.UpdatePerformanceStatus(bgCtx, sqlc.UpdatePerformanceStatusParams{
-				StatusCode: &newStatus,
-				ContractID: cid,
-			})
-			if err == nil {
-				h.markDelivered(bgCtx, cid)
-				h.triggerUnsolicitedOnStatus(cid, newStatus)
-			}
-		}(id)
-	}
+	// Shipped orders become Delivered after autoDeliverAfter -- done by
+	// RunAutoDelivery's sweep, not an in-memory timer, so a restart can't lose it.
 
 	c.JSON(http.StatusOK, gin.H{"status": "updated"})
 }

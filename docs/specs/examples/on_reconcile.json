@@ -1,0 +1,59 @@
+{
+  "context": {
+    "version": "2.0.0",
+    "action": "on_reconcile",
+    "timestamp": "2026-09-30T17:05:00Z",
+    "messageId": "6f0c9a7e-4d2b-4b8e-9d2f-1a7c3e5b9d10",
+    "transactionId": "b3e1d0a4-7c52-4f1e-8a93-2c6d4e8f0a17",
+    "bapId": "onix-bap-x7m2wmy7nq-et.a.run.app",
+    "bapUri": "http://onix-bap:8081/bap/receiver",
+    "bppId": "onix-bap-x7m2wmy7nq-et.a.run.app",
+    "bppUri": "http://onix-bpp:8082/bpp/receiver",
+    "ttl": "PT30S",
+    "networkId": "ion.id/ion-launch"
+  },
+  "message": {
+    "reconciliationId": "recon-2026-09-30T170000Z-onix-bap-x7m2wmy7nq-et.a.run.app",
+    "reconciliationStatus": "AGREED",
+    "contracts": [
+      {
+        "contractId": "6b86b4cd-f574-48f4-a5e2-3855ba00675c",
+        "reconciliationStatus": "AGREED"
+      },
+      {
+        "contractId": "bfd0dcc5-1dcb-4987-be91-e563638b63d5",
+        "reconciliationStatus": "AGREED"
+      },
+      {
+        "contractId": "11f4d03b-1949-41da-b0d4-5e7a42bb058a",
+        "reconciliationStatus": "AGREED"
+      }
+    ],
+    "settlementSummary": {
+      "bapId": "onix-bap-x7m2wmy7nq-et.a.run.app",
+      "bppId": "onix-bap-x7m2wmy7nq-et.a.run.app",
+      "currency": "IDR",
+      "settlementDate": "2026-09-30",
+      "settlementBasis": "DELIVERY",
+      "settlementWindow": "P1D",
+      "contractCount": 3,
+      "totalPaidAmount": 270000,
+      "totalGatewayRefundAmount": 134800,
+      "totalProviderRefundAmount": 0,
+      "totalFeesRetained": 200,
+      "totalSettledAmount": 135200,
+      "netPayable": 135200
+    },
+    "payout": {
+      "status": "COMPLETE",
+      "amount": 135200,
+      "currency": "IDR",
+      "paidAt": "2026-09-30T17:05:00Z",
+      "method": "BANK_TRANSFER",
+      "gateway": {
+        "name": "mock-gateway",
+        "transactionId": "9d1c2f7e-0b6a-4c4e-9a51-3f1e2d8b7c60"
+      }
+    }
+  }
+}

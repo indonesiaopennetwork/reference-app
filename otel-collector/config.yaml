@@ -1,6 +1,11 @@
 # Companion collector for onix-bap/onix-bpp — network-forwarding only.
-# Forwards filtered signals to the network-level collector at netcol.iontest.in
-# (operated by the network governing entity, not this deployment).
+# Forwards filtered signals to the network-level collector at
+# NETWORK_COLLECTOR_ENDPOINT (env-substituted below; see docker-compose.yml
+# and .env.example) — netcol.iontest.in is ion-monitor's own staging
+# deployment, and that's the default. Point it at a local ion-monitor
+# instead for local testing (http://host.docker.internal:<its OTLP/HTTP
+# host port, 4320 by default> — see docker-compose.yml's extra_hosts entry
+# on this service for why host.docker.internal resolves here).
 # No local Prometheus or Jaeger exporters — node-level telemetry is not
 # enabled in this config. Shared as-is between the onix-bap and onix-bpp
 # sidecars (identical config; each runs its own instance).
@@ -41,7 +46,7 @@ exporters:
   debug:
     verbosity: detailed
   otlp_http/collector-network:
-    endpoint: https://netcol.iontest.in
+    endpoint: ${env:NETWORK_COLLECTOR_ENDPOINT}
     compression: gzip
 
 extensions:

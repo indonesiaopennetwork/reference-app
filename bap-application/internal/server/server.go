@@ -20,6 +20,7 @@ import (
 	onstatussvc "github.com/ion/winroom/bap/internal/on_status_svc"
 	onsupportsvc "github.com/ion/winroom/bap/internal/on_support_svc"
 	onupdatesvc "github.com/ion/winroom/bap/internal/on_update_svc"
+	reconcilesvc "github.com/ion/winroom/bap/internal/reconcile_svc"
 )
 
 // RegisterRoutes wires all BAP routes onto the given Gin engine. verifier
@@ -65,6 +66,19 @@ func RegisterRoutes(r *gin.Engine, pool *pgxpool.Pool, cfg *config.Config, lh *l
 
 		onSupportH := onsupportsvc.NewHandler(pool, cfg, lh)
 		webhook.POST("/on_support", onSupportH.Handle)
+
+		// /reconcile — a BPP's settlement batch (Beckn extension,
+		// docs/specs/reconcile.yaml); answered with /on_reconcile.
+		reconcileH := reconcilesvc.NewHandler(pool, cfg, lh)
+		webhook.POST("/reconcile", reconcileH.Handle)
+	}
+
+	// Operator API: not for shoppers -- guarded by BAP_ADMIN_KEY (X-Admin-Key).
+	admin := r.Group("/api/v1/admin")
+	admin.Use(reconcilesvc.RequireAdminKey(cfg.BapAdminKey))
+	{
+		reconcileAdminH := reconcilesvc.NewHandler(pool, cfg, lh)
+		admin.GET("/reconciliation", reconcileAdminH.HandleAdminOverview)
 	}
 
 	// Client-facing APIs for the React frontend. OptionalAuth resolves a
@@ -86,8 +100,8 @@ func RegisterRoutes(r *gin.Engine, pool *pgxpool.Pool, cfg *config.Config, lh *l
 		v1.GET("/status/:id", clientH.HandleStatus)
 		v1.POST("/request-status", clientH.HandleRequestStatus)
 		v1.POST("/cancel", clientH.HandleCancel)
-	v1.POST("/cancel-items", clientH.HandleCancelItems)
-	v1.POST("/return-items", clientH.HandleReturnItems)
+		v1.POST("/cancel-items", clientH.HandleCancelItems)
+		v1.POST("/return-items", clientH.HandleReturnItems)
 		v1.POST("/update", clientH.HandleUpdate)
 		v1.POST("/rate", clientH.HandleRate)
 		v1.POST("/support", clientH.HandleSupport)

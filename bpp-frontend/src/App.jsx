@@ -8,7 +8,7 @@ import {
   Activity, Zap, Store, Calendar, Tag, BarChart2, Inbox,
   ArrowRight, Circle, Star, Ticket, Ban, Wand2,
   BookOpen, FolderOpen, Send, ArrowLeft, ExternalLink, LogOut,
-  ChevronDown, Copy, Check,
+  ChevronDown, Copy, Check, Scale, Pencil,
 } from 'lucide-react'
 import { captureTokenFromUrl, getToken, clearToken, redirectToLogin, logout } from './auth.js'
 
@@ -88,6 +88,14 @@ function StatusBadge({ status }) {
     COMPLETE: { cls: 'bg-sky-500/15    text-sky-400    border-sky-500/25', dot: 'bg-sky-400' },
     ACK: { cls: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25', dot: 'bg-emerald-400' },
     NACK: { cls: 'bg-red-500/15    text-red-400    border-red-500/25', dot: 'bg-red-400' },
+    // reconciliation batches
+    SENT: { cls: 'bg-sky-500/15    text-sky-400    border-sky-500/25', dot: 'bg-sky-400' },
+    SENDING: { cls: 'bg-sky-500/15    text-sky-400    border-sky-500/25', dot: 'bg-sky-400' },
+    PENDING: { cls: 'bg-amber-500/15  text-amber-400  border-amber-500/25', dot: 'bg-amber-400' },
+    AGREED: { cls: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25', dot: 'bg-emerald-400' },
+    ADJUSTED: { cls: 'bg-violet-500/15 text-violet-400 border-violet-500/25', dot: 'bg-violet-400' },
+    DISPUTED: { cls: 'bg-red-500/15    text-red-400    border-red-500/25', dot: 'bg-red-400' },
+    FAILED: { cls: 'bg-red-500/15    text-red-400    border-red-500/25', dot: 'bg-red-400' },
   }
   const s = map[status] || { cls: 'bg-slate-500/15 text-slate-400 border-slate-500/25', dot: 'bg-slate-400' }
   return (
@@ -157,6 +165,7 @@ const NAV_ITEMS = [
   { id: 'orders', label: 'Orders', icon: ShoppingBag, desc: 'Manage contracts' },
   { id: 'inventory', label: 'Inventory', icon: Package, desc: 'Resources & offers' },
   { id: 'catalogs', label: 'Catalogs', icon: BookOpen, desc: 'Manage & publish' },
+  { id: 'reconciliation', label: 'Reconciliation', icon: Scale, desc: 'Settle with buyer apps' },
   { id: 'messages', label: 'Message Log', icon: MessageSquare, desc: 'Protocol audit' },
   { id: 'support', label: 'Support Tickets', icon: Ticket, desc: 'Customer support' },
   { id: 'ratings', label: 'Ratings', icon: Star, desc: 'Order ratings' },
@@ -686,6 +695,38 @@ function OrderDetailDrawer({ order, onClose }) {
   )
 }
 
+// Delivery progress of an order (PENDING → Packed → Shipped → Delivered), with
+// the latest return's outcome underneath when there is one.
+const FULFILLMENT_STYLE = {
+  PENDING: 'bg-slate-500/15 text-slate-300 border-slate-500/25',
+  PACKED: 'bg-amber-500/15 text-amber-300 border-amber-500/25',
+  SHIPPED: 'bg-sky-500/15 text-sky-300 border-sky-500/25',
+  DELIVERED: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/25',
+}
+const RETURN_LABEL = {
+  Return_Approved: ['Return approved', 'text-emerald-400'],
+  Return_Rejected: ['Return rejected', 'text-rose-400'],
+  Return_Initiated: ['Return requested', 'text-amber-400'],
+}
+
+function FulfillmentStatus({ status, returnStatus, contractStatus }) {
+  const code = String(status || '').toUpperCase()
+  // An order cancelled before it was packed never entered fulfillment.
+  if (contractStatus === 'CANCELLED' && (!code || code === 'PENDING')) {
+    return <span className="text-xs text-slate-500">Not fulfilled</span>
+  }
+  if (!code) return <span className="text-xs text-slate-600">—</span>
+  const [retText, retCls] = RETURN_LABEL[returnStatus] || []
+  return (
+    <div className="flex flex-col items-start gap-1">
+      <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold border ${FULFILLMENT_STYLE[code] || FULFILLMENT_STYLE.PENDING}`}>
+        {status}
+      </span>
+      {retText && <span className={`text-[10px] font-semibold ${retCls}`}>{retText}</span>}
+    </div>
+  )
+}
+
 function OrdersPage() {
   const [page, setPage] = useState(1)
   const [selected, setSelected] = useState(null)
@@ -728,6 +769,7 @@ function OrdersPage() {
                 <th className="text-left px-5 py-3">Txn ID</th>
                 <th className="text-left px-5 py-3">Buyer</th>
                 <th className="text-left px-5 py-3">Status</th>
+                <th className="text-left px-5 py-3">Fulfillment</th>
                 <th className="text-left px-5 py-3">Offer</th>
                 <th className="text-left px-5 py-3">Created</th>
                 <th className="px-5 py-3 w-16" />
@@ -739,6 +781,7 @@ function OrdersPage() {
                   <td className="px-5 py-3 font-mono text-xs text-slate-500">{o.transaction_id?.slice(0, 8)}…</td>
                   <td className="px-5 py-3 text-slate-300 font-medium max-w-[180px] truncate">{o.bap_id}</td>
                   <td className="px-5 py-3"><StatusBadge status={o.status} /></td>
+                  <td className="px-5 py-3"><FulfillmentStatus status={o.fulfillment_status} returnStatus={o.return_status} contractStatus={o.status} /></td>
                   <td className="px-5 py-3 text-slate-400 text-xs max-w-[140px] truncate">{fmtName(o.offer_descriptor)}</td>
                   <td className="px-5 py-3 text-slate-500 text-xs">{fmtDateShort(o.created_at?.Time || o.created_at)}</td>
                   <td className="px-5 py-3">
@@ -751,7 +794,7 @@ function OrdersPage() {
                 </tr>
               ))}
               {!items.length && (
-                <tr><td colSpan={6} className="px-5 py-12 text-center text-slate-500">No orders found</td></tr>
+                <tr><td colSpan={7} className="px-5 py-12 text-center text-slate-500">No orders found</td></tr>
               )}
             </tbody>
           </table>
@@ -1382,6 +1425,64 @@ function buildResourceAttrs(r) {
 // Build offerAttributes JSON-LD from flat form fields.
 // Returns undefined when no meaningful attributes are set so the field is
 // omitted from the payload entirely (avoids sending a broken @context to CDS).
+// Reverse of buildResourceAttrs + the publish descriptor: a stored resource
+// (GET /catalogs/:id/resources/:rid) back into the Add Product form's fields.
+function resourceToForm(r) {
+  const a = r.resourceAttributes || {}
+  const id = a.identity || {}, ph = a.physical || {}, ap = ph.appearance || {}, dim = ph.dimensions || {}
+  const pkg = a.packagedGoodsDeclaration || {}, mfr = pkg.manufacturerOrPacker || {}
+  const s = v => (v == null ? '' : String(v))
+  return {
+    ...EMPTY_RESOURCE(),
+    id: r.id, name: r.descriptor?.name || '', short_desc: r.descriptor?.shortDesc || '', long_desc: r.descriptor?.longDesc || '',
+    media_url: r.descriptor?.mediaFile?.[0]?.uri || '',
+    stock_quantity: r.stockQuantity ? String(r.stockQuantity) : '',
+    product_highlights: a.productHighlights || '', specifications: a.specifications || '',
+    brand: id.brand || '', origin_country: id.originCountry || '',
+    weight_value: s(ph.weight?.unitQuantity), weight_unit: ph.weight?.unitCode || 'G',
+    volume_value: s(ph.volume?.unitQuantity), volume_unit: ph.volume?.unitCode || 'ML',
+    dim_unit: dim.unit || 'CM', dim_length: s(dim.length || ''), dim_breadth: s(dim.breadth || ''), dim_height: s(dim.height || ''),
+    color: ap.color || '', material: ap.material || '', finish: ap.finish || '',
+    mfr_type: mfr.type || 'MANUFACTURER', mfr_name: mfr.name || '', mfr_address: mfr.address || '',
+    common_name: pkg.commonOrGenericName || '',
+    net_qty_value: s(pkg.netQuantity?.unitQuantity), net_qty_unit: pkg.netQuantity?.unitCode || 'ML',
+  }
+}
+
+// Reverse of buildOfferAttrs + buildPriceBreakup: a stored offer
+// (GET /catalogs/:id/offers/:oid) back into the offer form's fields.
+function offerToForm(o) {
+  const a = o.offerAttributes || {}
+  const pol = a.policies || {}, ret = pol.returns || {}, can = pol.cancellation || {}, rep = pol.replacement || {}
+  const svc = a.serviceability || {}, timing = svc.timing?.[0] || {}
+  const ca = o.considerations?.[0]?.considerationAttributes || {}
+  const base = (ca.breakup || []).find(b => b.type === 'BASE_PRICE')
+  const tax = (ca.breakup || []).find(b => b.type === 'TAX')
+  const local = iso => { if (!iso) return ''; const d = new Date(iso); return isNaN(d) ? '' : new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16) }
+  const blank = EMPTY_OFFER()
+  return {
+    ...blank,
+    id: o.id, name: o.descriptor?.name || '', short_desc: o.descriptor?.shortDesc || '',
+    resource_ids: (o.resourceIds || []).join(', '),
+    price: base ? String(base.amount) : ca.totalAmount != null ? String(ca.totalAmount) : '',
+    currency: ca.currency || 'IDR',
+    tax_regime: tax?.taxDetail?.taxRegime || (tax ? 'PPN' : 'EXEMPT'),
+    tax_category: tax?.taxDetail?.taxCategory || 'BKP',
+    tax_rate: tax?.taxDetail?.rate != null ? String(Math.round(tax.taxDetail.rate * 10000) / 100) : blank.tax_rate,
+    validity_start: local(o.validity?.startDate), validity_end: local(o.validity?.endDate),
+    offer_context: a['@context'] || blank.offer_context,
+    returns_allowed: !!ret.allowed, returns_window: ret.window || blank.returns_window, returns_method: ret.method || blank.returns_method,
+    returns_fee_type: ret.restockingFee?.type || '', returns_fee_value: ret.restockingFee?.value != null ? String(ret.restockingFee.value) : '',
+    cancel_allowed: !!can.allowed, cancel_window: can.window || blank.cancel_window, cancel_event: can.cutoffEvent || blank.cancel_event,
+    replace_allowed: !!rep.allowed, replace_window: rep.window || blank.replace_window, replace_method: rep.method || blank.replace_method,
+    replace_subject_avail: rep.subjectToAvailability ?? blank.replace_subject_avail,
+    cod_available: !!a.paymentConstraints?.codAvailable,
+    max_distance: svc.distanceConstraint?.maxDistance != null ? String(svc.distanceConstraint.maxDistance) : '',
+    distance_unit: svc.distanceConstraint?.unit || 'KM',
+    timing_days: timing.daysOfWeek || [], timing_start: timing.timeRange?.start || '09:00', timing_end: timing.timeRange?.end || '21:00',
+  }
+}
+
 function buildOfferAttrs(o) {
   const hasPolicies = o.returns_allowed || o.cancel_allowed || o.replace_allowed
   const hasPayment = o.cod_available
@@ -2394,6 +2495,210 @@ function PayloadPanel({ message: m }) {
   )
 }
 
+// ─── Reconciliation ───────────────────────────────────────────────────────────
+// Settlement reconciliation with buyer apps (Beckn extension, docs/specs/
+// reconcile.yaml). Per BAP: contracts due now (payout basis event +
+// settlementWindow has passed) with the summary /reconcile would carry, and a
+// manual send; contracts still to fall due; and past batches.
+
+const rupiah = n => n == null ? '—' : `Rp ${Number(n).toLocaleString('id-ID')}`
+
+function untilText(dueAt, now) {
+  if (!dueAt) return null
+  const ms = new Date(dueAt).getTime() - now
+  if (ms <= 0) return 'due now'
+  const s = Math.round(ms / 1000), d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60)
+  return 'due in ' + (d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : m ? `${m}m ${s % 60}s` : `${s}s`)
+}
+
+function ReconContractsTable({ rows, now }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-white/[0.06]">
+            <th className="text-left px-4 py-2">Contract</th>
+            <th className="text-left px-4 py-2">Status</th>
+            <th className="text-left px-4 py-2">Payout clock</th>
+            <th className="text-right px-4 py-2">Paid</th>
+            <th className="text-right px-4 py-2">Gateway refund</th>
+            <th className="text-right px-4 py-2">Provider refund</th>
+            <th className="text-right px-4 py-2">Settled</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-white/[0.04]">
+          {rows.map(r => (
+            <tr key={r.contract_id}>
+              <td className="px-4 py-2 font-mono text-slate-400" title={r.contract_id}>{String(r.contract_id).slice(0, 8)}…</td>
+              <td className="px-4 py-2"><StatusBadge status={r.status} /></td>
+              <td className="px-4 py-2 text-slate-400">
+                <span className="text-slate-300">{r.basis_event}</span>
+                {r.basis_at && <> {fmtDate(r.basis_at)}</>}
+                <span className="text-slate-600"> + {r.settlement_window}</span>
+                {r.due_at && <span className={`ml-2 font-semibold ${r.due ? 'text-emerald-400' : 'text-amber-400'}`}>{untilText(r.due_at, now)}</span>}
+              </td>
+              <td className="px-4 py-2 text-right tabular-nums text-slate-300">{rupiah(r.paid)}</td>
+              <td className="px-4 py-2 text-right tabular-nums text-rose-300">{r.gateway_refund ? `− ${rupiah(r.gateway_refund)}` : '—'}</td>
+              <td className="px-4 py-2 text-right tabular-nums text-slate-500">{r.provider_refund ? rupiah(r.provider_refund) : '—'}</td>
+              <td className="px-4 py-2 text-right tabular-nums font-semibold text-white">{rupiah(r.paid - r.gateway_refund)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function ReconciliationPage() {
+  const { data, loading, error, reload } = useApi('/reconciliation')
+  const [now, setNow] = useState(Date.now())
+  const [sending, setSending] = useState(null)
+  const [notice, setNotice] = useState(null)
+  const [openBatch, setOpenBatch] = useState(null)
+
+  // Tick every second for the countdowns; re-fetch every 15s so contracts
+  // move from upcoming to due (and batch outcomes arrive) on their own.
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000)
+    const r = setInterval(() => reload(), 15000)
+    return () => { clearInterval(t); clearInterval(r) }
+  }, [reload])
+
+  const send = async bapId => {
+    if (!window.confirm(`Send /reconcile to ${bapId} for everything due now?`)) return
+    setSending(bapId); setNotice(null)
+    try {
+      const r = await apiFetch('/reconciliation/send', { method: 'POST', body: JSON.stringify({ bap_id: bapId }) })
+      setNotice({ ok: true, text: `Sent ${r.batch.id} — net payable ${rupiah(r.batch.summary?.netPayable)}` })
+    } catch (e) {
+      let msg = e.message
+      try { msg = JSON.parse(e.message).error || msg } catch { }
+      setNotice({ ok: false, text: msg })
+    } finally {
+      setSending(null); reload()
+    }
+  }
+
+  const baps = data?.baps || []
+  const batches = data?.batches || []
+  const terms = data?.terms
+
+  return (
+    <div>
+      <PageHeader breadcrumb="Settlement" title="Reconciliation"
+        subtitle={terms ? `Payout terms: ${terms.settlement_basis} + ${terms.settlement_window}` : 'Settle with buyer apps'}
+        action={
+          <button onClick={reload}
+            className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white transition-colors px-3 py-1.5 rounded-lg border border-white/[0.07]">
+            <RefreshCw size={12} className={loading ? 'animate-spin' : ''} /> Refresh
+          </button>
+        }
+      />
+
+      {error && <div className="mb-4"><ErrorBox message={error} onRetry={reload} /></div>}
+      {notice && (
+        <div className={`mb-4 px-4 py-3 rounded-xl text-sm border ${notice.ok ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300' : 'bg-red-500/10 border-red-500/20 text-red-300'}`}>
+          {notice.text}
+        </div>
+      )}
+
+      {loading && !data ? <LoadingSpinner label="Loading settlements…" /> : baps.length === 0 ? (
+        <Card className="p-8 text-center text-sm text-slate-500">Nothing to reconcile — every settlement is in a batch.</Card>
+      ) : baps.map(g => (
+        <Card key={g.bap_id} className="mb-5 overflow-hidden">
+          <div className="px-5 py-3 border-b border-white/[0.06] flex flex-wrap items-center gap-3">
+            <div className="min-w-0">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Buyer app</p>
+              <p className="text-sm font-mono text-white truncate">{g.bap_id}</p>
+            </div>
+            <button disabled={!g.due.length || sending === g.bap_id} onClick={() => send(g.bap_id)}
+              className="ml-auto flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-white disabled:opacity-40 transition-opacity"
+              style={{ background: BRAND }}>
+              <Send size={13} /> {sending === g.bap_id ? 'Sending…' : g.due.length ? `Send reconcile (${g.due.length})` : 'Nothing due yet'}
+            </button>
+          </div>
+
+          {g.summary && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-px bg-white/[0.04]">
+              {[
+                ['Contracts', g.summary.contractCount, 'text-white'],
+                ['Paid (held)', rupiah(g.summary.totalPaidAmount), 'text-slate-200'],
+                ['Gateway refunds', g.summary.totalGatewayRefundAmount ? `− ${rupiah(g.summary.totalGatewayRefundAmount)}` : '—', 'text-rose-300'],
+                ['Provider refunds', g.summary.totalProviderRefundAmount ? rupiah(g.summary.totalProviderRefundAmount) : '—', 'text-slate-400'],
+                ['Fees retained', rupiah(g.summary.totalFeesRetained), 'text-amber-300'],
+                ['Net payable', rupiah(g.summary.netPayable), 'text-emerald-300'],
+              ].map(([label, value, cls]) => (
+                <div key={label} className="bg-slate-950/40 px-4 py-3">
+                  <p className="text-[10px] text-slate-500">{label}</p>
+                  <p className={`text-sm font-bold tabular-nums ${cls}`}>{value}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {g.due.length > 0 && (
+            <div className="pt-2">
+              <p className="px-5 pt-2 text-[11px] font-bold uppercase tracking-widest text-emerald-400">Due now</p>
+              <ReconContractsTable rows={g.due} now={now} />
+            </div>
+          )}
+          {g.upcoming.length > 0 && (
+            <div className="pt-2 pb-1">
+              <p className="px-5 pt-2 text-[11px] font-bold uppercase tracking-widest text-amber-400">Upcoming</p>
+              <ReconContractsTable rows={g.upcoming} now={now} />
+            </div>
+          )}
+        </Card>
+      ))}
+
+      <SectionTitleBar>Batches</SectionTitleBar>
+      <Card>
+        {!batches.length ? <p className="px-5 py-8 text-center text-sm text-slate-500">No reconciliation sent yet.</p> : (
+          <div className="divide-y divide-white/[0.05]">
+            {batches.map(b => {
+              let sum = b.summary
+              try { if (typeof sum === 'string') sum = JSON.parse(sum) } catch { }
+              const open = openBatch === b.id
+              return (
+                <div key={b.id}>
+                  <button onClick={() => setOpenBatch(open ? null : b.id)}
+                    className="w-full text-left px-5 py-3 flex flex-wrap items-center gap-3 hover:bg-white/[0.025]">
+                    <ChevronDown size={14} className={`text-slate-500 transition-transform ${open ? 'rotate-180 text-cyan-400' : ''}`} />
+                    <span className="font-mono text-xs text-slate-300 truncate max-w-[22rem]" title={b.id}>{b.id}</span>
+                    <StatusBadge status={b.status} />
+                    <span className="text-xs text-slate-500">{b.contract_ids?.length || 0} contracts</span>
+                    <span className="ml-auto text-xs font-semibold text-emerald-300 tabular-nums">{rupiah(sum?.netPayable)}</span>
+                    <span className="text-[11px] text-slate-500 whitespace-nowrap">{fmtDate(b.created_at)}</span>
+                  </button>
+                  {b.error_message && <p className="px-5 pb-2 -mt-1 text-xs text-red-300 break-words">{b.error_message}</p>}
+                  {open && (
+                    <div className="px-5 pb-4 grid grid-cols-1 lg:grid-cols-2 gap-3">
+                      {[['/reconcile sent', b.request_payload], ['/on_reconcile received', b.response_payload]].map(([label, payload]) => (
+                        <div key={label} className="rounded-xl border border-white/[0.07] bg-slate-950/60 overflow-hidden">
+                          <p className="px-3 py-2 text-[11px] font-semibold text-slate-400 border-b border-white/[0.06]">{label}</p>
+                          {payload ? (
+                            <div className="max-h-[28rem] overflow-auto p-3 text-[11px] leading-relaxed font-mono text-slate-300 whitespace-pre">
+                              <JsonNode value={typeof payload === 'string' ? JSON.parse(payload) : payload} depth={0} last />
+                            </div>
+                          ) : <p className="p-3 text-xs text-slate-500">Nothing yet</p>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </Card>
+    </div>
+  )
+}
+
+function SectionTitleBar({ children }) {
+  return <p className="mt-2 mb-3 text-[11px] font-bold uppercase tracking-widest text-slate-500">{children}</p>
+}
+
 // ─── OrderRatings (inline inside OrderDetailDrawer) ──────────────────────────
 
 function OrderRatings({ contractId }) {
@@ -2963,7 +3268,10 @@ function CatalogDetailPage({ onNav, catalogId }) {
       {/* Products table */}
       <Card>
         <div className="flex items-center justify-between mb-4">
-          <p className="text-sm font-bold text-slate-200">Products</p>
+          <div>
+            <p className="text-sm font-bold text-slate-200">Products</p>
+            {cat.isPublished && <p className="text-[11px] text-slate-500">Edits reach the network when you publish again.</p>}
+          </div>
           <div className="flex gap-2">
             <button onClick={reload} className="p-1.5 rounded-lg border border-white/[0.08] text-slate-500 hover:text-white transition-colors">
               <RefreshCw size={13} />
@@ -2979,7 +3287,7 @@ function CatalogDetailPage({ onNav, catalogId }) {
           <div className="overflow-x-auto"><table className="w-full text-sm min-w-[500px]">
             <thead>
               <tr className="border-b border-white/[0.06]">
-                {['Resource', 'Description', 'Price', 'Offer ID', 'Validity'].map(h => (
+                {['Resource', 'Description', 'Price', 'Offer ID', 'Validity', ''].map(h => (
                   <th key={h} className="px-4 py-2 text-left text-[10px] uppercase tracking-widest text-slate-500 font-semibold">{h}</th>
                 ))}
               </tr>
@@ -3011,11 +3319,30 @@ function CatalogDetailPage({ onNav, catalogId }) {
                     <td className="px-4 py-3 text-xs text-slate-500">
                       {offer?.validityStart ? `${fmtDate(offer.validityStart)} – ${fmtDate(offer.validityEnd)}` : '—'}
                     </td>
+                    <td className="px-4 py-3">
+                      <div className="flex justify-end gap-1.5">
+                        <button onClick={() => onNav('edit_product', { catalogId, editResourceId: r.id })}
+                          className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold border border-white/[0.08] text-slate-300 hover:text-white hover:border-white/20 transition-colors whitespace-nowrap">
+                          <Pencil size={11} /> Edit product
+                        </button>
+                        {offer ? (
+                          <button onClick={() => onNav('edit_offer', { catalogId, editOfferId: offer.id })}
+                            className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold border border-white/[0.08] text-slate-300 hover:text-white hover:border-white/20 transition-colors whitespace-nowrap">
+                            <Tag size={11} /> Edit offer
+                          </button>
+                        ) : (
+                          <button onClick={() => onNav('add_offer', { catalogId, preselectedResourceId: r.id })}
+                            className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold border border-blue-500/30 text-blue-400 hover:bg-blue-500/10 transition-colors whitespace-nowrap">
+                            <Plus size={11} /> Add offer
+                          </button>
+                        )}
+                      </div>
+                    </td>
                   </tr>
                 )
               })}
               {!resources.length && (
-                <tr><td colSpan={5} className="px-4 py-12 text-center text-slate-500">
+                <tr><td colSpan={6} className="px-4 py-12 text-center text-slate-500">
                   No products yet.{' '}
                   <button onClick={() => onNav('add_product', { catalogId })} className="text-blue-400 hover:underline">Add the first product →</button>
                 </td></tr>
@@ -3051,7 +3378,7 @@ let _productFillIdx = 0
 
 // ── Shared offer form component ────────────────────────────────────────────
 
-function OfferForm({ off, oSet, offOpen, setOffOpen, catalogId, showResourcePicker }) {
+function OfferForm({ off, oSet, offOpen, setOffOpen, catalogId, lockId, showResourcePicker }) {
   const labelCls = 'block text-[11px] uppercase tracking-widest text-slate-500 font-semibold mb-1'
   const inputCls = 'w-full px-3 py-2 rounded-lg text-sm text-white placeholder-slate-600 border border-white/[0.08] bg-slate-900 focus:outline-none focus:border-blue-500/50 transition-colors'
 
@@ -3084,7 +3411,9 @@ function OfferForm({ off, oSet, offOpen, setOffOpen, catalogId, showResourcePick
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div><label className={labelCls}>Offer ID *</label>
-          <input className={inputCls} value={off.id} onChange={e => oSet('id', e.target.value)} placeholder="offer-flask-mh500" required />
+          <input className={inputCls + (lockId ? ' opacity-60 cursor-not-allowed' : '')} value={off.id} readOnly={lockId}
+            title={lockId ? 'The offer ID cannot change' : undefined}
+            onChange={e => oSet('id', e.target.value)} placeholder="offer-flask-mh500" required />
         </div>
         <div><label className={labelCls}>Offer Name *</label>
           <input className={inputCls} value={off.name} onChange={e => oSet('name', e.target.value)} placeholder="Flask 500ml Yellow" required />
@@ -3227,7 +3556,7 @@ function OfferForm({ off, oSet, offOpen, setOffOpen, catalogId, showResourcePick
 
 // ── Add Product Page (resource only) ──────────────────────────────────────
 
-function AddProductPage({ onNav, catalogId }) {
+function AddProductPage({ onNav, catalogId, editResourceId }) {
   const labelCls = 'block text-[11px] uppercase tracking-widest text-slate-500 font-semibold mb-1'
   const inputCls = 'w-full px-3 py-2 rounded-lg text-sm text-white placeholder-slate-600 border border-white/[0.08] bg-slate-900 focus:outline-none focus:border-blue-500/50 transition-colors'
 
@@ -3238,6 +3567,17 @@ function AddProductPage({ onNav, catalogId }) {
   const [success, setSuccess] = useState(false)
 
   const rSet = (k, v) => setRes(r => ({ ...r, [k]: v }))
+  const editing = !!editResourceId
+  const [loadingItem, setLoadingItem] = useState(editing)
+
+  // Edit mode: load the stored resource into the form.
+  useEffect(() => {
+    if (!editing) return
+    apiFetch(`/catalogs/${catalogId}/resources/${encodeURIComponent(editResourceId)}`)
+      .then(d => setRes(resourceToForm(d.resource)))
+      .catch(e => setError(e.message))
+      .finally(() => setLoadingItem(false))
+  }, [editing, catalogId, editResourceId])
 
   const handleAutoFill = () => {
     const seed = PRODUCT_AUTOFILL_POOL[_productFillIdx % PRODUCT_AUTOFILL_POOL.length]
@@ -3255,19 +3595,21 @@ function AddProductPage({ onNav, catalogId }) {
     const resourceAttrs = buildResourceAttrs(res)
     const mediaFile = res.media_url ? [{ uri: res.media_url, mimeType: 'image/jpeg' }] : []
 
-    // Resource only -- the real offer is created on the next (add_offer) page.
+    const resource = {
+      id: res.id,
+      descriptor: { name: res.name, shortDesc: res.short_desc, longDesc: res.long_desc, mediaFile },
+      stockQuantity: res.stock_quantity ? Number(res.stock_quantity) : 0,
+      ...(resourceAttrs ? { resourceAttributes: resourceAttrs } : {}),
+    }
     try {
-      await apiFetch(`/catalogs/${catalogId}/products`, {
-        method: 'POST',
-        body: JSON.stringify({
-          resource: {
-            id: res.id,
-            descriptor: { name: res.name, shortDesc: res.short_desc, longDesc: res.long_desc, mediaFile },
-            stockQuantity: res.stock_quantity ? Number(res.stock_quantity) : 0,
-            ...(resourceAttrs ? { resourceAttributes: resourceAttrs } : {}),
-          },
-        }),
-      })
+      if (editing) {
+        await apiFetch(`/catalogs/${catalogId}/resources/${encodeURIComponent(editResourceId)}`, { method: 'PUT', body: JSON.stringify(resource) })
+        setSuccess(true)
+        setTimeout(() => onNav('catalog_detail', { catalogId }), 1000)
+        return
+      }
+      // Resource only -- the real offer is created on the next (add_offer) page.
+      await apiFetch(`/catalogs/${catalogId}/products`, { method: 'POST', body: JSON.stringify({ resource }) })
       setSuccess(true)
       setTimeout(() => onNav('add_offer', { catalogId, preselectedResourceId: res.id }), 1000)
     } catch (err) {
@@ -3281,8 +3623,8 @@ function AddProductPage({ onNav, catalogId }) {
     return (
       <div className="flex flex-col items-center justify-center py-24 gap-4">
         <CheckCircle2 size={48} className="text-emerald-400" />
-        <p className="text-white text-lg font-semibold">Resource added!</p>
-        <p className="text-slate-500 text-sm">Opening offer setup…</p>
+        <p className="text-white text-lg font-semibold">{editing ? 'Product updated!' : 'Resource added!'}</p>
+        <p className="text-slate-500 text-sm">{editing ? 'Back to the catalog — publish to send the change' : 'Opening offer setup…'}</p>
       </div>
     )
   }
@@ -3294,24 +3636,29 @@ function AddProductPage({ onNav, catalogId }) {
           <ArrowLeft size={16} />
         </button>
         <div className="flex-1">
-          <h1 className="text-2xl font-bold text-white tracking-tight">Add Product</h1>
+          <h1 className="text-2xl font-bold text-white tracking-tight">{editing ? 'Edit Product' : 'Add Product'}</h1>
           <p className="text-xs text-slate-500 font-mono mt-0.5">catalog: {catalogId}</p>
         </div>
-        <button type="button" onClick={handleAutoFill}
-          className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold border border-purple-500/30 text-purple-400 hover:bg-purple-500/10 transition-colors">
-          <Wand2 size={13} /> Auto-fill
-        </button>
+        {!editing && (
+          <button type="button" onClick={handleAutoFill}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold border border-purple-500/30 text-purple-400 hover:bg-purple-500/10 transition-colors">
+            <Wand2 size={13} /> Auto-fill
+          </button>
+        )}
       </div>
 
       {error && <ErrorBox message={error} />}
+      {loadingItem && <LoadingSpinner label="Loading product…" />}
 
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className={`space-y-4 ${loadingItem ? 'hidden' : ''}`}>
         <Card className="p-4 sm:p-6">
           <p className="text-xs uppercase tracking-widest text-slate-500 font-bold pb-3 border-b border-white/[0.06] mb-4">📦 Resource Details</p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div><label className={labelCls}>Resource ID *</label>
-              <input className={inputCls} value={res.id} onChange={e => rSet('id', e.target.value)} placeholder="item-flask-mh500" required />
+              <input className={inputCls + (editing ? ' opacity-60 cursor-not-allowed' : '')} value={res.id} readOnly={editing}
+                title={editing ? 'The resource ID cannot change' : undefined}
+                onChange={e => rSet('id', e.target.value)} placeholder="item-flask-mh500" required />
             </div>
             <div><label className={labelCls}>Name *</label>
               <input className={inputCls} value={res.name} onChange={e => rSet('name', e.target.value)} placeholder="Stainless Steel Hiking Flask" required />
@@ -3426,7 +3773,7 @@ function AddProductPage({ onNav, catalogId }) {
           <button type="submit" disabled={loading}
             className="flex-1 px-5 py-3 rounded-xl text-sm font-semibold text-white shadow-lg transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50 flex items-center justify-center gap-2"
             style={{ background: BRAND }}>
-            {loading ? <><RefreshCw size={14} className="animate-spin" /> Saving…</> : <><Plus size={14} /> Save Resource → Setup Offer</>}
+            {loading ? <><RefreshCw size={14} className="animate-spin" /> Saving…</> : editing ? <><Check size={14} /> Save Changes</> : <><Plus size={14} /> Save Resource → Setup Offer</>}
           </button>
         </div>
       </form>
@@ -3436,7 +3783,7 @@ function AddProductPage({ onNav, catalogId }) {
 
 // ── Add Offer Page (standalone) ───────────────────────────────────────────
 
-function AddOfferPage({ onNav, catalogId, preselectedResourceId }) {
+function AddOfferPage({ onNav, catalogId, preselectedResourceId, editOfferId }) {
   const [off, setOff] = useState(() => ({
     ...EMPTY_OFFER(),
     resource_ids: preselectedResourceId || '',
@@ -3447,6 +3794,17 @@ function AddOfferPage({ onNav, catalogId, preselectedResourceId }) {
   const [success, setSuccess] = useState(false)
 
   const oSet = (k, v) => setOff(o => ({ ...o, [k]: v }))
+  const editing = !!editOfferId
+  const [loadingItem, setLoadingItem] = useState(editing)
+
+  // Edit mode: load the stored offer (with its price) into the form.
+  useEffect(() => {
+    if (!editing) return
+    apiFetch(`/catalogs/${catalogId}/offers/${encodeURIComponent(editOfferId)}`)
+      .then(d => setOff(offerToForm(d.offer)))
+      .catch(e => setError(e.message))
+      .finally(() => setLoadingItem(false))
+  }, [editing, catalogId, editOfferId])
 
   const handleAutoFill = () => {
     const seed = PRODUCT_AUTOFILL_POOL[_productFillIdx % PRODUCT_AUTOFILL_POOL.length]
@@ -3491,7 +3849,11 @@ function AddOfferPage({ onNav, catalogId, preselectedResourceId }) {
     }
 
     try {
-      await apiFetch(`/catalogs/${catalogId}/offers`, { method: 'POST', body: JSON.stringify(payload) })
+      if (editing) {
+        await apiFetch(`/catalogs/${catalogId}/offers/${encodeURIComponent(editOfferId)}`, { method: 'PUT', body: JSON.stringify(payload) })
+      } else {
+        await apiFetch(`/catalogs/${catalogId}/offers`, { method: 'POST', body: JSON.stringify(payload) })
+      }
       setSuccess(true)
       setTimeout(() => onNav('catalog_detail', { catalogId }), 1200)
     } catch (err) {
@@ -3505,7 +3867,7 @@ function AddOfferPage({ onNav, catalogId, preselectedResourceId }) {
     return (
       <div className="flex flex-col items-center justify-center py-24 gap-4">
         <CheckCircle2 size={48} className="text-emerald-400" />
-        <p className="text-white text-lg font-semibold">Offer added!</p>
+        <p className="text-white text-lg font-semibold">{editing ? 'Offer updated!' : 'Offer added!'}</p>
         <p className="text-slate-500 text-sm">Redirecting to catalog…</p>
       </div>
     )
@@ -3518,22 +3880,25 @@ function AddOfferPage({ onNav, catalogId, preselectedResourceId }) {
           <ArrowLeft size={16} />
         </button>
         <div className="flex-1">
-          <h1 className="text-2xl font-bold text-white tracking-tight">Add Offer</h1>
+          <h1 className="text-2xl font-bold text-white tracking-tight">{editing ? 'Edit Offer' : 'Add Offer'}</h1>
           <p className="text-xs text-slate-500 font-mono mt-0.5">catalog: {catalogId}</p>
         </div>
-        <button type="button" onClick={handleAutoFill}
-          className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold border border-purple-500/30 text-purple-400 hover:bg-purple-500/10 transition-colors">
-          <Wand2 size={13} /> Auto-fill
-        </button>
+        {!editing && (
+          <button type="button" onClick={handleAutoFill}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold border border-purple-500/30 text-purple-400 hover:bg-purple-500/10 transition-colors">
+            <Wand2 size={13} /> Auto-fill
+          </button>
+        )}
       </div>
 
       {error && <ErrorBox message={error} />}
+      {loadingItem && <LoadingSpinner label="Loading offer…" />}
 
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className={`space-y-4 ${loadingItem ? 'hidden' : ''}`}>
         <Card className="p-4 sm:p-6">
           <p className="text-xs uppercase tracking-widest text-slate-500 font-bold pb-3 border-b border-white/[0.06] mb-4">🏷️ Offer Details</p>
           <OfferForm off={off} oSet={oSet} offOpen={offOpen} setOffOpen={setOffOpen}
-            catalogId={catalogId} showResourcePicker={!preselectedResourceId} />
+            catalogId={catalogId} showResourcePicker={!preselectedResourceId} lockId={editing} />
         </Card>
 
         <div className="flex flex-col sm:flex-row gap-3">
@@ -3544,7 +3909,7 @@ function AddOfferPage({ onNav, catalogId, preselectedResourceId }) {
           <button type="submit" disabled={loading}
             className="flex-1 px-5 py-3 rounded-xl text-sm font-semibold text-white shadow-lg transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50 flex items-center justify-center gap-2"
             style={{ background: BRAND }}>
-            {loading ? <><RefreshCw size={14} className="animate-spin" /> Adding…</> : <><Tag size={14} /> Add Offer to Catalog</>}
+            {loading ? <><RefreshCw size={14} className="animate-spin" /> {editing ? 'Saving…' : 'Adding…'}</> : editing ? <><Check size={14} /> Save Changes</> : <><Tag size={14} /> Add Offer to Catalog</>}
           </button>
         </div>
       </form>
@@ -3563,8 +3928,11 @@ const PAGES = {
   catalog_detail: CatalogDetailPage,
   add_product: AddProductPage,
   add_offer: AddOfferPage,
+  edit_product: AddProductPage,
+  edit_offer: AddOfferPage,
   publish: PublishPage,
   messages: MessagesPage,
+  reconciliation: ReconciliationPage,
   support: SupportPage,
   ratings: RatingsPage,
 }

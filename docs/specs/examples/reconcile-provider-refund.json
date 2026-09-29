@@ -1,0 +1,555 @@
+{
+  "context": {
+    "version": "2.0.0",
+    "action": "reconcile",
+    "timestamp": "2026-10-01T17:00:00Z",
+    "messageId": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+    "transactionId": "c4f2e1b5-8d63-4a2f-9ba4-3d7e5f9a1b28",
+    "bapId": "onix-bap-x7m2wmy7nq-et.a.run.app",
+    "bapUri": "http://onix-bap:8081/bap/receiver",
+    "bppId": "onix-bap-x7m2wmy7nq-et.a.run.app",
+    "bppUri": "http://onix-bpp:8082/bpp/receiver",
+    "ttl": "PT30S",
+    "networkId": "ion.id/ion-launch"
+  },
+  "message": {
+    "reconciliationId": "recon-2026-10-01T170000Z-onix-bap-x7m2wmy7nq-et.a.run.app",
+    "settlementDate": "2026-10-01",
+    "contracts": [
+      {
+        "id": "11f4d03b-1949-41da-b0d4-5e7a42bb058a",
+        "status": {
+          "code": "ACTIVE"
+        },
+        "commitments": [
+          {
+            "id": "commitment-item-keripik-singkong-mumke2k1",
+            "offer": {
+              "id": "offer-bolu-pisang-mumke8v1",
+              "provider": {
+                "id": "provider-default",
+                "descriptor": {}
+              },
+              "descriptor": {
+                "name": "Bolu Pisang Cokelat"
+              },
+              "resourceIds": [
+                "item-keripik-singkong-mumke2k1"
+              ],
+              "considerations": [
+                {
+                  "id": "offer-bolu-pisang-mumke8v1-price",
+                  "status": {
+                    "code": "ACTIVE",
+                    "name": "ACTIVE"
+                  },
+                  "considerationAttributes": {
+                    "@type": "ion:IONTradeConsideration",
+                    "breakup": [
+                      {
+                        "type": "BASE_PRICE",
+                        "title": "Bolu Pisang Cokelat",
+                        "amount": 45000
+                      }
+                    ],
+                    "@context": "https://schema.ion.id/release1/schema/extension/trade/TradeConsideration/v1/context.jsonld",
+                    "currency": "IDR",
+                    "totalAmount": 45000,
+                    "paymentMethods": [
+                      "PREPAID",
+                      "COD",
+                      "DIGITAL_WALLET"
+                    ]
+                  }
+                }
+              ],
+              "offerAttributes": {
+                "@type": "ion:IONTradeOffer",
+                "@context": "https://schema.ion.id/release1/schema/extension/trade/TradeOffer/v1/context.jsonld",
+                "policies": {
+                  "returns": {
+                    "method": "SELLER_PICKUP",
+                    "window": "P7D",
+                    "allowed": true,
+                    "restockingFee": {
+                      "type": "FIXED",
+                      "value": 100
+                    }
+                  },
+                  "replacement": {
+                    "allowed": false
+                  },
+                  "cancellation": {
+                    "window": "PT1H",
+                    "allowed": true,
+                    "cutoffEvent": "BEFORE_PACKING"
+                  }
+                },
+                "serviceability": {
+                  "timing": [
+                    {
+                      "timeRange": {
+                        "end": "18:00",
+                        "start": "08:00"
+                      },
+                      "daysOfWeek": [
+                        "MON",
+                        "TUE",
+                        "WED",
+                        "THU",
+                        "FRI",
+                        "SAT"
+                      ]
+                    }
+                  ],
+                  "distanceConstraint": {
+                    "unit": "KM",
+                    "maxDistance": 12
+                  }
+                },
+                "paymentConstraints": {
+                  "codAvailable": true
+                }
+              }
+            },
+            "status": {
+              "descriptor": {
+                "code": "CLOSED",
+                "name": "Returned"
+              }
+            },
+            "resources": [
+              {
+                "id": "item-keripik-singkong-mumke2k1",
+                "quantity": {
+                  "unitCode": "EA",
+                  "unitQuantity": 2
+                },
+                "descriptor": {
+                  "name": "Keripik Singkong Balado (Spicy Cassava Chips)",
+                  "longDesc": "Keripik singkong renyah dengan bumbu balado khas Minang yang pedas manis. (Crispy cassava chips with authentic Minang sweet and spicy balado seasoning.)",
+                  "mediaFile": [
+                    {
+                      "uri": "https://images.unsplash.com/photo-1621939514649-280e2ee25f60?w=400",
+                      "mimeType": "image/jpeg"
+                    }
+                  ],
+                  "shortDesc": "Crispy cassava chips with balado seasoning"
+                },
+                "resourceAttributes": {
+                  "@type": "ion:IONTradeResource",
+                  "@context": "https://schema.ion.id/release1/schema/extension/trade/TradeResource/v1/context.jsonld",
+                  "identity": {
+                    "brand": "Chitato",
+                    "originCountry": "ID"
+                  },
+                  "physical": {
+                    "weight": {
+                      "unitCode": "G",
+                      "unitQuantity": 150
+                    },
+                    "appearance": {
+                      "color": "Golden",
+                      "material": "Cassava"
+                    }
+                  },
+                  "specifications": "- Berat Bersih (Net Weight): 150g\n- Kemasan (Packaging): Plastik Ziplock (Ziplock Plastic)\n- Bahan Utama (Main Ingredient): Singkong, Cabai (Cassava, Chili)",
+                  "productHighlights": "- Terbuat dari singkong segar pilihan (Made from fresh selected cassava)\n- Bumbu balado asli minang (Authentic Minang balado seasoning)\n- Tanpa pengawet buatan (No artificial preservatives)"
+                }
+              }
+            ],
+            "commitmentAttributes": {
+              "@type": "ion:IONTradeCommitment",
+              "price": {
+                "value": 45000,
+                "currency": "IDR"
+              },
+              "lineId": "LINE-001",
+              "@context": "https://schema.ion.id/release1/schema/extension/trade/TradeCommitment/v1/context.jsonld",
+              "quantity": {
+                "unitCode": "EA",
+                "unitQuantity": 2
+              },
+              "resourceId": "item-keripik-singkong-mumke2k1"
+            }
+          },
+          {
+            "id": "commitment-item-keripik-singkong-mumke2k1-a1",
+            "offer": {
+              "id": "offer-bolu-pisang-mumke8v1",
+              "provider": {
+                "id": "provider-default",
+                "descriptor": {}
+              },
+              "descriptor": {
+                "name": "Bolu Pisang Cokelat"
+              },
+              "resourceIds": [
+                "item-keripik-singkong-mumke2k1"
+              ],
+              "considerations": [
+                {
+                  "id": "offer-bolu-pisang-mumke8v1-price",
+                  "status": {
+                    "code": "ACTIVE",
+                    "name": "ACTIVE"
+                  },
+                  "considerationAttributes": {
+                    "@type": "ion:IONTradeConsideration",
+                    "breakup": [
+                      {
+                        "type": "BASE_PRICE",
+                        "title": "Bolu Pisang Cokelat",
+                        "amount": 45000
+                      }
+                    ],
+                    "@context": "https://schema.ion.id/release1/schema/extension/trade/TradeConsideration/v1/context.jsonld",
+                    "currency": "IDR",
+                    "totalAmount": 45000,
+                    "paymentMethods": [
+                      "PREPAID",
+                      "COD",
+                      "DIGITAL_WALLET"
+                    ]
+                  }
+                }
+              ],
+              "offerAttributes": {
+                "@type": "ion:IONTradeOffer",
+                "@context": "https://schema.ion.id/release1/schema/extension/trade/TradeOffer/v1/context.jsonld",
+                "policies": {
+                  "returns": {
+                    "method": "SELLER_PICKUP",
+                    "window": "P7D",
+                    "allowed": true,
+                    "restockingFee": {
+                      "type": "FIXED",
+                      "value": 100
+                    }
+                  },
+                  "replacement": {
+                    "allowed": false
+                  },
+                  "cancellation": {
+                    "window": "PT1H",
+                    "allowed": true,
+                    "cutoffEvent": "BEFORE_PACKING"
+                  }
+                },
+                "serviceability": {
+                  "timing": [
+                    {
+                      "timeRange": {
+                        "end": "18:00",
+                        "start": "08:00"
+                      },
+                      "daysOfWeek": [
+                        "MON",
+                        "TUE",
+                        "WED",
+                        "THU",
+                        "FRI",
+                        "SAT"
+                      ]
+                    }
+                  ],
+                  "distanceConstraint": {
+                    "unit": "KM",
+                    "maxDistance": 12
+                  }
+                },
+                "paymentConstraints": {
+                  "codAvailable": true
+                }
+              }
+            },
+            "status": {
+              "descriptor": {
+                "code": "ACTIVE"
+              }
+            },
+            "resources": [
+              {
+                "id": "item-keripik-singkong-mumke2k1",
+                "quantity": {
+                  "unitCode": "EA",
+                  "unitQuantity": 1
+                },
+                "descriptor": {
+                  "name": "Keripik Singkong Balado (Spicy Cassava Chips)",
+                  "longDesc": "Keripik singkong renyah dengan bumbu balado khas Minang yang pedas manis. (Crispy cassava chips with authentic Minang sweet and spicy balado seasoning.)",
+                  "mediaFile": [
+                    {
+                      "uri": "https://images.unsplash.com/photo-1621939514649-280e2ee25f60?w=400",
+                      "mimeType": "image/jpeg"
+                    }
+                  ],
+                  "shortDesc": "Crispy cassava chips with balado seasoning"
+                },
+                "resourceAttributes": {
+                  "@type": "ion:IONTradeResource",
+                  "@context": "https://schema.ion.id/release1/schema/extension/trade/TradeResource/v1/context.jsonld",
+                  "identity": {
+                    "brand": "Chitato",
+                    "originCountry": "ID"
+                  },
+                  "physical": {
+                    "weight": {
+                      "unitCode": "G",
+                      "unitQuantity": 150
+                    },
+                    "appearance": {
+                      "color": "Golden",
+                      "material": "Cassava"
+                    }
+                  },
+                  "specifications": "- Berat Bersih (Net Weight): 150g\n- Kemasan (Packaging): Plastik Ziplock (Ziplock Plastic)\n- Bahan Utama (Main Ingredient): Singkong, Cabai (Cassava, Chili)",
+                  "productHighlights": "- Terbuat dari singkong segar pilihan (Made from fresh selected cassava)\n- Bumbu balado asli minang (Authentic Minang balado seasoning)\n- Tanpa pengawet buatan (No artificial preservatives)"
+                }
+              }
+            ],
+            "commitmentAttributes": {
+              "@type": "ion:IONTradeCommitment",
+              "price": {
+                "value": 45000,
+                "currency": "IDR"
+              },
+              "lineId": "LINE-001",
+              "@context": "https://schema.ion.id/release1/schema/extension/trade/TradeCommitment/v1/context.jsonld",
+              "quantity": {
+                "unitCode": "EA",
+                "unitQuantity": 1
+              },
+              "resourceId": "item-keripik-singkong-mumke2k1"
+            }
+          }
+        ],
+        "performance": [
+          {
+            "id": "f1",
+            "status": {
+              "code": "Delivered"
+            },
+            "commitmentIds": [
+              "commitment-item-keripik-singkong-mumke2k1",
+              "commitment-item-keripik-singkong-mumke2k1-a1"
+            ],
+            "performanceAttributes": {
+              "@type": "ion:IONTradePerformance",
+              "@context": "https://schema.ion.id/release1/schema/extension/trade/TradePerformance/v1/context.jsonld",
+              "operatingHours": [
+                {
+                  "timeRange": {
+                    "end": "21:00",
+                    "start": "09:00"
+                  },
+                  "daysOfWeek": [
+                    1,
+                    2,
+                    3,
+                    4,
+                    5,
+                    6
+                  ]
+                }
+              ],
+              "deliveryDetails": {
+                "address": {
+                  "postalCode": "10220",
+                  "addressRegion": "DKI Jakarta",
+                  "streetAddress": "Jl. Sudirman 1",
+                  "addressCountry": "ID",
+                  "addressLocality": "Jakarta"
+                },
+                "contact": {
+                  "name": "Test Buyer",
+                  "phone": "+628123456789"
+                }
+              },
+              "installationScheduling": {
+                "available": false
+              },
+              "supportedPerformanceModes": [
+                "DELIVERY"
+              ]
+            }
+          },
+          {
+            "id": "return-1",
+            "status": {
+              "code": "Return_Approved",
+              "name": "Return approved"
+            },
+            "commitmentIds": [
+              "commitment-item-keripik-singkong-mumke2k1"
+            ],
+            "performanceAttributes": {
+              "type": "RETURN",
+              "@type": "ion:IONTradePerformance",
+              "@context": "https://schema.ion.id/release1/schema/extension/trade/TradePerformance/v1/context.jsonld",
+              "supportedPerformanceModes": [
+                "DELIVERY"
+              ]
+            }
+          }
+        ],
+        "settlements": [
+          {
+            "id": "settlement-673e4e11",
+            "status": "COMPLETE",
+            "considerationId": "consideration-03963d7e",
+            "settlementAttributes": {
+              "@type": "ion:IONTradeSettlement",
+              "method": "ONLINE",
+              "gateway": {
+                "name": "mock-gateway",
+                "transactionId": "6b0aa037-233e-441c-a562-68516f30ea63"
+              },
+              "@context": "https://schema.ion.id/release1/schema/extension/trade/TradeSettlement/v1/context.jsonld",
+              "currency": "IDR",
+              "settledAt": "2026-09-29T15:31:07Z",
+              "settledAmount": 90000,
+              "settlementBasis": "DELIVERY",
+              "settlementWindow": "P1D",
+              "reconciliationId": "recon-2026-09-30T170000Z-onix-bap-x7m2wmy7nq-et.a.run.app",
+              "reconciliationStatus": "AGREED"
+            }
+          },
+          {
+            "id": "refund-673e4e11-c1",
+            "status": "COMMITTED",
+            "considerationId": "consideration-03963d7e-a1",
+            "settlementAttributes": {
+              "@type": "ion:IONTradeSettlement",
+              "method": "ONLINE",
+              "refund": {
+                "amount": 44900,
+                "method": "ONLINE",
+                "status": "INITIATED",
+                "timelineDays": 3,
+                "source": "PROVIDER"
+              },
+              "gateway": {
+                "name": "mock-gateway",
+                "transactionId": "4aacc25e-cc9f-43c8-8247-4a647fb00384"
+              },
+              "@context": "https://schema.ion.id/release1/schema/extension/trade/TradeSettlement/v1/context.jsonld",
+              "currency": "IDR",
+              "settledAt": "2026-09-29T16:23:44Z",
+              "settledAmount": 45100,
+              "settlementBasis": "DELIVERY",
+              "settlementWindow": "P1D",
+              "reconciliationId": "recon-2026-10-01T170000Z-onix-bap-x7m2wmy7nq-et.a.run.app",
+              "reconciliationStatus": "PENDING"
+            }
+          }
+        ],
+        "participants": [
+          {
+            "id": "provider-default",
+            "descriptor": {},
+            "participantAttributes": {
+              "id": "provider-default",
+              "@type": "ion:IONTradeProvider",
+              "@context": "https://schema.ion.id/release1/schema/extension/trade/TradeProvider/v1/context.jsonld",
+              "descriptor": {
+                "name": ""
+              }
+            }
+          },
+          {
+            "id": "buyer-onix-bap-x7m2wmy7nq-et.a.run.app",
+            "descriptor": {
+              "name": "Buyer"
+            },
+            "participantAttributes": {
+              "role": "buyer",
+              "@type": "Consumer",
+              "person": {
+                "id": "buyer-onix-bap-x7m2wmy7nq-et.a.run.app",
+                "name": "Test Buyer",
+                "email": "t@example.com",
+                "telephone": "+628123456789"
+              },
+              "@context": "https://raw.githubusercontent.com/beckn/schemas/main/schema/Consumer/v2.0/context.jsonld"
+            }
+          }
+        ],
+        "consideration": [
+          {
+            "id": "consideration-03963d7e",
+            "status": {
+              "code": "CANCELLED"
+            },
+            "considerationAttributes": {
+              "@type": "ion:IONTradeConsideration",
+              "breakup": [
+                {
+                  "type": "BASE_PRICE",
+                  "title": "Bolu Pisang Cokelat",
+                  "amount": 90000
+                }
+              ],
+              "@context": "https://schema.ion.id/release1/schema/extension/trade/TradeConsideration/v1/context.jsonld",
+              "currency": "IDR",
+              "totalAmount": 90000
+            }
+          },
+          {
+            "id": "consideration-03963d7e-a1",
+            "status": {
+              "code": "ACTIVE"
+            },
+            "considerationAttributes": {
+              "@type": "ion:IONTradeConsideration",
+              "breakup": [
+                {
+                  "type": "BASE_PRICE",
+                  "title": "Bolu Pisang Cokelat",
+                  "amount": 45000
+                }
+              ],
+              "@context": "https://schema.ion.id/release1/schema/extension/trade/TradeConsideration/v1/context.jsonld",
+              "currency": "IDR",
+              "totalAmount": 45000
+            }
+          },
+          {
+            "id": "restocking-03963d7e-c1",
+            "status": {
+              "code": "ACTIVE"
+            },
+            "considerationAttributes": {
+              "@type": "ion:IONTradeConsideration",
+              "breakup": [
+                {
+                  "type": "RESTOCKING_FEE",
+                  "title": "Restocking fee",
+                  "amount": 100
+                }
+              ],
+              "@context": "https://schema.ion.id/release1/schema/extension/trade/TradeConsideration/v1/context.jsonld",
+              "currency": "IDR",
+              "totalAmount": 100
+            }
+          }
+        ]
+      }
+    ],
+    "settlementSummary": {
+      "bapId": "onix-bap-x7m2wmy7nq-et.a.run.app",
+      "bppId": "onix-bap-x7m2wmy7nq-et.a.run.app",
+      "currency": "IDR",
+      "settlementDate": "2026-10-01",
+      "settlementBasis": "DELIVERY",
+      "settlementWindow": "P1D",
+      "contractCount": 1,
+      "totalPaidAmount": 0,
+      "totalGatewayRefundAmount": 0,
+      "totalProviderRefundAmount": 44900,
+      "totalFeesRetained": 100,
+      "totalSettledAmount": 0,
+      "netPayable": 0
+    }
+  }
+}

@@ -94,11 +94,14 @@ func (v *Verifier) verify(ctx context.Context, rawToken string) (verifiedClaims,
 }
 
 // OptionalAuth is Gin middleware: if a valid bearer token is present, it
-// stores the buyer's Zitadel subject in the request context. If the token
-// is missing, malformed, or fails verification, it does NOT reject the
-// request -- it just proceeds with no subject set. v may be nil (Zitadel
-// was unreachable at startup); in that case this is a no-op, since
-// bap-application should keep serving traffic even if Zitadel is down.
+// stores the buyer's Zitadel subject in the request context. A request with
+// no token proceeds with no subject set. A token that IS sent but fails
+// verification (expired, or signed by a Zitadel instance that has since been
+// reset) is rejected with 401, so the buyer app sends the shopper back to
+// log in -- otherwise the order would silently be placed without its buyer
+// and never show in their order history. v may be nil (Zitadel was
+// unreachable at startup); then this is a no-op, since bap-application should
+// keep serving traffic even if Zitadel is down.
 func OptionalAuth(v *Verifier) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if v == nil {
@@ -113,7 +116,7 @@ func OptionalAuth(v *Verifier) gin.HandlerFunc {
 		claims, err := v.verify(c.Request.Context(), raw)
 		if err != nil {
 			log.Printf("OptionalAuth token verification failed: %v", err)
-			c.Next()
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired login; please log in again"})
 			return
 		}
 		c.Set(contextSubjectKey, claims.Subject)

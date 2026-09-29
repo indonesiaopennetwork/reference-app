@@ -52,7 +52,26 @@ SELECT
     c.status,
     c.bap_id,
     c.created_at,
-    COALESCE(co.offer_descriptor, '{}') AS offer_descriptor
+    COALESCE(co.offer_descriptor, '{}') AS offer_descriptor,
+    -- Delivery progress (PENDING / Packed / Shipped / Delivered): the
+    -- contract's non-RETURN performance, else the dashboard's recorded status.
+    COALESCE(
+        (SELECT p->'status'->>'code'
+           FROM jsonb_array_elements(COALESCE(c.contract_attributes->'performance', '[]'::jsonb)) p
+          WHERE COALESCE(p->'performanceAttributes'->>'type', '') <> 'RETURN'
+          LIMIT 1),
+        (SELECT cp.status_code FROM contract_performances cp WHERE cp.contract_id = c.id LIMIT 1),
+        ''
+    )::TEXT AS fulfillment_status,
+    -- The latest return's outcome (Return_Approved / Return_Rejected), if any.
+    COALESCE(
+        (SELECT p->'status'->>'code'
+           FROM jsonb_array_elements(COALESCE(c.contract_attributes->'performance', '[]'::jsonb)) WITH ORDINALITY AS e(p, n)
+          WHERE p->'performanceAttributes'->>'type' = 'RETURN'
+          ORDER BY n DESC
+          LIMIT 1),
+        ''
+    )::TEXT AS return_status
 FROM contracts c
 LEFT JOIN LATERAL (
     SELECT co2.offer_descriptor

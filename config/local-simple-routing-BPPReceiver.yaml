@@ -12,6 +12,7 @@ routingRules:
       - update
       - rate
       - support
+      - on_reconcile
       - catalog/on_publish
   - version: "2.0.0"
     targetType: "url"

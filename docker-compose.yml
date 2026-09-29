@@ -159,6 +159,18 @@ services:
       context: ./otel-collector
     container_name: otel-collector-bap
     restart: unless-stopped
+    environment:
+      # Defaults to ion-monitor's staging deployment. Override in .env to
+      # point at a local ion-monitor instead (e.g.
+      # http://host.docker.internal:4320) — see extra_hosts below and
+      # otel-collector/config.yaml's comment.
+      NETWORK_COLLECTOR_ENDPOINT: ${NETWORK_COLLECTOR_ENDPOINT:-https://netcol.iontest.in}
+    extra_hosts:
+      # Lets NETWORK_COLLECTOR_ENDPOINT point at a collector running on the
+      # host (e.g. a local ion-monitor stack) without joining any extra
+      # Docker network. Inert when NETWORK_COLLECTOR_ENDPOINT doesn't
+      # reference host.docker.internal, so safe to leave on unconditionally.
+      - "host.docker.internal:host-gateway"
     networks:
       - beckn
 
@@ -167,6 +179,12 @@ services:
       context: ./otel-collector
     container_name: otel-collector-bpp
     restart: unless-stopped
+    environment:
+      # See otel-collector-bap's identical NETWORK_COLLECTOR_ENDPOINT comment.
+      NETWORK_COLLECTOR_ENDPOINT: ${NETWORK_COLLECTOR_ENDPOINT:-https://netcol.iontest.in}
+    extra_hosts:
+      # See otel-collector-bap's identical extra_hosts comment.
+      - "host.docker.internal:host-gateway"
     networks:
       - beckn
 
@@ -203,6 +221,8 @@ services:
     volumes:
       - ./config:/app/config
       - ./schemas:/app/schemas
+      # Beckn extension specs loaded by schemav2validator (auxiliaryLocations).
+      - ./docs/specs/reconcile.yaml:/app/specs/reconcile.yaml:ro
     command: [ "./server", "--config=/app/config/local-simple-bap.yaml" ]
 
   onix-bpp:
@@ -232,6 +252,8 @@ services:
     volumes:
       - ./config:/app/config
       - ./schemas:/app/schemas
+      # Beckn extension specs loaded by schemav2validator (auxiliaryLocations).
+      - ./docs/specs/reconcile.yaml:/app/specs/reconcile.yaml:ro
     command: [ "./server", "--config=/app/config/local-simple-bpp.yaml" ]
 
   # ─── Catalog Publish (standalone) ─────────────────────────────────────────
@@ -534,6 +556,9 @@ services:
       # discovery-service's own /discover endpoint, called DIRECTLY --
       # bypassing onix-bap entirely. Used only when DISCOVER_METHOD=GET.
       CDS_DISCOVER_URL: ${CDS_DISCOVER_URL}
+
+      # Operator API key for /api/v1/admin/* (reconciliation view); unset = disabled.
+      BAP_ADMIN_KEY: ${BAP_ADMIN_KEY:-}
 
       # Same keypair as config/local-simple-bap.yaml's keyManager — one registered identity.
       BAP_PRIVATE_KEY: ${BAP_PRIVATE_KEY}

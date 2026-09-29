@@ -50,6 +50,11 @@ type Config struct {
 	// which stays in the Beckn context.
 	BapCallerURL string
 
+	// BapAdminKey guards the operator API (/api/v1/admin/*, e.g. settlement
+	// reconciliation): requests must send it as X-Admin-Key. Empty disables
+	// the operator view.
+	BapAdminKey string
+
 	// CDSDiscoverURL is the full URL of discovery-service's own /discover
 	// endpoint, called DIRECTLY — bypassing onix-bap entirely. Used only
 	// by clientsvc.ClientService.DiscoverSync (selected when
@@ -114,6 +119,7 @@ func Load() (*Config, error) {
 		BppID:        os.Getenv("BPP_ID"),
 		BppURI:       os.Getenv("BPP_URI"),
 		BapCallerURL: getEnv("BAP_CALLER_URL", os.Getenv("ADAPTER_URL")),
+		BapAdminKey:  os.Getenv("BAP_ADMIN_KEY"),
 
 		CDSDiscoverURL: os.Getenv("CDS_DISCOVER_URL"),
 		DiscoverMethod: strings.ToUpper(getEnv("DISCOVER_METHOD", DiscoverMethodGet)),
