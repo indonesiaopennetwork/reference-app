@@ -39,6 +39,18 @@ Three prior-art repos were scanned to ground this design:
    network profile (signing rules, `discoverService: https://discover.ion.id`)
    and ION-specific extensions (`/raise`, `/reconcile`) on top via `$ref` —
    it does **not** redefine `/discover`. **This is our ground-truth contract.**
+   Note this lives on the **`ion-launch`** branch (matches this deployment's
+   own `NETWORK_ID=ion.id/ion-launch`), not `main` — `main` doesn't have
+   `ion.yaml` or the `/raise`/`/reconcile` extensions at all.
+   **Standing instruction (2026-09-25, applies repo-wide, not just
+   discovery-service):** for any trade-domain field/extension shape
+   (offer/resource/consideration/commitment/contract/performance/provider/
+   settlement attributes), always check
+   [`ion-specs` **`main`** branch's `releases/release1/schema/extension/trade/`](https://github.com/indonesiaopennetwork/ion-specs/tree/main/releases/release1/schema/extension/trade)
+   first, rather than inventing or assuming a shape — this is the
+   `ion:IONTrade*` extension source already used throughout
+   `bap-application`/`bpp-application`'s `considerationAttributes`/
+   `offerAttributes`/etc.
 2. **`beckn/beckn-discovr`** — a mature, already-v2 Java/Spring reference
    implementation of exactly this role (three jobs: catalog-publish-job,
    catalog-discover-job, response-dispatcher; Kafka + Postgres/PostGIS +
