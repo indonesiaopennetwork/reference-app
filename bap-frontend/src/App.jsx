@@ -1042,6 +1042,29 @@ function cancelBlockedReason(policy, fulfillmentStatus) {
   return `Cancellation closed — only allowed ${when}, order is ${fulfillmentStatus || 'confirmed'}`;
 }
 
+// ISO 8601 duration (P7D, PT2H, P1W2DT3H) in milliseconds; null if invalid.
+function isoDurationMs(s) {
+  const m = /^P(?:(\d+(?:\.\d+)?)Y)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)W)?(?:(\d+(?:\.\d+)?)D)?(?:T(?:(\d+(?:\.\d+)?)H)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)S)?)?$/.exec(s || '');
+  if (!m || s === 'P' || s === 'PT') return null;
+  const [y, mo, w, d, h, mi, se] = m.slice(1).map(v => Number(v || 0));
+  return ((((y * 365 + mo * 30 + w * 7 + d) * 24 + h) * 60 + mi) * 60 + se) * 1000;
+}
+
+// Return eligibility under an item's offer policies.returns -- the BAP and
+// BPP enforce the same rule. { blocked } explains a refusal; otherwise
+// { until, fee } describe the open window and the restocking fee.
+function returnEligibility(policy, fulfillmentStatus, deliveredAt) {
+  if (!policy?.allowed) return { blocked: 'This item is not returnable' };
+  if (stageRank(fulfillmentStatus) < 3) return { blocked: 'Returns open once the order is delivered' };
+  const f = policy.restockingFee;
+  const fee = f?.type === 'PERCENTAGE' ? `${f.value}% restocking fee` : f?.type === 'FIXED' ? `Rp ${Number(f.value).toLocaleString()} restocking fee` : 'No restocking fee';
+  const ms = isoDurationMs(policy.window);
+  if (!policy.window || ms == null || !deliveredAt) return { fee };
+  const until = new Date(new Date(deliveredAt).getTime() + ms);
+  if (Date.now() > until.getTime()) return { blocked: `Return window (${policy.window}) closed on ${until.toLocaleString()}` };
+  return { until, fee };
+}
+
 // Reason picker limited to what every offer involved allows (all reasons when
 // no offer declares allowedReasons).
 function CancelReasonSelect({ value, onChange, allowedLists = [] }) {
@@ -1071,15 +1094,21 @@ function parseContractDetail(contract) {
     resourceId: c.resources?.[0]?.id || c.offer?.resourceIds?.[0] || '',
     // A cancelled commitment is CLOSED (its ACTIVE replacement carries what remains).
     cancelled: c.status?.descriptor?.code === 'CLOSED',
+    closedAs: c.status?.descriptor?.name,
     allowedReasons: c.offer?.offerAttributes?.policies?.cancellation?.allowedReasons,
     cancelPolicy: c.offer?.offerAttributes?.policies?.cancellation,
+    returnPolicy: c.offer?.offerAttributes?.policies?.returns,
+    // Per-unit price incl. tax (the offer consideration's totalAmount), falling
+    // back to the commitment's pre-tax unit price for older orders.
+    unitPrice: c.offer?.considerations?.[0]?.considerationAttributes?.totalAmount
+      ?? c.commitmentAttributes?.price?.value ?? null,
   }));
 
   // Consideration → price. After a cancellation the old price is CANCELLED and
   // the ACTIVE one (if any) is what the buyer still pays; cancellation fees are
   // separate "cancellation-…" considerations.
   const considerations = contract.consideration || [];
-  const isFee = c => (c.id || '').startsWith('cancellation-');
+  const isFee = c => /^(cancellation|restocking)-/.test(c.id || '');
   const consideration = considerations.find(c => !isFee(c) && c.status?.code !== 'CANCELLED')
     || considerations.find(c => !isFee(c)) || considerations[0];
   const fees = considerations.filter(isFee).map(c => ({
@@ -1108,13 +1137,19 @@ function parseContractDetail(contract) {
   const performances = contract.performance || [];
   let fulfillmentStatus = performances[0]?.status?.code || '';
   const returnPerformance = performances.find(p => p.performanceAttributes?.type === 'RETURN');
+  // Every return request and its policy outcome (Return_Approved / Return_Rejected + reason).
+  const returns = performances.filter(p => p.performanceAttributes?.type === 'RETURN').map(p => ({
+    id: p.id, code: p.status?.code || '', reason: p.status?.shortDesc || '',
+    items: (p.commitmentIds || []).map(id => commitments.find(c => c.id === id)?.resources?.[0]?.descriptor?.name
+      || commitments.find(c => c.id === id)?.offer?.descriptor?.name || id),
+  }));
   if (returnPerformance && returnPerformance.status?.code) {
     fulfillmentStatus = returnPerformance.status.code;
   }
 
   return {
     items, price: fullyCancelled && consideration?.status?.code === 'CANCELLED' ? 0 : price,
-    currency, breakup: fullyCancelled ? [] : breakup, fees, refunds,
+    currency, breakup: fullyCancelled ? [] : breakup, fees, refunds, returns,
     buyer, seller, statusCode, fulfillmentStatus, id: contract.id,
   };
 }
@@ -1139,17 +1174,36 @@ const ACTION_LABELS = {
 // cancel it, or cancel the whole order. Cancelling everything still active
 // goes out as Beckn cancel, anything less as a partial-cancellation update --
 // the BAP decides (/cancel-items). onChanged is called once a request is sent.
-function OrderItemsCard({ txnId, order, txnStatus, onChanged }) {
-  const [cancelQty, setCancelQty] = useState({});   // commitmentId → units to cancel
+function OrderItemsCard({ txnId, order, txnStatus, deliveredAt, onChanged }) {
+  const [cancelQty, setCancelQty] = useState({});   // commitmentId → units to cancel / return
   const [cancelling, setCancelling] = useState(null); // commitmentId | 'ALL' | null
   const [cancelReason, setCancelReason] = useState('');
+  // Delivered orders switch from cancellation to returns (offer return policy).
+  const delivered = stageRank(order.fulfillmentStatus) >= 3;
 
   const activeItems = order.items.filter(it => !it.cancelled);
   const blockedReason = it => cancelBlockedReason(it.cancelPolicy, order.fulfillmentStatus)
     || (stageRank(order.fulfillmentStatus) >= 3 ? 'Already delivered — use Return instead' : null);
   const cancellable = activeItems.filter(it => !blockedReason(it));
   // Cancellation is offered on a confirmed order, per item, until its offer's cutoff.
-  const canCancel = txnStatus === 'CONFIRMED' && cancellable.length > 0;
+  const canCancel = !delivered && txnStatus === 'CONFIRMED' && cancellable.length > 0;
+  const returnable = activeItems.filter(it => !returnEligibility(it.returnPolicy, order.fulfillmentStatus, deliveredAt).blocked);
+  const canReturn = delivered && txnStatus === 'CONFIRMED' && returnable.length > 0;
+
+  const returnItems = async (items, key) => {
+    if (!window.confirm(key === 'ALL' ? 'Return all items?' : 'Return the selected quantity of this item?')) return;
+    setCancelling(key);
+    try {
+      const r = await apiFetch('/return-items', { method: 'POST', body: JSON.stringify({ transaction_id: txnId, items }) });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
+      setCancelQty({});
+      onChanged?.();
+    } catch (e) {
+      alert('Return failed: ' + e.message);
+    } finally {
+      setCancelling(null);
+    }
+  };
 
   const cancelItems = async (items, key) => {
     if (!cancelReason) { alert('Please choose a reason for cancelling.'); return; }
@@ -1194,13 +1248,47 @@ function OrderItemsCard({ txnId, order, txnStatus, onChanged }) {
                   {item.resourceId && <p className="text-[10px] font-mono text-slate-600 truncate">{item.resourceId}</p>}
                 </div>
                 <div className="text-right shrink-0 flex items-center gap-2">
-                  {item.cancelled && <span className="text-[10px] font-bold text-rose-400 bg-rose-500/10 border border-rose-500/20 px-1.5 py-0.5 rounded">Cancelled</span>}
-                  <p className="text-xs text-slate-400">×{item.qty}</p>
+                  {item.cancelled && <span className="text-[10px] font-bold text-rose-400 bg-rose-500/10 border border-rose-500/20 px-1.5 py-0.5 rounded">{item.closedAs || 'Cancelled'}</span>}
+                  <div>
+                    {item.unitPrice != null && (
+                      <p className={`text-sm font-semibold tabular-nums ${item.cancelled ? 'text-slate-500 line-through' : 'text-slate-200'}`}>
+                        {fmtIDR(item.unitPrice * item.qty, order.currency)}
+                      </p>
+                    )}
+                    <p className="text-[11px] text-slate-500 tabular-nums">
+                      ×{item.qty}{item.unitPrice != null && item.qty > 1 ? ` · ${fmtIDR(item.unitPrice, order.currency)} each` : ''}
+                    </p>
+                  </div>
                 </div>
               </div>
-              {txnStatus === 'CONFIRMED' && !item.cancelled && blockedReason(item) && (
+              {!delivered && txnStatus === 'CONFIRMED' && !item.cancelled && blockedReason(item) && (
                 <p className="mt-1.5 text-right text-[10px] text-slate-500">{blockedReason(item)}</p>
               )}
+              {delivered && txnStatus === 'CONFIRMED' && !item.cancelled && (() => {
+                const el = returnEligibility(item.returnPolicy, order.fulfillmentStatus, deliveredAt);
+                if (el.blocked) return <p className="mt-1.5 text-right text-[10px] text-slate-500">{el.blocked}</p>;
+                return (
+                  <div className="mt-2 flex flex-wrap items-center justify-end gap-2">
+                    <span className="text-[10px] text-slate-500 mr-auto">
+                      {el.until ? `Returnable until ${el.until.toLocaleString()} · ` : ''}{el.fee}
+                    </span>
+                    {item.qty > 1 && (
+                      <div className="flex items-center rounded-lg border border-white/10 overflow-hidden text-xs">
+                        <button className="px-2 py-1 text-slate-400 hover:text-white disabled:opacity-30" disabled={q <= 1}
+                          onClick={() => setCancelQty(m => ({ ...m, [item.id]: q - 1 }))}><Minus className="w-3 h-3" /></button>
+                        <span className="px-2 text-slate-200 tabular-nums">{q}</span>
+                        <button className="px-2 py-1 text-slate-400 hover:text-white disabled:opacity-30" disabled={q >= item.qty}
+                          onClick={() => setCancelQty(m => ({ ...m, [item.id]: q + 1 }))}><Plus className="w-3 h-3" /></button>
+                      </div>
+                    )}
+                    <button disabled={!!cancelling}
+                      onClick={() => returnItems([{ commitment_id: item.id, quantity: q }], item.id)}
+                      className="px-2.5 py-1 rounded-lg text-[11px] font-semibold text-purple-300 border border-purple-500/30 hover:bg-purple-500/10 disabled:opacity-50">
+                      {cancelling === item.id ? 'Requesting…' : item.qty > 1 ? `Return ${q}` : 'Return item'}
+                    </button>
+                  </div>
+                );
+              })()}
               {canCancel && !item.cancelled && !blockedReason(item) && (
                 <div className="mt-2 flex items-center justify-end gap-2">
                   {item.qty > 1 && (
@@ -1231,6 +1319,27 @@ function OrderItemsCard({ txnId, order, txnStatus, onChanged }) {
             className="px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-rose-600 hover:bg-rose-500 disabled:opacity-50">
             {cancelling === 'ALL' ? 'Cancelling…' : 'Cancel entire order'}
           </button>}
+        </div>
+      )}
+      {canReturn && returnable.length === activeItems.length && activeItems.length > 1 && (
+        <div className="px-4 py-2.5 border-t border-white/[0.06] flex justify-end">
+          <button disabled={!!cancelling}
+            onClick={() => returnItems(activeItems.map(it => ({ commitment_id: it.id, quantity: it.qty })), 'ALL')}
+            className="px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-purple-600 hover:bg-purple-500 disabled:opacity-50">
+            {cancelling === 'ALL' ? 'Requesting…' : 'Return all items'}
+          </button>
+        </div>
+      )}
+      {order.returns?.length > 0 && (
+        <div className="px-4 py-2.5 border-t border-white/[0.06] space-y-1">
+          {order.returns.map(r => (
+            <div key={r.id} className="text-xs flex items-start justify-between gap-3">
+              <span className="text-slate-400">Return · {r.items.join(', ') || r.id}</span>
+              <span className={r.code === 'Return_Approved' ? 'text-emerald-400' : r.code === 'Return_Rejected' ? 'text-rose-400 text-right' : 'text-amber-400'}>
+                {r.code === 'Return_Approved' ? 'Approved' : r.code === 'Return_Rejected' ? `Rejected${r.reason ? ` — ${r.reason}` : ''}` : 'Requested…'}
+              </span>
+            </div>
+          ))}
         </div>
       )}
       {(order.fees.length > 0 || order.refunds.length > 0) && (
@@ -1282,7 +1391,6 @@ function OrderDetailPanel({ txnId, onBack }) {
   const [detail, setDetail] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [returning, setReturning] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -1351,48 +1459,11 @@ function OrderDetailPanel({ txnId, onBack }) {
     }
   };
 
-  const handleReturn = async () => {
-    setReturning(true);
-    try {
-      let rawContract = {};
-      const snaps = detail.snapshots || [];
-      if (snaps.length > 0) {
-        const lastSnap = snaps[snaps.length - 1].contract;
-        rawContract = lastSnap.message?.contract || lastSnap;
-      } else {
-        rawContract = detail.contract;
-      }
-
-      const retContract = {
-        ...rawContract,
-        id: bestContract.id,
-        performance: [
-          ...(rawContract.performance || []),
-          { 
-            id: "return-1",
-            performanceAttributes: {
-              "@context": "https://schema.ion.id/release1/schema/extension/trade/TradePerformance/v1/context.jsonld",
-              "@type": "ion:IONTradePerformance",
-              "type": "RETURN",
-              "supportedPerformanceModes": ["DELIVERY"]
-            },
-            status: { code: "Return_Initiated" } 
-          }
-        ]
-      };
-      await apiFetch('/update', {
-        method: 'POST',
-        body: JSON.stringify({ transaction_id: txnId, contract: retContract })
-      });
-      alert('Return initiated! The BPP has been notified.');
-    } catch (e) {
-      alert('Return failed: ' + e.message);
-    } finally {
-      setReturning(false);
-    }
-  };
-
-  const canReturn = bestContract?.fulfillmentStatus === 'Delivered';
+  // When the order was first seen Delivered -- the start of the return window.
+  const deliveredAt = (detail.snapshots || [])
+    .filter(sn => (parseContractDetail(sn.contract?.message?.contract || sn.contract)?.fulfillmentStatus === 'Delivered')
+      || (sn.contract?.performance || []).some(p => p.status?.code === 'Delivered'))
+    .map(sn => sn.created_at).sort()[0] || null;
 
   return (
     <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
@@ -1432,21 +1503,7 @@ function OrderDetailPanel({ txnId, onBack }) {
         </div>
       )}
 
-      {canReturn && (
-        <div className="rounded-xl border border-white/[0.07] px-4 py-3 bg-purple-500/10 flex items-center justify-between">
-          <div>
-            <p className="text-xs font-bold text-purple-400">Order Delivered</p>
-            <p className="text-[10px] text-purple-400/70 mt-0.5">You can now initiate a return.</p>
-          </div>
-          <button 
-            disabled={returning}
-            onClick={handleReturn}
-            className="px-3 py-1.5 bg-purple-500 text-white rounded-lg text-xs font-bold hover:bg-purple-600 transition-colors disabled:opacity-50"
-          >
-            {returning ? 'Initiating...' : 'Return Order'}
-          </button>
-        </div>
-      )}
+
 
       {/* IDs */}
       <div className="rounded-xl border border-white/[0.07] px-4 py-3 space-y-2" style={{ background: 'rgba(255,255,255,0.02)' }}>
@@ -1465,7 +1522,7 @@ function OrderDetailPanel({ txnId, onBack }) {
 
       {/* Items + cancellation */}
       {bestContract?.items?.length > 0 && (
-        <OrderItemsCard txnId={txnId} order={bestContract} txnStatus={detail.status}
+        <OrderItemsCard txnId={txnId} order={bestContract} txnStatus={detail.status} deliveredAt={deliveredAt}
           onChanged={() => setReloadKey(k => k + 1)} />
       )}
 

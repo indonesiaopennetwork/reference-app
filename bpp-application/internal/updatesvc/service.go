@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -34,6 +35,9 @@ func NewService(pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.Logger) *
 }
 
 // Process handles /update and fires on_update to the BAP.
+//
+// An update that adds a RETURN performance is a return request: the offer's
+// policies.returns decides it (see internal/cancellation.Apply with Return).
 //
 // An update that lowers an active commitment's quantity or marks it CLOSED is a
 // partial cancellation (full cancellations use /cancel): it goes through
@@ -118,8 +122,33 @@ func (s *Service) apply(ctx context.Context, txID uuid.UUID, txErr error, req *U
 		if err != nil {
 			return nil, err
 		}
+		// A return request: accepted or rejected by the offer's return policy
+		// alone -- a rejection is still answered (Return_Rejected + reason).
+		if perf, items := cancellation.ReturnRequest(stored, requested); perf != nil {
+			var res *cancellation.Result
+			err := errors.New("the return request lists no items to return")
+			if len(items) > 0 {
+				res, err = cancellation.Execute(ctx, s.pool, s.cfg.BppID, txID, items, cancellation.Request{
+					Return: true, ReturnPerformance: perf,
+					SettlementTerms: cancellation.SettlementTerms(s.cfg.SettlementBasis, s.cfg.SettlementWindow),
+				})
+			}
+			if err != nil {
+				if res == nil && (len(items) == 0 || errors.Is(err, cancellation.ErrReturnRejected)) {
+					rejected, rerr := cancellation.StoreRejectedReturn(ctx, s.pool, s.cfg.BppID, txID, perf, err.Error())
+					if rerr != nil {
+						return nil, rerr
+					}
+					return json.Marshal(rejected)
+				}
+				return nil, fmt.Errorf("return failed: %w", err)
+			}
+			return json.Marshal(res.Contract)
+		}
 		if items := cancellation.ItemsFromUpdate(stored, requested); len(items) > 0 {
-			res, err := cancellation.Execute(ctx, s.pool, s.cfg.BppID, txID, items, cancellation.RequestFrom(requested))
+			creq := cancellation.RequestFrom(requested)
+			creq.SettlementTerms = cancellation.SettlementTerms(s.cfg.SettlementBasis, s.cfg.SettlementWindow)
+			res, err := cancellation.Execute(ctx, s.pool, s.cfg.BppID, txID, items, creq)
 			if err != nil {
 				return nil, fmt.Errorf("partial cancellation failed: %w", err)
 			}

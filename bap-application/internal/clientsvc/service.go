@@ -960,6 +960,184 @@ func (s *ClientService) CancelItems(ctx context.Context, req *ClientCancelItemsR
 	return string(dbsqlc.TransactionStatusUPDATESENT), nil
 }
 
+// ReturnItems requests a return of the given units of a delivered order: it
+// checks each item's offer policies.returns (allowed, delivered, still inside
+// the window counted from delivery) and sends /update with the latest
+// contract, the returned quantities lowered (or CLOSED when all of an item
+// goes back) and a new RETURN performance (Return_Initiated). The BPP applies
+// the same policy and answers Return_Approved -- with the restocking fee and
+// refund -- or Return_Rejected.
+func (s *ClientService) ReturnItems(ctx context.Context, req *ClientReturnItemsRequest) (string, error) {
+	txnID, err := uuid.Parse(req.TransactionID)
+	if err != nil {
+		return "", fmt.Errorf("invalid transaction_id: %w", err)
+	}
+	snapshot, err := dbsqlc.New(s.pool).GetLatestContractSnapshot(ctx, txnID)
+	if err != nil {
+		return "", fmt.Errorf("no snapshot for txn %s: %w", txnID, err)
+	}
+	var contract map[string]interface{}
+	if err := json.Unmarshal(unwrapContract(snapshot.Contract), &contract); err != nil || contract == nil {
+		return "", fmt.Errorf("parse contract snapshot: %v", err)
+	}
+
+	stage, _ := fulfillmentStage(contract)
+	delivered := s.deliveredAt(ctx, txnID)
+	active := map[string]map[string]interface{}{}
+	for _, raw := range asSlice(contract["commitments"]) {
+		if cm := asObj(raw); cm != nil && commitmentStatusCode(cm) != "CLOSED" {
+			active[asStr(cm["id"])] = cm
+		}
+	}
+	returnQty := map[string]float64{}
+	for _, it := range req.Items {
+		cm, ok := active[it.CommitmentID]
+		if !ok {
+			return "", fmt.Errorf("commitment %q is not an active item of this order", it.CommitmentID)
+		}
+		if err := returnBlocked(cm, stage, delivered, time.Now()); err != nil {
+			return "", fmt.Errorf("%s cannot be returned: %v", it.CommitmentID, err)
+		}
+		have := commitmentQuantity(cm)
+		q := it.Quantity
+		if q <= 0 {
+			q = have
+		}
+		if returnQty[it.CommitmentID]+q > have {
+			return "", fmt.Errorf("cannot return %v of %q: only %v ordered", q, it.CommitmentID, have)
+		}
+		returnQty[it.CommitmentID] += q
+	}
+
+	var ids []string
+	for id, q := range returnQty {
+		ids = append(ids, id)
+		cm := active[id]
+		if remaining := commitmentQuantity(cm) - q; remaining > 0 {
+			setCommitmentQuantity(cm, remaining)
+		} else {
+			cm["status"] = map[string]interface{}{"descriptor": map[string]interface{}{"code": "CLOSED", "name": "Returned"}}
+		}
+	}
+	sort.Strings(ids)
+
+	perfIDs := map[string]bool{}
+	for _, p := range asSlice(contract["performance"]) {
+		perfIDs[asStr(asObj(p)["id"])] = true
+	}
+	perfID := ""
+	for n := 1; ; n++ {
+		if perfID = fmt.Sprintf("return-%d", n); !perfIDs[perfID] {
+			break
+		}
+	}
+	contract["performance"] = append(asSlice(contract["performance"]), map[string]interface{}{
+		"id":            perfID,
+		"commitmentIds": ids,
+		"status":        map[string]interface{}{"code": "Return_Initiated", "name": "Return requested"},
+		"performanceAttributes": map[string]interface{}{
+			"@context":                  "https://schema.ion.id/release1/schema/extension/trade/TradePerformance/v1/context.jsonld",
+			"@type":                     "ion:IONTradePerformance",
+			"type":                      "RETURN",
+			"supportedPerformanceModes": []string{"DELIVERY"},
+		},
+	})
+
+	contractJSON, err := json.Marshal(contract)
+	if err != nil {
+		return "", err
+	}
+	if err := s.Update(ctx, &ClientUpdateRequest{TransactionID: req.TransactionID, Contract: contractJSON}); err != nil {
+		return "", err
+	}
+	return string(dbsqlc.TransactionStatusUPDATESENT), nil
+}
+
+// deliveredAt is when this BAP first saw the order as Delivered (the earliest
+// snapshot whose performance says so); zero when never seen.
+func (s *ClientService) deliveredAt(ctx context.Context, txnID uuid.UUID) time.Time {
+	var t *time.Time
+	_ = s.pool.QueryRow(ctx, `
+		SELECT min(created_at) FROM contract_snapshots
+		WHERE transaction_id = $1 AND contract->'performance' @> '[{"status":{"code":"Delivered"}}]'`, txnID).Scan(&t)
+	if t == nil {
+		return time.Time{}
+	}
+	return *t
+}
+
+// fulfillmentStage is the furthest stage the contract's performances reached.
+func fulfillmentStage(contract map[string]interface{}) (int, string) {
+	stage, name := stagePending, "PENDING"
+	for _, p := range asSlice(contract["performance"]) {
+		code := asStr(asObj(asObj(p)["status"])["code"])
+		if r := stageRank(code); r > stage {
+			stage, name = r, code
+		}
+	}
+	return stage, name
+}
+
+// returnBlocked explains why a commitment can't be returned under its offer's
+// policies.returns (the BPP enforces the same rule), or returns nil.
+func returnBlocked(cm map[string]interface{}, stage int, deliveredAt, now time.Time) error {
+	pol := asObj(asObj(asObj(asObj(cm["offer"])["offerAttributes"])["policies"])["returns"])
+	if allowed, _ := pol["allowed"].(bool); !allowed {
+		return fmt.Errorf("the offer does not accept returns")
+	}
+	if stage < stageDelivered {
+		return fmt.Errorf("the order has not been delivered yet")
+	}
+	if w := asStr(pol["window"]); w != "" && !deliveredAt.IsZero() {
+		d, err := parseISODuration(w)
+		if err != nil {
+			return fmt.Errorf("invalid return window %q", w)
+		}
+		if closes := deliveredAt.Add(d); now.After(closes) {
+			return fmt.Errorf("the %s return window closed at %s", w, closes.UTC().Format(time.RFC3339))
+		}
+	}
+	return nil
+}
+
+// parseISODuration parses an ISO 8601 duration such as P7D, PT2H or P1W2DT3H
+// (years as 365 days, months as 30).
+func parseISODuration(s string) (time.Duration, error) {
+	if !strings.HasPrefix(s, "P") || len(s) < 3 {
+		return 0, fmt.Errorf("not an ISO 8601 duration")
+	}
+	var total time.Duration
+	inTime, num := false, ""
+	units := map[bool]map[byte]time.Duration{
+		false: {'Y': 365 * 24 * time.Hour, 'M': 30 * 24 * time.Hour, 'W': 7 * 24 * time.Hour, 'D': 24 * time.Hour},
+		true:  {'H': time.Hour, 'M': time.Minute, 'S': time.Second},
+	}
+	for i := 1; i < len(s); i++ {
+		ch := s[i]
+		switch {
+		case ch == 'T':
+			inTime = true
+		case (ch >= '0' && ch <= '9') || ch == '.':
+			num += string(ch)
+		default:
+			unit, ok := units[inTime][ch]
+			if !ok || num == "" {
+				return 0, fmt.Errorf("bad component %q", string(ch))
+			}
+			var v float64
+			if _, err := fmt.Sscanf(num, "%g", &v); err != nil {
+				return 0, err
+			}
+			total += time.Duration(v * float64(unit))
+			num = ""
+		}
+	}
+	if num != "" {
+		return 0, fmt.Errorf("trailing number without unit")
+	}
+	return total, nil
+}
+
 // cancellationReasons are ION's cancellation reason codes (TradeOffer
 // policies.cancellation.allowedReasons) with their display names.
 var cancellationReasons = map[string]string{

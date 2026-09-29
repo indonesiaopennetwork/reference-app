@@ -50,6 +50,7 @@ func (s *Service) Process(ctx context.Context, req *OnStatusRequest) {
 	txnStatus := map[string]dbsqlc.TransactionStatus{
 		"ACTIVE":    dbsqlc.TransactionStatusCONFIRMED,
 		"CANCELLED": dbsqlc.TransactionStatusCANCELLED,
+		"COMPLETE":  dbsqlc.TransactionStatusCOMPLETE,
 	}[contractStatus.Status.Code]
 	if txnStatus != "" {
 		if err := q.UpsertTransaction(ctx, dbsqlc.UpsertTransactionParams{

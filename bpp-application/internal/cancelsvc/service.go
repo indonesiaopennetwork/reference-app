@@ -50,7 +50,7 @@ func (s *Service) Process(ctx context.Context, req *CancelRequest) {
 	err := txErr
 	if err != nil {
 		err = fmt.Errorf("invalid transactionId: %w", err)
-	} else if res, err = cancellation.Execute(ctx, s.pool, s.cfg.BppID, txID, nil, cancelRequest(req)); err != nil {
+	} else if res, err = cancellation.Execute(ctx, s.pool, s.cfg.BppID, txID, nil, s.cancelRequest(req)); err != nil {
 		err = fmt.Errorf("cancel failed: %w", err)
 	}
 
@@ -105,10 +105,12 @@ func (s *Service) Process(ctx context.Context, req *CancelRequest) {
 
 // cancelRequest reads the reason the BAP declared in the cancel contract's
 // contractAttributes.cancellation.
-func cancelRequest(req *CancelRequest) cancellation.Request {
+func (s *Service) cancelRequest(req *CancelRequest) cancellation.Request {
 	var contract map[string]any
 	_ = json.Unmarshal(req.Message.Contract, &contract)
-	return cancellation.RequestFrom(contract)
+	r := cancellation.RequestFrom(contract)
+	r.SettlementTerms = cancellation.SettlementTerms(s.cfg.SettlementBasis, s.cfg.SettlementWindow)
+	return r
 }
 
 // callOnCancel POSTs on_cancel through the ONIX BPP caller and logs the OUTBOUND entry.
