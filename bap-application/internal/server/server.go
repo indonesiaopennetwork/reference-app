@@ -71,7 +71,7 @@ func RegisterRoutes(r *gin.Engine, pool *pgxpool.Pool, cfg *config.Config, lh *l
 	// buyer identity from the bearer token when present, but never rejects
 	// a request for lacking one -- see internal/auth.
 	v1 := r.Group("/api/v1")
-	v1.Use(auth.OptionalAuth(verifier))
+	v1.Use(auth.OptionalAuth(verifier, lh))
 	{
 		clientH := clientsvc.NewClientHandler(pool, cfg, lh, discoverRegistry)
 		v1.GET("/catalog", clientH.HandleCatalog)

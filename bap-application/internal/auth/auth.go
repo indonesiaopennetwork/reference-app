@@ -15,7 +15,6 @@ package auth
 import (
 	"context"
 	"errors"
-	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -23,6 +22,7 @@ import (
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/gin-gonic/gin"
+	"github.com/remiges-tech/logharbour/logharbour"
 )
 
 // Gin context key set by OptionalAuth when a valid token is present.
@@ -93,13 +93,25 @@ func (v *Verifier) verify(ctx context.Context, rawToken string) (verifiedClaims,
 	return claims, nil
 }
 
+// Gin context key set by OptionalAuth when a token was presented but could
+// not be verified. Handlers use TokenRejected to tell that apart from "no
+// token was sent at all" -- see SubjectFromContext's callers.
+const contextTokenRejectedKey = "auth.tokenRejected"
+
 // OptionalAuth is Gin middleware: if a valid bearer token is present, it
 // stores the buyer's Zitadel subject in the request context. If the token
 // is missing, malformed, or fails verification, it does NOT reject the
 // request -- it just proceeds with no subject set. v may be nil (Zitadel
 // was unreachable at startup); in that case this is a no-op, since
 // bap-application should keep serving traffic even if Zitadel is down.
-func OptionalAuth(v *Verifier) gin.HandlerFunc {
+//
+// A rejected token is recorded in the context and logged at Warn. It used
+// to be swallowed with no trace at all, which made an expired or otherwise
+// unverifiable token indistinguishable from an anonymous visit: the whole
+// shop kept working (discover/select/init/confirm need no identity) while
+// every buyer-scoped read silently returned "not found", with nothing in
+// the logs to say why. lh may be nil, in which case nothing is logged.
+func OptionalAuth(v *Verifier, lh *logharbour.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if v == nil {
 			c.Next()
@@ -112,13 +124,33 @@ func OptionalAuth(v *Verifier) gin.HandlerFunc {
 		}
 		claims, err := v.verify(c.Request.Context(), raw)
 		if err != nil {
-			log.Printf("OptionalAuth token verification failed: %v", err)
+			c.Set(contextTokenRejectedKey, true)
+			if lh != nil {
+				lh.WithModule("auth").Warn().Error(err).Log(
+					"bearer token present but failed verification; request proceeds with no buyer identity, so buyer-scoped reads will find nothing",
+				)
+			}
 			c.Next()
 			return
 		}
+		c.Set(contextTokenRejectedKey, false)
 		c.Set(contextSubjectKey, claims.Subject)
 		c.Next()
 	}
+}
+
+// TokenRejected reports whether this request carried a bearer token that
+// failed verification (as opposed to carrying none at all). Handlers use
+// it to answer 401 -- which lets the frontend clear the dead token and
+// send the buyer back through login -- instead of a 404 that looks like
+// the order doesn't exist and leaves them stuck.
+func TokenRejected(c *gin.Context) bool {
+	rejected, ok := c.Get(contextTokenRejectedKey)
+	if !ok {
+		return false
+	}
+	b, _ := rejected.(bool)
+	return b
 }
 
 // SubjectFromContext returns the authenticated buyer's Zitadel subject, if
