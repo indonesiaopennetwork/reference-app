@@ -6,6 +6,12 @@ import (
 	"net/http"
 	"strconv"
 
+	"bytes"
+	"context"
+	"io"
+	"strings"
+	"time"
+
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -15,6 +21,7 @@ import (
 	"github.com/ion/winroom/bpp/db/sqlc"
 	"github.com/ion/winroom/bpp/internal/auth"
 	"github.com/ion/winroom/bpp/internal/config"
+	"github.com/ion/winroom/bpp/internal/statussvc"
 )
 
 const defaultPageSize = 20
@@ -288,13 +295,13 @@ func (h *Handler) HandleListStock(c *gin.Context) {
 	}
 
 	type stockItem struct {
-		ResourceID string  `json:"resourceId"`
-		Name       string  `json:"name"`
-		CatalogID  string  `json:"catalogId"`
-		Quantity   int32   `json:"quantity"`
-		Sold       int32   `json:"sold"`
-		Available  int32   `json:"available"`
-		UpdatedAt  string  `json:"updatedAt"`
+		ResourceID string `json:"resourceId"`
+		Name       string `json:"name"`
+		CatalogID  string `json:"catalogId"`
+		Quantity   int32  `json:"quantity"`
+		Sold       int32  `json:"sold"`
+		Available  int32  `json:"available"`
+		UpdatedAt  string `json:"updatedAt"`
 	}
 
 	items := make([]stockItem, 0, len(rows))
@@ -353,16 +360,16 @@ func (h *Handler) HandleListSupportTickets(c *gin.Context) {
 	}
 
 	type ticketItem struct {
-		ID          string `json:"id"`
-		ContractID  string `json:"contractId"`
-		TxnID       string `json:"transactionId"`
-		BapID       string `json:"bapId"`
-		Name        string `json:"name"`
-		ShortDesc   string `json:"shortDesc"`
-		Status      string `json:"status"`
-		IsPreview   bool   `json:"isPreview"`
-		CreatedAt   string `json:"createdAt"`
-		ResolvedAt  string `json:"resolvedAt,omitempty"`
+		ID         string `json:"id"`
+		ContractID string `json:"contractId"`
+		TxnID      string `json:"transactionId"`
+		BapID      string `json:"bapId"`
+		Name       string `json:"name"`
+		ShortDesc  string `json:"shortDesc"`
+		Status     string `json:"status"`
+		IsPreview  bool   `json:"isPreview"`
+		CreatedAt  string `json:"createdAt"`
+		ResolvedAt string `json:"resolvedAt,omitempty"`
 	}
 
 	items := make([]ticketItem, 0, len(rows))
@@ -441,14 +448,14 @@ func (h *Handler) HandleListRatings(c *gin.Context) {
 	}
 
 	type ratingItem struct {
-		ID        string          `json:"id"`
-		ContractID string         `json:"contractId"`
-		TxnID     string          `json:"transactionId"`
-		BapID     string          `json:"bapId"`
-		TargetID  string          `json:"targetId"`
-		Range     json.RawMessage `json:"range"`
-		IsPreview bool            `json:"isPreview"`
-		CreatedAt string          `json:"createdAt"`
+		ID         string          `json:"id"`
+		ContractID string          `json:"contractId"`
+		TxnID      string          `json:"transactionId"`
+		BapID      string          `json:"bapId"`
+		TargetID   string          `json:"targetId"`
+		Range      json.RawMessage `json:"range"`
+		IsPreview  bool            `json:"isPreview"`
+		CreatedAt  string          `json:"createdAt"`
 	}
 
 	items := make([]ratingItem, 0, len(rows))
@@ -475,6 +482,215 @@ func (h *Handler) HandleListRatings(c *gin.Context) {
 		"page":  page,
 		"limit": limit,
 	})
+}
+
+// ---------------------------------------------------------------------------
+// PUT /api/v1/orders/:id/fulfillment-status
+// ---------------------------------------------------------------------------
+
+// HandleUpdateFulfillmentStatus updates the contract performance status
+func (h *Handler) HandleUpdateFulfillmentStatus(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid contract id"})
+		return
+	}
+
+	var req struct {
+		Status string `json:"status" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	q := sqlc.New(h.pool)
+	ctx := c.Request.Context()
+	bppID := h.cfg.BppID
+
+	// Verify contract belongs to seller
+	providerID := auth.ProviderIDFromContext(c)
+	_, err = q.GetContractDetail(ctx, sqlc.GetContractDetailParams{ID: id, BppID: bppID, ProviderID: &providerID})
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "order not found"})
+		return
+	}
+
+	// Update DB
+	err = q.UpdatePerformanceStatus(ctx, sqlc.UpdatePerformanceStatusParams{
+		StatusCode: &req.Status,
+		ContractID: id,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Trigger unsolicited on_status
+	h.triggerUnsolicitedOnStatus(id, req.Status)
+
+	// If Shipped, schedule Delivered after 10 mins
+	if req.Status == "Shipped" {
+		go func(cid uuid.UUID) {
+			time.Sleep(1 * time.Minute)
+			bgCtx := context.Background()
+			newStatus := "Delivered"
+			err := q.UpdatePerformanceStatus(bgCtx, sqlc.UpdatePerformanceStatusParams{
+				StatusCode: &newStatus,
+				ContractID: cid,
+			})
+			if err == nil {
+				h.triggerUnsolicitedOnStatus(cid, newStatus)
+			}
+		}(id)
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "updated"})
+}
+
+func (h *Handler) triggerUnsolicitedOnStatus(contractID uuid.UUID, status string) {
+	bgCtx := context.Background()
+	q := sqlc.New(h.pool)
+
+	row, err := q.GetActiveContractByID(bgCtx, sqlc.GetActiveContractByIDParams{
+		ID:    contractID,
+		BppID: h.cfg.BppID,
+	})
+	if err != nil {
+		h.lh.WithModule("dashboardsvc").Err().Error(err).Log("failed to get active contract for unsolicited on_status")
+		return
+	}
+
+	var contractMap map[string]interface{}
+	
+	// If contract_attributes is present, use it. Otherwise, fall back to beckn_message_log
+	if len(row.ContractAttributes) > 0 && string(row.ContractAttributes) != "null" {
+		if err := json.Unmarshal(row.ContractAttributes, &contractMap); err != nil {
+			h.lh.WithModule("dashboardsvc").Err().Error(err).Log("failed to parse contract attributes for unsolicited on_status")
+			return
+		}
+	}
+
+	if contractMap == nil {
+		var lastPayloadStr string
+		err = h.pool.QueryRow(bgCtx, `
+			SELECT request_payload 
+			FROM beckn_message_log 
+			WHERE transaction_id = $1 AND action IN ('on_confirm', 'confirm', 'on_init', 'init') 
+			ORDER BY created_at DESC LIMIT 1
+		`, row.TransactionID).Scan(&lastPayloadStr)
+		if err != nil {
+			h.lh.WithModule("dashboardsvc").Err().Error(err).Log("failed to find previous contract payload for unsolicited on_status")
+			return
+		}
+
+		var parsedReq struct {
+			Message struct {
+				Contract map[string]interface{} `json:"contract"`
+			} `json:"message"`
+		}
+		if err := json.Unmarshal([]byte(lastPayloadStr), &parsedReq); err != nil {
+			h.lh.WithModule("dashboardsvc").Err().Error(err).Log("failed to parse previous contract payload")
+			return
+		}
+		contractMap = parsedReq.Message.Contract
+	}
+
+	if contractMap == nil {
+		contractMap = make(map[string]interface{})
+	}
+
+	contractMap["id"] = row.ID.String()
+	contractMap["status"] = map[string]string{"code": string(row.Status)}
+	
+	isReturnStatus := status == "Return_Received" || status == "Return_Rejected" || status == "Return_Approved"
+
+	if perfs, ok := contractMap["performance"].([]interface{}); ok && len(perfs) > 0 {
+		foundReturn := false
+		if isReturnStatus {
+			for _, p := range perfs {
+				if perf, ok := p.(map[string]interface{}); ok {
+					if attrs, ok := perf["performanceAttributes"].(map[string]interface{}); ok && attrs["type"] == "RETURN" {
+						perf["status"] = map[string]interface{}{"code": status}
+						foundReturn = true
+					}
+				}
+			}
+		}
+		if !foundReturn && !isReturnStatus {
+			if perf, ok := perfs[0].(map[string]interface{}); ok {
+				perf["status"] = map[string]interface{}{"code": status}
+			}
+		}
+	}
+
+	contractJSON, _ := json.Marshal(contractMap)
+
+	// Persist updated contract state to the database so that subsequent loads see the new status
+	_, execErr := h.pool.Exec(bgCtx, `
+		UPDATE contracts SET contract_attributes = $1, updated_at = NOW()
+		WHERE id = $2 AND bpp_id = $3
+	`, contractJSON, row.ID, h.cfg.BppID)
+	if execErr != nil {
+		h.lh.WithModule("dashboardsvc").Err().Error(execErr).Log("failed to update contract attributes in db")
+	}
+
+	networkID := ""
+	if row.NetworkID != nil {
+		networkID = *row.NetworkID
+	}
+
+	outMsgID := uuid.New()
+	onStatusReq := statussvc.OnStatusRequest{
+		Context: statussvc.BecknContext{
+			Version:       "2.0.0",
+			Action:        "on_status",
+			Timestamp:     time.Now().UTC().Format(time.RFC3339),
+			MessageID:     outMsgID.String(),
+			TransactionID: row.TransactionID.String(),
+			BapID:         row.BapID,
+			BapURI:        row.BapUri,
+			BppID:         h.cfg.BppID,
+			BppURI:        h.cfg.BppURI,
+			NetworkID:     networkID,
+		},
+		Message: statussvc.OnStatusMessage{Contract: contractJSON},
+	}
+
+	bapURI := row.BapUri
+	url := h.resolveOnStatusURL(bapURI)
+	body, _ := json.Marshal(onStatusReq)
+
+	req, err := http.NewRequestWithContext(bgCtx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		h.lh.WithModule("dashboardsvc").Err().Error(err).Log("failed unsolicited on_status")
+		return
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+	h.lh.WithModule("dashboardsvc").Info().Log("unsolicited on_status sent: " + string(respBody))
+}
+
+func (h *Handler) resolveOnStatusURL(_ string) string {
+	base := strings.TrimSpace(h.cfg.BppCallerURL)
+	if base == "" {
+		base = strings.TrimSpace(h.cfg.BppURI)
+		if strings.HasSuffix(base, "/") {
+			base = strings.TrimSuffix(base, "/")
+		}
+		if strings.HasSuffix(base, "/bpp/receiver") {
+			base = strings.TrimSuffix(base, "/bpp/receiver") + "/bpp/caller"
+		}
+	}
+	base = strings.TrimRight(base, "/")
+	return base + "/on_status"
 }
 
 // ---------------------------------------------------------------------------

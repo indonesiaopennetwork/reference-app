@@ -484,7 +484,34 @@ function OverviewPage({ onNav }) {
 // ─── Orders ───────────────────────────────────────────────────────────────────
 
 function OrderDetailDrawer({ order, onClose }) {
-  const { data, loading } = useApi(order?.id ? `/orders/${order.id}` : null, [order?.id])
+  const { data, loading, reload } = useApi(order?.id ? `/orders/${order.id}` : null, [order?.id])
+  const [updating, setUpdating] = useState(false)
+
+  let contractAttrs = data?.contract?.contract_attributes;
+  if (typeof contractAttrs === 'string') {
+    try { contractAttrs = JSON.parse(contractAttrs); } catch {}
+  }
+  const performances = contractAttrs?.performance || [];
+  const returnPerf = performances.find(p => p.performanceAttributes?.type === 'RETURN');
+  const returnStatus = returnPerf?.status?.code;
+  const deliveryPerf = performances.find(p => p.performanceAttributes?.type !== 'RETURN');
+  const deliveryStatus = deliveryPerf?.status?.code;
+
+  const updateStatus = async (status) => {
+    setUpdating(true)
+    try {
+      await apiFetch(`/orders/${order.id}/fulfillment-status`, {
+        method: 'PUT',
+        body: JSON.stringify({ status })
+      })
+      reload()
+    } catch (e) {
+      alert("Failed to update status: " + e.message)
+    } finally {
+      setUpdating(false)
+    }
+  }
+
   return (
     <AnimatePresence>
       {order && (
@@ -531,6 +558,74 @@ function OrderDetailDrawer({ order, onClose }) {
                       ))}
                     </Card>
                   </section>
+
+                  {/* Fulfillment Actions */}
+                  {data?.contract?.status === 'ACTIVE' && (
+                    <section>
+                      <SectionTitle>Fulfillment Actions</SectionTitle>
+                      
+                      {returnStatus === 'Return_Initiated' ? (
+                        <Card className="p-4 space-y-3">
+                          <p className="text-sm font-semibold text-purple-400 flex items-center gap-2">
+                            <RefreshCw size={16} /> Return Requested
+                          </p>
+                          <div className="flex items-center gap-3">
+                            <button 
+                              disabled={updating}
+                              onClick={() => updateStatus('Return_Approved')}
+                              className="flex-1 py-2 px-3 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50"
+                            >
+                              {updating ? 'Updating...' : 'Approve Return'}
+                            </button>
+                            <button 
+                              disabled={updating}
+                              onClick={() => updateStatus('Return_Rejected')}
+                              className="flex-1 py-2 px-3 bg-rose-500/10 text-rose-400 border border-rose-500/20 hover:bg-rose-500/20 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50"
+                            >
+                              {updating ? 'Updating...' : 'Reject Return'}
+                            </button>
+                          </div>
+                        </Card>
+                      ) : returnStatus ? (
+                        <Card className="p-4">
+                          <p className="text-sm font-semibold text-slate-300 flex items-center gap-2">
+                            <RefreshCw size={16} className="text-slate-500" /> Return Status: {returnStatus.replace(/_/g, ' ')}
+                          </p>
+                        </Card>
+                      ) : (
+                        <Card className="p-4 flex items-center gap-3">
+                          {(!deliveryStatus || (deliveryStatus.toLowerCase() !== 'packed' && deliveryStatus.toLowerCase() !== 'shipped' && deliveryStatus.toLowerCase() !== 'delivered')) && (
+                            <button 
+                              disabled={updating}
+                              onClick={() => updateStatus('Packed')}
+                              className="flex-1 py-2 px-3 bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50"
+                            >
+                              {updating ? 'Updating...' : 'Mark Packed'}
+                            </button>
+                          )}
+                          {deliveryStatus?.toLowerCase() === 'packed' && (
+                            <button 
+                              disabled={updating}
+                              onClick={() => updateStatus('Shipped')}
+                              className="flex-1 py-2 px-3 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50"
+                            >
+                              {updating ? 'Updating...' : 'Mark Shipped'}
+                            </button>
+                          )}
+                          {deliveryStatus?.toLowerCase() === 'shipped' && (
+                            <p className="text-sm font-semibold text-cyan-400 w-full text-center">
+                              Order is Shipped (Auto-Delivering)
+                            </p>
+                          )}
+                          {deliveryStatus?.toLowerCase() === 'delivered' && (
+                            <p className="text-sm font-semibold text-slate-400 w-full text-center">
+                              Order is Delivered
+                            </p>
+                          )}
+                        </Card>
+                      )}
+                    </section>
+                  )}
 
                   {/* Commitments */}
                   {data?.commitments?.length > 0 && (

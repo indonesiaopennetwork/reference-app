@@ -222,10 +222,6 @@ func (q *Queries) ListTransactions(ctx context.Context, arg ListTransactionsPara
 const upsertContractSnapshot = `-- name: UpsertContractSnapshot :exec
 INSERT INTO contract_snapshots (transaction_id, action, contract_id, contract)
 VALUES ($1, $2, $3, $4)
-ON CONFLICT (transaction_id, action) DO UPDATE SET
-    contract_id = EXCLUDED.contract_id,
-    contract    = EXCLUDED.contract,
-    updated_at  = NOW()
 `
 
 type UpsertContractSnapshotParams struct {

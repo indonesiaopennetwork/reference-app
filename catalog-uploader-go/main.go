@@ -257,27 +257,22 @@ func main() {
 	}
 
 	payload := map[string]any{
-		"context": map[string]any{
-			"action": "on_discover",
-		},
-		"message": map[string]any{
-			"catalogs": []map[string]any{
-				{
-					"id": *catalogID,
-					"descriptor": map[string]any{
-						"name":      *catalogName,
-						"shortDesc": *catalogShortDesc,
-						"longDesc":  *catalogLongDesc,
-					},
-					"provider": map[string]any{
-						"id": *providerID,
-						"descriptor": map[string]any{
-							"name": *providerName,
-						},
-					},
-					"resources": resources,
-					"offers":    offers,
+		"catalogs": []map[string]any{
+			{
+				"id": *catalogID,
+				"descriptor": map[string]any{
+					"name":      *catalogName,
+					"shortDesc": *catalogShortDesc,
+					"longDesc":  *catalogLongDesc,
 				},
+				"provider": map[string]any{
+					"id": *providerID,
+					"descriptor": map[string]any{
+						"name": *providerName,
+					},
+				},
+				"resources": resources,
+				"offers":    offers,
 			},
 		},
 	}
