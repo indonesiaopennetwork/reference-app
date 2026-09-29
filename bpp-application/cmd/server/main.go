@@ -18,6 +18,7 @@ import (
 	"github.com/ion/winroom/bpp/internal/auth"
 	"github.com/ion/winroom/bpp/internal/config"
 	"github.com/ion/winroom/bpp/internal/server"
+	"github.com/ion/winroom/bpp/internal/sweep"
 )
 
 func main() {
@@ -105,6 +106,12 @@ func main() {
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+	// Alerts on update requests stuck PENDING too long (see internal/sweep's
+	// own package doc) -- read-only, single background goroutine.
+	sweepCtx, stopSweep := context.WithCancel(context.Background())
+	defer stopSweep()
+	go sweep.RunLoop(sweepCtx, pool, lh, sweep.DefaultInterval, sweep.DefaultStaleAfter)
 
 	go func() {
 		if err := r.Run(addr); err != nil {

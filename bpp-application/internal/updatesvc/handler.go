@@ -31,6 +31,17 @@ func (h *Handler) Handle(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, buildNACK(req.Context, "bapUri required"))
 		return
 	}
+	if req.Context.TransactionID == "" {
+		c.JSON(http.StatusBadRequest, buildNACK(req.Context, "transactionId required"))
+		return
+	}
+	if len(req.Message.Contract) == 0 {
+		// UpdateAction's wire schema requires `contract` -- reject
+		// synchronously (cheap, local) rather than ACKing a request with
+		// nothing to apply and only discovering that asynchronously.
+		c.JSON(http.StatusBadRequest, buildNACK(req.Context, "message.contract required"))
+		return
+	}
 	c.JSON(http.StatusOK, BecknACK{Context: req.Context, Message: ACKMessage{ACK: ACKStatus{Status: "ACK"}}})
 	go func() { h.svc.Process(context.Background(), &req) }()
 }

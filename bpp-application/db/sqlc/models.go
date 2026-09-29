@@ -549,6 +549,49 @@ func (ns NullTrackingStatus) Value() (driver.Value, error) {
 	return string(ns.TrackingStatus), nil
 }
 
+type UpdateRequestStatus string
+
+const (
+	UpdateRequestStatusPENDING  UpdateRequestStatus = "PENDING"
+	UpdateRequestStatusAPPROVED UpdateRequestStatus = "APPROVED"
+	UpdateRequestStatusREJECTED UpdateRequestStatus = "REJECTED"
+)
+
+func (e *UpdateRequestStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = UpdateRequestStatus(s)
+	case string:
+		*e = UpdateRequestStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for UpdateRequestStatus: %T", src)
+	}
+	return nil
+}
+
+type NullUpdateRequestStatus struct {
+	UpdateRequestStatus UpdateRequestStatus `json:"update_request_status"`
+	Valid               bool                `json:"valid"` // Valid is true if UpdateRequestStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullUpdateRequestStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.UpdateRequestStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.UpdateRequestStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullUpdateRequestStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.UpdateRequestStatus), nil
+}
+
 // Immutable, partitioned audit log of all Beckn protocol messages. Provides non-repudiation — never update or delete rows.
 type BecknMessageLog struct {
 	ID            uuid.UUID        `json:"id"`
@@ -804,6 +847,22 @@ type ContractTracking struct {
 	ExpiresAt                 pgtype.Timestamptz `json:"expires_at"`
 	CreatedAt                 pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt                 pgtype.Timestamptz `json:"updated_at"`
+}
+
+// Buyer-proposed contract mutations awaiting seller approval/rejection. Only APPROVED requests are ever applied to contracts.contract_attributes.
+type ContractUpdateRequest struct {
+	ID                  uuid.UUID           `json:"id"`
+	ContractID          uuid.UUID           `json:"contract_id"`
+	TransactionID       uuid.UUID           `json:"transaction_id"`
+	BapID               string              `json:"bap_id"`
+	BapUri              string              `json:"bap_uri"`
+	RequestedAttributes json.RawMessage     `json:"requested_attributes"`
+	Status              UpdateRequestStatus `json:"status"`
+	RejectReason        *string             `json:"reject_reason"`
+	CreatedAt           pgtype.Timestamptz  `json:"created_at"`
+	DecidedAt           pgtype.Timestamptz  `json:"decided_at"`
+	// Snapshot of contract_performances.performance_attributes.deliveryDetails taken when this request was queued. NULL for rows created before this column existed.
+	PreviousDeliveryDetails json.RawMessage `json:"previous_delivery_details"`
 }
 
 // Beckn callbacks that exhausted the retry budget. Requires manual review and replay by the operations team.

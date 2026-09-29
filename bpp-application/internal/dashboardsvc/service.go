@@ -3,6 +3,7 @@ package dashboardsvc
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -22,19 +23,22 @@ import (
 	"github.com/ion/winroom/bpp/internal/auth"
 	"github.com/ion/winroom/bpp/internal/config"
 	"github.com/ion/winroom/bpp/internal/statussvc"
+	"github.com/ion/winroom/bpp/internal/orderchange"
+	"github.com/ion/winroom/bpp/internal/updatesvc"
 )
 
 const defaultPageSize = 20
 
 // Handler bundles all dashboard API handlers and their shared dependencies.
 type Handler struct {
-	pool *pgxpool.Pool
-	cfg  *config.Config
-	lh   *logharbour.Logger
+	pool      *pgxpool.Pool
+	cfg       *config.Config
+	lh        *logharbour.Logger
+	updateSvc *updatesvc.Service
 }
 
 func NewHandler(pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.Logger) *Handler {
-	return &Handler{pool: pool, cfg: cfg, lh: lh}
+	return &Handler{pool: pool, cfg: cfg, lh: lh, updateSvc: updatesvc.NewService(pool, cfg, lh)}
 }
 
 // ---------------------------------------------------------------------------
@@ -418,6 +422,240 @@ func (h *Handler) HandleListSupportTickets(c *gin.Context) {
 		"page":  page,
 		"limit": limit,
 	})
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/update-requests, POST .../approve, POST .../reject
+//
+// Buyer-proposed contract updates are queued (see updatesvc.Process) rather
+// than applied automatically -- these three endpoints are how a seller
+// actually reviews and decides them.
+// ---------------------------------------------------------------------------
+
+// HandleListUpdateRequests returns the seller's change-request queue.
+//
+// Each item carries a one-line headline plus only the fields that actually
+// differ, computed by internal/orderchange -- deliberately NOT a raw diff
+// of the two contracts. The buyer sends a full replacement contract built
+// from the BAP's snapshot, while the seller stores the order normalised
+// across contract_performances/commitments, so diffing them wholesale
+// reports hundreds of phantom "new field" rows (and contract_attributes is
+// usually NULL, so everything looks new). See that package's header.
+func (h *Handler) HandleListUpdateRequests(c *gin.Context) {
+	page, limit := parsePagination(c)
+	q := sqlc.New(h.pool)
+	ctx := c.Request.Context()
+	providerID := auth.ProviderIDFromContext(c)
+
+	var statusFilter sqlc.NullUpdateRequestStatus
+	if s := c.Query("status"); s != "" {
+		statusFilter = sqlc.NullUpdateRequestStatus{UpdateRequestStatus: sqlc.UpdateRequestStatus(s), Valid: true}
+	}
+
+	total, err := q.CountUpdateRequests(ctx, sqlc.CountUpdateRequestsParams{
+		BppID:      h.cfg.BppID,
+		ProviderID: &providerID,
+		Status:     statusFilter,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	rows, err := q.ListUpdateRequestsDetailed(ctx, sqlc.ListUpdateRequestsDetailedParams{
+		BppID:      h.cfg.BppID,
+		Limit:      int32(limit),
+		Offset:     int32((page - 1) * limit),
+		ProviderID: &providerID,
+		Status:     statusFilter,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Swap NoPhaseTracking{} for a real PhaseReporter to switch on
+	// fulfilment-phase warnings -- this is the single call site referred to
+	// in internal/orderchange/feasibility.go's header.
+	var phases orderchange.PhaseReporter = orderchange.NoPhaseTracking{}
+
+	type orderContext struct {
+		PlacedAt       string            `json:"placedAt"`
+		ContractStatus string            `json:"contractStatus"`
+		Name           string            `json:"name,omitempty"`
+		ItemCount      int               `json:"itemCount"`
+		Total          string            `json:"total,omitempty"`
+		Phase          orderchange.Phase `json:"phase"`
+	}
+
+	type updateRequestItem struct {
+		ID            string                `json:"id"`
+		ContractID    string                `json:"contractId"`
+		TransactionID string                `json:"transactionId"`
+		BapID         string                `json:"bapId"`
+		Status        string                `json:"status"`
+		RejectReason  string                `json:"rejectReason,omitempty"`
+		CreatedAt     string                `json:"createdAt"`
+		DecidedAt     string                `json:"decidedAt,omitempty"`
+		Headline      string                `json:"headline"`
+		Changes       []orderchange.Change  `json:"changes"`
+		Warnings      []orderchange.Warning `json:"warnings"`
+		Order         orderContext          `json:"order"`
+		// RequestedAttributes is kept for debugging/audit only -- the UI
+		// renders Changes. Dumping this on screen is what made the old
+		// page unreadable.
+		RequestedAttributes json.RawMessage `json:"requestedAttributes,omitempty"`
+	}
+
+	items := make([]updateRequestItem, 0, len(rows))
+	for _, r := range rows {
+		// Prefer the "before" snapshot taken when the request was queued.
+		// Falling back to the live contract is only for rows created
+		// before migration 030 -- and that fallback is exactly why an
+		// approved request used to show no changes at all, since after
+		// approval the live contract already holds the requested values.
+		changes := orderchange.SummarizeFromDeliveryDetails(r.PreviousDeliveryDetails, r.RequestedAttributes)
+		if len(changes) == 0 && len(r.PreviousDeliveryDetails) == 0 {
+			changes = orderchange.Summarize(r.CurrentPerformanceAttributes, r.RequestedAttributes)
+		}
+		phase, err := phases.PhaseFor(ctx, r.ContractID.String())
+		if err != nil {
+			// Losing the phase costs advice, not the decision -- show the
+			// request rather than failing the whole page.
+			h.lh.WithModule("dashboardsvc").Warn().Error(err).Log("could not resolve fulfilment phase for update request")
+			phase = orderchange.Phase{Label: "Unknown", Tracked: false}
+		}
+
+		itemCount, total := summariseCommitments(r.CommitmentAttributes)
+
+		item := updateRequestItem{
+			ID:                  r.ID.String(),
+			ContractID:          r.ContractID.String(),
+			TransactionID:       r.TransactionID.String(),
+			BapID:               r.BapID,
+			Status:              string(r.Status),
+			Headline:            orderchange.Headline(changes, orderchange.HasDeliveryProposal(r.RequestedAttributes)),
+			Changes:             changes,
+			Warnings:            orderchange.Warnings(phase, changes),
+			RequestedAttributes: r.RequestedAttributes,
+			Order: orderContext{
+				ContractStatus: string(r.ContractStatus),
+				ItemCount:      itemCount,
+				Total:          total,
+				Phase:          phase,
+			},
+		}
+		if r.OrderName != nil {
+			item.Order.Name = *r.OrderName
+		}
+		if r.OrderPlacedAt.Valid {
+			item.Order.PlacedAt = r.OrderPlacedAt.Time.UTC().Format("2006-01-02T15:04:05Z")
+		}
+		if r.RejectReason != nil {
+			item.RejectReason = *r.RejectReason
+		}
+		if r.CreatedAt.Valid {
+			item.CreatedAt = r.CreatedAt.Time.UTC().Format("2006-01-02T15:04:05Z")
+		}
+		if r.DecidedAt.Valid {
+			item.DecidedAt = r.DecidedAt.Time.UTC().Format("2006-01-02T15:04:05Z")
+		}
+		items = append(items, item)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"items": items,
+		"total": total,
+		"page":  page,
+		"limit": limit,
+	})
+}
+
+// summariseCommitments reduces the order's commitment attributes to the two
+// facts the seller needs at a glance: how many line items, and the money.
+// Best-effort: an unparseable bag yields a zero count and no total rather
+// than an error, since this is context around the decision, not the
+// decision itself.
+func summariseCommitments(raw interface{}) (int, string) {
+	b, err := json.Marshal(raw)
+	if err != nil {
+		return 0, ""
+	}
+	var bags []struct {
+		Price struct {
+			Currency string      `json:"currency"`
+			Value    json.Number `json:"value"`
+		} `json:"price"`
+		Quantity struct {
+			UnitQuantity json.Number `json:"unitQuantity"`
+		} `json:"quantity"`
+	}
+	if err := json.Unmarshal(b, &bags); err != nil {
+		return 0, ""
+	}
+
+	var sum float64
+	currency := ""
+	for _, bag := range bags {
+		v, err := bag.Price.Value.Float64()
+		if err != nil {
+			continue
+		}
+		qty := 1.0
+		if q, err := bag.Quantity.UnitQuantity.Float64(); err == nil && q > 0 {
+			qty = q
+		}
+		sum += v * qty
+		if currency == "" {
+			currency = bag.Price.Currency
+		}
+	}
+	if currency == "" || sum == 0 {
+		return len(bags), ""
+	}
+	return len(bags), fmt.Sprintf("%s %.0f", currency, sum)
+}
+
+func (h *Handler) HandleApproveUpdateRequest(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid update request id"})
+		return
+	}
+	providerID := auth.ProviderIDFromContext(c)
+	if err := h.updateSvc.ApproveRequest(c.Request.Context(), id, &providerID); err != nil {
+		h.lh.WithModule("dashboardsvc").Err().Error(err).Log("approve update request failed")
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "APPROVED"})
+}
+
+func (h *Handler) HandleRejectUpdateRequest(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid update request id"})
+		return
+	}
+	var body struct {
+		// ReasonCode is one of orderchange.RejectReason's keys. It is what
+		// gives the BUYER a stable label ("Already dispatched") instead of
+		// whatever wording this particular seller typed -- which is the
+		// point of sending a reason at all: a buyer who understands why
+		// stops re-sending the same request. Free text rides along in
+		// Reason. Both optional, per the product decision that a reason is
+		// not mandatory.
+		ReasonCode string `json:"reasonCode"`
+		Reason     string `json:"reason"`
+	}
+	_ = c.ShouldBindJSON(&body) // reason is optional -- an empty body is fine
+	providerID := auth.ProviderIDFromContext(c)
+	if err := h.updateSvc.RejectRequest(c.Request.Context(), id, &providerID, body.ReasonCode, body.Reason); err != nil {
+		h.lh.WithModule("dashboardsvc").Err().Error(err).Log("reject update request failed")
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "REJECTED"})
 }
 
 // ---------------------------------------------------------------------------

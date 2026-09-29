@@ -172,6 +172,9 @@ func registerDashboardRoutes(v1 *gin.RouterGroup, pool *pgxpool.Pool, cfg *confi
 
 	dash.GET("/messages", h.HandleListMessages)
 	dash.GET("/support-tickets", h.HandleListSupportTickets)
+	dash.GET("/update-requests", h.HandleListUpdateRequests)
+	dash.POST("/update-requests/:id/approve", h.HandleApproveUpdateRequest)
+	dash.POST("/update-requests/:id/reject", h.HandleRejectUpdateRequest)
 	dash.GET("/ratings", h.HandleListRatings)
 
 	// Catalog management

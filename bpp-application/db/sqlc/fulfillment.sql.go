@@ -13,6 +13,40 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const applyPerformanceDeliveryDetails = `-- name: ApplyPerformanceDeliveryDetails :execrows
+UPDATE contract_performances
+SET performance_attributes = jsonb_set(
+        COALESCE(performance_attributes, '{}'::jsonb),
+        '{deliveryDetails}',
+        $1::jsonb,
+        true
+    ),
+    updated_at = NOW()
+WHERE contract_id = $2
+`
+
+type ApplyPerformanceDeliveryDetailsParams struct {
+	DeliveryDetails json.RawMessage `json:"delivery_details"`
+	ContractID      uuid.UUID       `json:"contract_id"`
+}
+
+// Writes an approved delivery-details change to where fulfilment actually
+// reads it.
+//
+// This is the fix for a real bug: approving a change used to write the
+// buyer's whole proposed contract into contracts.contract_attributes,
+// which nothing reads for fulfilment -- so an approved address change was
+// recorded but the parcel still went to the old address. The delivery
+// address lives in contract_performances.performance_attributes, and this
+// is the only statement that should change it.
+func (q *Queries) ApplyPerformanceDeliveryDetails(ctx context.Context, arg ApplyPerformanceDeliveryDetailsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, applyPerformanceDeliveryDetails, arg.DeliveryDetails, arg.ContractID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const cancelContract = `-- name: CancelContract :one
 
 UPDATE contracts SET
@@ -87,6 +121,51 @@ func (q *Queries) CountSupportTickets(ctx context.Context, arg CountSupportTicke
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const countUpdateRequests = `-- name: CountUpdateRequests :one
+SELECT COUNT(*) FROM contract_update_requests ur
+JOIN contracts c ON c.id = ur.contract_id
+WHERE c.bpp_id = $1
+  AND ($2::TEXT IS NULL OR c.provider_id = $2)
+  AND ($3::update_request_status IS NULL OR ur.status = $3)
+`
+
+type CountUpdateRequestsParams struct {
+	BppID      string                  `json:"bpp_id"`
+	ProviderID *string                 `json:"provider_id"`
+	Status     NullUpdateRequestStatus `json:"status"`
+}
+
+func (q *Queries) CountUpdateRequests(ctx context.Context, arg CountUpdateRequestsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countUpdateRequests, arg.BppID, arg.ProviderID, arg.Status)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const decideUpdateRequestIfPending = `-- name: DecideUpdateRequestIfPending :execrows
+UPDATE contract_update_requests
+SET status = $2, reject_reason = $3, decided_at = NOW()
+WHERE id = $1
+  AND status = 'PENDING'
+`
+
+type DecideUpdateRequestIfPendingParams struct {
+	ID           uuid.UUID           `json:"id"`
+	Status       UpdateRequestStatus `json:"status"`
+	RejectReason *string             `json:"reject_reason"`
+}
+
+// Atomic compare-and-swap, same technique as MarkUpdateSentIfConfirmed on
+// the BAP side: only a currently-PENDING request can be decided, so two
+// concurrent approve/reject clicks (or a double-submit) can't both succeed.
+func (q *Queries) DecideUpdateRequestIfPending(ctx context.Context, arg DecideUpdateRequestIfPendingParams) (int64, error) {
+	result, err := q.db.Exec(ctx, decideUpdateRequestIfPending, arg.ID, arg.Status, arg.RejectReason)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const getActiveContractByID = `-- name: GetActiveContractByID :one
@@ -235,6 +314,73 @@ func (q *Queries) GetCommitmentResourceIDsByContractID(ctx context.Context, cont
 	return items, nil
 }
 
+const getCurrentPerformanceForContract = `-- name: GetCurrentPerformanceForContract :one
+SELECT id, status_code, performance_attributes
+FROM contract_performances
+WHERE contract_id = $1
+ORDER BY created_at ASC
+LIMIT 1
+`
+
+type GetCurrentPerformanceForContractRow struct {
+	ID                    string          `json:"id"`
+	StatusCode            *string         `json:"status_code"`
+	PerformanceAttributes json.RawMessage `json:"performance_attributes"`
+}
+
+// The seller's live delivery details, used both to show "before" values and
+// as the target ApplyPerformanceDeliveryDetails writes into.
+func (q *Queries) GetCurrentPerformanceForContract(ctx context.Context, contractID uuid.UUID) (GetCurrentPerformanceForContractRow, error) {
+	row := q.db.QueryRow(ctx, getCurrentPerformanceForContract, contractID)
+	var i GetCurrentPerformanceForContractRow
+	err := row.Scan(&i.ID, &i.StatusCode, &i.PerformanceAttributes)
+	return i, err
+}
+
+const getUpdateRequestForDecision = `-- name: GetUpdateRequestForDecision :one
+SELECT ur.id, ur.contract_id, ur.transaction_id, ur.bap_id, ur.bap_uri,
+       ur.requested_attributes, ur.status
+FROM contract_update_requests ur
+JOIN contracts c ON c.id = ur.contract_id
+WHERE ur.id = $1
+  AND c.bpp_id = $2
+  AND ($3::TEXT IS NULL OR c.provider_id = $3)
+`
+
+type GetUpdateRequestForDecisionParams struct {
+	ID         uuid.UUID `json:"id"`
+	BppID      string    `json:"bpp_id"`
+	ProviderID *string   `json:"provider_id"`
+}
+
+type GetUpdateRequestForDecisionRow struct {
+	ID                  uuid.UUID           `json:"id"`
+	ContractID          uuid.UUID           `json:"contract_id"`
+	TransactionID       uuid.UUID           `json:"transaction_id"`
+	BapID               string              `json:"bap_id"`
+	BapUri              string              `json:"bap_uri"`
+	RequestedAttributes json.RawMessage     `json:"requested_attributes"`
+	Status              UpdateRequestStatus `json:"status"`
+}
+
+// Scoped by provider_id (nullable, NULL bypasses for internal/ops use) so a
+// seller can only see/decide requests against their own contracts, same
+// scoping convention as ListUpdateRequests.
+func (q *Queries) GetUpdateRequestForDecision(ctx context.Context, arg GetUpdateRequestForDecisionParams) (GetUpdateRequestForDecisionRow, error) {
+	row := q.db.QueryRow(ctx, getUpdateRequestForDecision, arg.ID, arg.BppID, arg.ProviderID)
+	var i GetUpdateRequestForDecisionRow
+	err := row.Scan(
+		&i.ID,
+		&i.ContractID,
+		&i.TransactionID,
+		&i.BapID,
+		&i.BapUri,
+		&i.RequestedAttributes,
+		&i.Status,
+	)
+	return i, err
+}
+
 const insertRating = `-- name: InsertRating :exec
 
 INSERT INTO ratings (
@@ -313,6 +459,46 @@ func (q *Queries) InsertSupportTicket(ctx context.Context, arg InsertSupportTick
 		arg.DescriptorShortDesc,
 		arg.Channels,
 		arg.IsPreview,
+	)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const insertUpdateRequest = `-- name: InsertUpdateRequest :one
+
+INSERT INTO contract_update_requests (
+    contract_id, transaction_id, bap_id, bap_uri, requested_attributes,
+    previous_delivery_details
+)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id
+`
+
+type InsertUpdateRequestParams struct {
+	ContractID              uuid.UUID       `json:"contract_id"`
+	TransactionID           uuid.UUID       `json:"transaction_id"`
+	BapID                   string          `json:"bap_id"`
+	BapUri                  string          `json:"bap_uri"`
+	RequestedAttributes     json.RawMessage `json:"requested_attributes"`
+	PreviousDeliveryDetails json.RawMessage `json:"previous_delivery_details"`
+}
+
+// ============================================================
+// UPDATE REQUESTS — buyer-proposed contract mutations awaiting seller review
+// ============================================================
+// previous_delivery_details is the order's delivery block as it stands RIGHT
+// NOW, captured so the seller can still see what changed after the request
+// is decided (see migration 030 -- diffing against the live contract breaks
+// the moment an approval is applied).
+func (q *Queries) InsertUpdateRequest(ctx context.Context, arg InsertUpdateRequestParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, insertUpdateRequest,
+		arg.ContractID,
+		arg.TransactionID,
+		arg.BapID,
+		arg.BapUri,
+		arg.RequestedAttributes,
+		arg.PreviousDeliveryDetails,
 	)
 	var id uuid.UUID
 	err := row.Scan(&id)
@@ -482,6 +668,251 @@ func (q *Queries) ListSupportTickets(ctx context.Context, arg ListSupportTickets
 		return nil, err
 	}
 	return items, nil
+}
+
+const listUpdateRequests = `-- name: ListUpdateRequests :many
+SELECT
+    ur.id,
+    ur.contract_id,
+    ur.transaction_id,
+    ur.bap_id,
+    ur.requested_attributes,
+    ur.status,
+    ur.reject_reason,
+    ur.created_at,
+    ur.decided_at,
+    c.contract_attributes AS current_attributes
+FROM contract_update_requests ur
+JOIN contracts c ON c.id = ur.contract_id
+WHERE c.bpp_id = $1
+  AND ($4::TEXT IS NULL OR c.provider_id = $4)
+  AND ($5::update_request_status IS NULL OR ur.status = $5)
+ORDER BY ur.created_at DESC
+LIMIT  $2
+OFFSET $3
+`
+
+type ListUpdateRequestsParams struct {
+	BppID      string                  `json:"bpp_id"`
+	Limit      int32                   `json:"limit"`
+	Offset     int32                   `json:"offset"`
+	ProviderID *string                 `json:"provider_id"`
+	Status     NullUpdateRequestStatus `json:"status"`
+}
+
+type ListUpdateRequestsRow struct {
+	ID                  uuid.UUID           `json:"id"`
+	ContractID          uuid.UUID           `json:"contract_id"`
+	TransactionID       uuid.UUID           `json:"transaction_id"`
+	BapID               string              `json:"bap_id"`
+	RequestedAttributes json.RawMessage     `json:"requested_attributes"`
+	Status              UpdateRequestStatus `json:"status"`
+	RejectReason        *string             `json:"reject_reason"`
+	CreatedAt           pgtype.Timestamptz  `json:"created_at"`
+	DecidedAt           pgtype.Timestamptz  `json:"decided_at"`
+	CurrentAttributes   json.RawMessage     `json:"current_attributes"`
+}
+
+// provider_id: see ListSupportTickets's own comment -- NULL bypasses for internal/ops use.
+func (q *Queries) ListUpdateRequests(ctx context.Context, arg ListUpdateRequestsParams) ([]ListUpdateRequestsRow, error) {
+	rows, err := q.db.Query(ctx, listUpdateRequests,
+		arg.BppID,
+		arg.Limit,
+		arg.Offset,
+		arg.ProviderID,
+		arg.Status,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListUpdateRequestsRow{}
+	for rows.Next() {
+		var i ListUpdateRequestsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ContractID,
+			&i.TransactionID,
+			&i.BapID,
+			&i.RequestedAttributes,
+			&i.Status,
+			&i.RejectReason,
+			&i.CreatedAt,
+			&i.DecidedAt,
+			&i.CurrentAttributes,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUpdateRequestsDetailed = `-- name: ListUpdateRequestsDetailed :many
+SELECT
+    ur.id,
+    ur.contract_id,
+    ur.transaction_id,
+    ur.bap_id,
+    ur.requested_attributes,
+    ur.status,
+    ur.reject_reason,
+    ur.created_at,
+    ur.decided_at,
+    c.created_at      AS order_placed_at,
+    c.status          AS contract_status,
+    c.descriptor_name AS order_name,
+    cp.status_code    AS performance_status_code,
+    cp.performance_attributes AS current_performance_attributes,
+    ur.previous_delivery_details,
+    COALESCE(
+        (SELECT jsonb_agg(cm.commitment_attributes ORDER BY cm.id)
+         FROM commitments cm
+         WHERE cm.contract_id = ur.contract_id
+           AND cm.commitment_attributes IS NOT NULL),
+        '[]'::jsonb
+    ) AS commitment_attributes
+FROM contract_update_requests ur
+JOIN contracts c ON c.id = ur.contract_id
+LEFT JOIN LATERAL (
+    SELECT status_code, performance_attributes
+    FROM contract_performances
+    WHERE contract_id = ur.contract_id
+    ORDER BY created_at ASC
+    LIMIT 1
+) cp ON TRUE
+WHERE c.bpp_id = $1
+  AND ($4::TEXT IS NULL OR c.provider_id = $4)
+  AND ($5::update_request_status IS NULL OR ur.status = $5)
+ORDER BY ur.created_at DESC
+LIMIT  $2
+OFFSET $3
+`
+
+type ListUpdateRequestsDetailedParams struct {
+	BppID      string                  `json:"bpp_id"`
+	Limit      int32                   `json:"limit"`
+	Offset     int32                   `json:"offset"`
+	ProviderID *string                 `json:"provider_id"`
+	Status     NullUpdateRequestStatus `json:"status"`
+}
+
+type ListUpdateRequestsDetailedRow struct {
+	ID                           uuid.UUID           `json:"id"`
+	ContractID                   uuid.UUID           `json:"contract_id"`
+	TransactionID                uuid.UUID           `json:"transaction_id"`
+	BapID                        string              `json:"bap_id"`
+	RequestedAttributes          json.RawMessage     `json:"requested_attributes"`
+	Status                       UpdateRequestStatus `json:"status"`
+	RejectReason                 *string             `json:"reject_reason"`
+	CreatedAt                    pgtype.Timestamptz  `json:"created_at"`
+	DecidedAt                    pgtype.Timestamptz  `json:"decided_at"`
+	OrderPlacedAt                pgtype.Timestamptz  `json:"order_placed_at"`
+	ContractStatus               ContractStatus      `json:"contract_status"`
+	OrderName                    *string             `json:"order_name"`
+	PerformanceStatusCode        *string             `json:"performance_status_code"`
+	CurrentPerformanceAttributes json.RawMessage     `json:"current_performance_attributes"`
+	PreviousDeliveryDetails      json.RawMessage     `json:"previous_delivery_details"`
+	CommitmentAttributes         interface{}         `json:"commitment_attributes"`
+}
+
+// Same scoping as ListUpdateRequests, but joins the order context a human
+// seller needs to decide: when the order was placed, its contract status,
+// the delivery details the seller currently holds, and the fulfilment
+// phase column.
+//
+// current_performance_attributes -- NOT contracts.contract_attributes --
+// is the seller's authoritative delivery address. contract_attributes is a
+// small JSON-LD extension bag and is routinely NULL; comparing against it
+// is what made the old seller screen show every field as "new". See
+// internal/orderchange.
+//
+// performance_status_code is selected for the fulfilment-phase extension
+// point (internal/orderchange.PhaseReporter). It is 'PENDING' for every
+// row today because nothing advances it yet.
+func (q *Queries) ListUpdateRequestsDetailed(ctx context.Context, arg ListUpdateRequestsDetailedParams) ([]ListUpdateRequestsDetailedRow, error) {
+	rows, err := q.db.Query(ctx, listUpdateRequestsDetailed,
+		arg.BppID,
+		arg.Limit,
+		arg.Offset,
+		arg.ProviderID,
+		arg.Status,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListUpdateRequestsDetailedRow{}
+	for rows.Next() {
+		var i ListUpdateRequestsDetailedRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ContractID,
+			&i.TransactionID,
+			&i.BapID,
+			&i.RequestedAttributes,
+			&i.Status,
+			&i.RejectReason,
+			&i.CreatedAt,
+			&i.DecidedAt,
+			&i.OrderPlacedAt,
+			&i.ContractStatus,
+			&i.OrderName,
+			&i.PerformanceStatusCode,
+			&i.CurrentPerformanceAttributes,
+			&i.PreviousDeliveryDetails,
+			&i.CommitmentAttributes,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const updateContractIfActive = `-- name: UpdateContractIfActive :one
+
+UPDATE contracts SET
+    contract_attributes = $1,
+    updated_at = NOW()
+WHERE transaction_id = $2
+  AND bpp_id = $3
+  AND status = 'ACTIVE'::contract_status
+  AND deleted_at IS NULL
+RETURNING id, bap_id, bap_uri
+`
+
+type UpdateContractIfActiveParams struct {
+	ContractAttributes json.RawMessage `json:"contract_attributes"`
+	TransactionID      uuid.UUID       `json:"transaction_id"`
+	BppID              string          `json:"bpp_id"`
+}
+
+type UpdateContractIfActiveRow struct {
+	ID     uuid.UUID `json:"id"`
+	BapID  string    `json:"bap_id"`
+	BapUri string    `json:"bap_uri"`
+}
+
+// ============================================================
+// UPDATE — mutate contract_attributes on an ACTIVE contract
+// ============================================================
+// Mirrors CancelContract's status-gated pattern: only mutates an ACTIVE
+// contract, so an update targeting an already-CANCELLED/COMPLETE contract
+// affects 0 rows (surfaced as pgx.ErrNoRows) instead of silently
+// succeeding against a terminal contract. Returns bap_id/bap_uri so the
+// service can call on_update without a separate lookup.
+func (q *Queries) UpdateContractIfActive(ctx context.Context, arg UpdateContractIfActiveParams) (UpdateContractIfActiveRow, error) {
+	row := q.db.QueryRow(ctx, updateContractIfActive, arg.ContractAttributes, arg.TransactionID, arg.BppID)
+	var i UpdateContractIfActiveRow
+	err := row.Scan(&i.ID, &i.BapID, &i.BapUri)
+	return i, err
 }
 
 const updatePerformanceStatus = `-- name: UpdatePerformanceStatus :exec
