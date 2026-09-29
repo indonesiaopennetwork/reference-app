@@ -48,7 +48,7 @@ func NewClientService(pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.Log
 		pool:     pool,
 		cfg:      cfg,
 		lh:       lh,
-		client:   httpclient.New(10 * time.Second),
+		client:   httpclient.New(30 * time.Second),
 		registry: registry,
 	}
 }
@@ -122,6 +122,8 @@ func (s *ClientService) DiscoverSync(ctx context.Context, req *ClientDiscoverReq
 	start := time.Now()
 	msgID := uuid.New()
 	txnID := uuid.New()
+
+
 
 	becknReq := map[string]any{
 		"context": map[string]any{
@@ -743,14 +745,22 @@ func (s *ClientService) RequestStatus(ctx context.Context, req *ClientRequestSta
 		return fmt.Errorf("no snapshot for txn %s: %w", txnID, err)
 	}
 
-	var contract map[string]interface{}
-	if err := json.Unmarshal(snapshot.Contract, &contract); err != nil {
-		return fmt.Errorf("parse contract snapshot: %w", err)
+	// Extract the full contract from the snapshot so the adapter gets
+	// the required `commitments` array and other required fields.
+	var contractEnvelope struct {
+		Message struct {
+			Contract json.RawMessage `json:"contract"`
+		} `json:"message"`
 	}
-	contractID, _ := contract["id"].(string)
+	var contractPayload json.RawMessage
+	if err := json.Unmarshal(snapshot.Contract, &contractEnvelope); err == nil && len(contractEnvelope.Message.Contract) > 2 {
+		contractPayload = contractEnvelope.Message.Contract
+	} else {
+		contractPayload = snapshot.Contract
+	}
 
 	msgJSON, _ := json.Marshal(map[string]interface{}{
-		"contract": map[string]string{"id": contractID},
+		"contract": json.RawMessage(contractPayload),
 	})
 	becknReq := BecknRequest{
 		Context: s.newContext("status", req.TransactionID, msgID.String(), bppID, bppURI),
