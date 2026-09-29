@@ -23,8 +23,10 @@ import (
 )
 
 // ConfirmService handles the full /beckn/confirm flow:
-//  1. Transition the contract from DRAFT → ACTIVE in the database.
-//  2. Build the on_confirm payload echoing back the confirmed contract.
+//  1. Transition the contract from DRAFT → ACTIVE in the database and record
+//     the BAP's settlements (payment proof).
+//  2. Build the on_confirm payload echoing back the confirmed contract, with
+//     its settlements marked COMPLETE.
 //  3. POST the on_confirm callback to the BAP.
 //  4. Write INBOUND and OUTBOUND audit rows to beckn_message_log.
 type ConfirmService struct {
@@ -54,7 +56,7 @@ func (s *ConfirmService) ProcessConfirm(ctx context.Context, req *ConfirmRequest
 
 	prettyLog(fmt.Sprintf("← IN   CONFIRM   | txn=%.8s… | bap=%s", req.Context.TransactionID, req.Context.BapID), req)
 
-	// Transition DRAFT → ACTIVE and retrieve the contract UUID.
+	// Transition DRAFT → ACTIVE, record settlements, and retrieve the contract UUID.
 	contractID, err := s.confirmContract(ctx, req)
 
 	// Log INBOUND regardless of whether state transition succeeded.
@@ -95,6 +97,7 @@ func (s *ConfirmService) ProcessConfirm(ctx context.Context, req *ConfirmRequest
 	confirmedContract := req.Message.Contract
 	confirmedContract.ID = contractID.String()
 	confirmedContract.Status = &ContractStatus{Code: "ACTIVE"}
+	confirmedContract.Settlements = completedSettlements(confirmedContract.Settlements)
 
 	onConfirmReq := OnConfirmRequest{
 		Context: BecknContext{
@@ -149,15 +152,25 @@ func (s *ConfirmService) decrementStock(ctx context.Context, req *ConfirmRequest
 	}
 }
 
-// confirmContract transitions the DRAFT contract to ACTIVE.
+// confirmContract transitions the DRAFT contract to ACTIVE and records the
+// BAP's settlements as COMPLETE, in one transaction: a contract is only
+// activated together with its payment proof.
 // Returns the UUID of the confirmed contract.
 func (s *ConfirmService) confirmContract(ctx context.Context, req *ConfirmRequest) (uuid.UUID, error) {
-	q := dbsqlc.New(s.pool)
-
 	txID, err := uuid.Parse(req.Context.TransactionID)
 	if err != nil {
 		return uuid.UUID{}, fmt.Errorf("invalid transactionId: %w", err)
 	}
+	if err := validateSettlements(req.Message.Contract); err != nil {
+		return uuid.UUID{}, err
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return uuid.UUID{}, fmt.Errorf("begin confirm tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	q := dbsqlc.New(s.pool).WithTx(tx)
 
 	contractID, err := q.ConfirmContract(ctx, dbsqlc.ConfirmContractParams{
 		TransactionID: txID,
@@ -170,7 +183,79 @@ func (s *ConfirmService) confirmContract(ctx context.Context, req *ConfirmReques
 		return uuid.UUID{}, fmt.Errorf("confirm contract DB update: %w", err)
 	}
 
+	for _, st := range req.Message.Contract.Settlements {
+		attrCtx, attrType := extractJSONLDMeta(st.SettlementAttributes)
+		if err := q.UpsertSettlement(ctx, dbsqlc.UpsertSettlementParams{
+			ID:                          st.ID,
+			ContractID:                  contractID,
+			ConsiderationID:             st.ConsiderationID,
+			Status:                      dbsqlc.SettlementStatusCOMPLETE,
+			SettlementAttributes:        rawMessageOrNull(st.SettlementAttributes),
+			SettlementAttributesContext: attrCtx,
+			SettlementAttributesType:    attrType,
+		}); err != nil {
+			return uuid.UUID{}, fmt.Errorf("upsert settlement %s: %w", st.ID, err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return uuid.UUID{}, fmt.Errorf("commit confirm tx: %w", err)
+	}
 	return contractID, nil
+}
+
+// validateSettlements checks the confirm carries payment proof: at least one
+// settlement, each discharging a consideration of this contract.
+func validateSettlements(c ConfirmContract) error {
+	if len(c.Settlements) == 0 {
+		return fmt.Errorf("confirm has no settlements: payment proof is required")
+	}
+	considerationIDs := map[string]bool{}
+	for _, cons := range c.Consideration {
+		considerationIDs[cons.ID] = true
+	}
+	for _, st := range c.Settlements {
+		if st.ID == "" {
+			return fmt.Errorf("settlement is missing id")
+		}
+		if !considerationIDs[st.ConsiderationID] {
+			return fmt.Errorf("settlement %s references unknown consideration %q", st.ID, st.ConsiderationID)
+		}
+	}
+	return nil
+}
+
+// completedSettlements returns a copy of settlements marked COMPLETE — with no
+// real gateway, the payment the BAP reports is treated as already discharged.
+func completedSettlements(in []Settlement) []Settlement {
+	out := make([]Settlement, len(in))
+	for i, st := range in {
+		st.Status = string(dbsqlc.SettlementStatusCOMPLETE)
+		out[i] = st
+	}
+	return out
+}
+
+// extractJSONLDMeta pulls @context and @type from a JSON-LD blob.
+// Returns nil pointers if the fields are absent so sqlc can store NULL.
+func extractJSONLDMeta(raw json.RawMessage) (ctx *string, typ *string) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var m struct {
+		Context string `json:"@context"`
+		Type    string `json:"@type"`
+	}
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil, nil
+	}
+	if m.Context != "" {
+		ctx = &m.Context
+	}
+	if m.Type != "" {
+		typ = &m.Type
+	}
+	return ctx, typ
 }
 
 // callOnConfirm POSTs the on_confirm payload to the BAP and logs the OUTBOUND entry.

@@ -68,7 +68,7 @@ function parseCatalogs(data) {
 
       // Price: prefer considerations.totalAmount, fallback to offerAttributes.price.value
       let price = cons.totalAmount ?? pa.value ?? 0;
-      let currency = cons.currency || pa.currency || 'INR';
+      let currency = cons.currency || pa.currency || 'IDR';
 
       // Price breakup: prefer considerations.breakup, build from price.components if needed
       let breakup = cons.breakup || [];
@@ -121,6 +121,7 @@ function parseCatalogs(data) {
         bppId,
         bppUri,
         offerAttr: oa,
+        offerConsiderations: offer.considerations || [],
         breakup,
         sellerAddress,
         returnPolicy: policies.returns,
@@ -146,7 +147,7 @@ function parseOnSelectContract(contract) {
   const pol = commitment?.offer?.offerAttributes?.policies || {};
   return {
     total: ca.totalAmount,
-    currency: ca.currency || 'INR',
+    currency: ca.currency || 'IDR',
     breakup: ca.breakup || [],
     paymentMethods: ca.paymentMethods || [],
     codAvailable: commitment?.offer?.offerAttributes?.paymentConstraints?.codAvailable,
@@ -157,7 +158,7 @@ function parseOnSelectContract(contract) {
   };
 }
 
-const fmt = (amount, currency = 'INR') => {
+const fmt = (amount, currency = 'IDR') => {
   if (!amount && amount !== 0) return '—';
   const sym = currency === 'IDR' ? 'Rp' : '₹';
   return `${sym}${Number(amount).toLocaleString()}`;
@@ -511,7 +512,7 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
     )
     : null;
 
-  const currency = confirmedQuote?.currency || 'INR';
+  const currency = confirmedQuote?.currency || 'IDR';
 
   /* ── Stepper ───────────────────────────────────────────────────────── */
   const STEPS = ['Quote', 'Billing', 'Confirm', 'Done'];
@@ -574,7 +575,7 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
             ))}
             <div className="border-t border-white/10 pt-2 flex justify-between items-center">
               <span className="text-xs text-slate-400">Estimated Total</span>
-              <span className="text-base font-bold text-emerald-300">{fmt(cartTotal, 'INR')}</span>
+              <span className="text-base font-bold text-emerald-300">{fmt(cartTotal, 'IDR')}</span>
             </div>
           </div>
         </div>
@@ -1004,7 +1005,7 @@ function parseContractDetail(contract) {
   const consideration = (contract.consideration || [])[0];
   const consAttr = consideration?.considerationAttributes || {};
   const price = consAttr.totalAmount ?? null;
-  const currency = consAttr.currency || 'INR';
+  const currency = consAttr.currency || 'IDR';
   const breakup = consAttr.breakup || [];
 
   // Participants
@@ -1075,8 +1076,8 @@ function OrderDetailPanel({ txnId, onBack }) {
 
   const fmt = (amount, cur) => {
     if (amount == null) return '—';
-    try { return new Intl.NumberFormat('en-IN', { style: 'currency', currency: cur || 'INR', maximumFractionDigits: 0 }).format(amount); }
-    catch { return `${cur || 'INR'} ${amount}`; }
+    try { return new Intl.NumberFormat('id-ID', { style: 'currency', currency: cur || 'IDR', maximumFractionDigits: 0 }).format(amount); }
+    catch { return `${cur || 'IDR'} ${amount}`; }
   };
 
   return (
@@ -1508,6 +1509,7 @@ export default function App() {
             provider_id: product.providerId,
             provider_name: product.sellerName,
             offer_attributes: product.offerAttr || {},
+            offer_considerations: product.offerConsiderations || [],
             bpp_id: product.bppId || '',
             bpp_uri: product.bppUri || '',
           }],
@@ -1535,6 +1537,7 @@ export default function App() {
             provider_id: i.providerId || '',
             provider_name: i.sellerName || '',
             offer_attributes: i.offerAttr || {},
+            offer_considerations: i.offerConsiderations || [],
             bpp_id: i.bppId || '',
             bpp_uri: i.bppUri || '',
           })),
@@ -1990,7 +1993,7 @@ export default function App() {
                 </div>
               </div>
               <div className="flex items-center gap-2 font-bold">
-                <span>{fmt(cartTotal, 'INR')}</span>
+                <span>{fmt(cartTotal, 'IDR')}</span>
                 <div className="flex items-center gap-1 bg-white/15 px-3 py-1.5 rounded-xl text-sm">
                   View Cart <ChevronRight className="w-4 h-4" />
                 </div>
@@ -2158,7 +2161,7 @@ export default function App() {
                     <div className="px-5 py-4 border-t border-white/[0.07] space-y-3 shrink-0">
                       <div className="flex items-center justify-between">
                         <span className="text-slate-400 text-sm">{cartCount} item{cartCount !== 1 ? 's' : ''}</span>
-                        <span className="text-xl font-bold">{fmt(cartTotal, 'INR')}</span>
+                        <span className="text-xl font-bold">{fmt(cartTotal, 'IDR')}</span>
                       </div>
                       <button onClick={handleSelectCart} disabled={isLoading}
                         className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white py-3.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all active:scale-[0.98] shadow-lg shadow-emerald-600/30">

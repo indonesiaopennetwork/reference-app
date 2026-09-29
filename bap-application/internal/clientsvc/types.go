@@ -17,6 +17,9 @@ type SelectItem struct {
 	ProviderID      string          `json:"provider_id,omitempty"`
 	ProviderName    string          `json:"provider_name,omitempty"`
 	OfferAttributes json.RawMessage `json:"offer_attributes,omitempty"`
+	// OfferConsiderations is the offer's considerations[] (pricing) exactly as
+	// the discover response carried it; sent on as offer.considerations.
+	OfferConsiderations json.RawMessage `json:"offer_considerations,omitempty"`
 	// BppID and BppURI are populated from the catalog's bppId/bppUri fields in the
 	// discover response. They override the server-config defaults so the select is
 	// routed to the BPP that actually owns the resource.

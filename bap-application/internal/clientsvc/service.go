@@ -316,22 +316,27 @@ func buildSelectMessage(items []SelectItem, bapID string) ([]byte, error) {
 			offerName = item.ResourceID
 		}
 
+		offer := map[string]interface{}{
+			"id":          item.OfferID,
+			"resourceIds": []string{item.ResourceID},
+			"descriptor":  map[string]interface{}{"name": offerName},
+			"provider": map[string]interface{}{
+				"id":         providerID,
+				"descriptor": map[string]interface{}{"name": providerName},
+			},
+			"offerAttributes": offerAttr,
+		}
+		if hasJSONItems(item.OfferConsiderations) {
+			offer["considerations"] = item.OfferConsiderations
+		}
+
 		commitments = append(commitments, map[string]interface{}{
 			"id":     cid,
 			"status": map[string]interface{}{"descriptor": map[string]interface{}{"code": "DRAFT"}},
 			"resources": []map[string]interface{}{
 				{"id": item.ResourceID, "quantity": map[string]interface{}{"unitCode": "EA", "unitQuantity": qty}},
 			},
-			"offer": map[string]interface{}{
-				"id":          item.OfferID,
-				"resourceIds": []string{item.ResourceID},
-				"descriptor":  map[string]interface{}{"name": offerName},
-				"provider": map[string]interface{}{
-					"id":         providerID,
-					"descriptor": map[string]interface{}{"name": providerName},
-				},
-				"offerAttributes": offerAttr,
-			},
+			"offer": offer,
 			"commitmentAttributes": map[string]interface{}{
 				"@context":   "https://schema.ion.id/release1/schema/extension/trade/TradeCommitment/v1/context.jsonld",
 				"@type":      "ion:IONTradeCommitment",
@@ -404,6 +409,12 @@ func buildSelectMessage(items []SelectItem, bapID string) ([]byte, error) {
 	}
 
 	return json.Marshal(map[string]interface{}{"contract": contract})
+}
+
+// hasJSONItems reports whether raw is a non-empty JSON array.
+func hasJSONItems(raw json.RawMessage) bool {
+	var items []json.RawMessage
+	return json.Unmarshal(raw, &items) == nil && len(items) > 0
 }
 
 // sanitizeOfferAttributes extracts only @context, @type, and policies from the raw
@@ -638,7 +649,15 @@ func (s *ClientService) Confirm(ctx context.Context, req *ClientConfirmRequest) 
 		return fmt.Errorf("no contract snapshot found for confirm txn %s", txnID)
 	}
 
-	msgJSON, err := json.Marshal(map[string]interface{}{"contract": json.RawMessage(snapshot.Contract)})
+	var contract map[string]interface{}
+	if err := json.Unmarshal(snapshot.Contract, &contract); err != nil {
+		return fmt.Errorf("parse contract snapshot: %w", err)
+	}
+	if err := attachSettlement(contract); err != nil {
+		return fmt.Errorf("attach settlement for txn %s: %w", txnID, err)
+	}
+
+	msgJSON, err := json.Marshal(map[string]interface{}{"contract": contract})
 	if err != nil {
 		return fmt.Errorf("marshal confirm message: %w", err)
 	}
@@ -661,6 +680,50 @@ func (s *ClientService) Confirm(ctx context.Context, req *ClientConfirmRequest) 
 	}
 
 	return s.sendToBPP(ctx, s.cfg.BapCallerURL, "confirm", txnID, msgID, s.cfg.NetworkID, becknReq)
+}
+
+// mockGatewayName identifies the stand-in payment gateway: there is no real
+// gateway yet, so Pay & Confirm is treated as a successful payment and a UUID
+// is generated in place of the gateway's transaction reference.
+const mockGatewayName = "mock-gateway"
+
+// attachSettlement adds a COMMITTED settlement (ION TradeSettlement
+// attributes) discharging the contract's first consideration, carrying the
+// payment proof the BPP needs to activate the contract on confirm.
+func attachSettlement(contract map[string]interface{}) error {
+	considerations, _ := contract["consideration"].([]interface{})
+	if len(considerations) == 0 {
+		return fmt.Errorf("contract has no consideration to settle")
+	}
+	consideration, _ := considerations[0].(map[string]interface{})
+	considerationID, _ := consideration["id"].(string)
+	attrs, _ := consideration["considerationAttributes"].(map[string]interface{})
+	amount, okAmount := attrs["totalAmount"].(float64)
+	currency, okCurrency := attrs["currency"].(string)
+	if considerationID == "" || !okAmount || !okCurrency || currency == "" {
+		return fmt.Errorf("consideration is missing id, totalAmount or currency")
+	}
+
+	contract["settlements"] = []interface{}{
+		map[string]interface{}{
+			"id":              "settlement-" + uuid.New().String()[:8],
+			"considerationId": considerationID,
+			"status":          "COMMITTED",
+			"settlementAttributes": map[string]interface{}{
+				"@context":      "https://schema.ion.id/release1/schema/extension/trade/TradeSettlement/v1/context.jsonld",
+				"@type":         "ion:IONTradeSettlement",
+				"method":        "ONLINE",
+				"settledAt":     time.Now().UTC().Format(time.RFC3339),
+				"settledAmount": amount,
+				"currency":      currency,
+				"gateway": map[string]interface{}{
+					"name":          mockGatewayName,
+					"transactionId": uuid.New().String(),
+				},
+			},
+		},
+	}
+	return nil
 }
 
 // RequestStatus sends a Beckn status request for an active transaction.

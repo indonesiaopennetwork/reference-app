@@ -123,7 +123,7 @@
               "considerationAttributes": {
                 "@context": "https://schema.beckn.io/RetailConsideration/v2.1/context.jsonld",
                 "@type": "RetailConsideration",
-                "currency": "INR",
+                "currency": "IDR",
                 "breakup": [
                   { "title": "Chickamagalur Arabica Coffee 1000g MRP", "amount": 900, "type": "BASE_PRICE" }
                 ],
@@ -278,7 +278,7 @@
               "considerationAttributes": {
                 "@context": "https://schema.beckn.io/RetailConsideration/v2.1/context.jsonld",
                 "@type": "RetailConsideration",
-                "currency": "INR",
+                "currency": "IDR",
                 "breakup": [
                   { "title": "Chickamagalur Arabica Coffee 1000g MRP", "amount": 900, "type": "BASE_PRICE" }
                 ],
