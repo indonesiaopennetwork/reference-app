@@ -9,6 +9,7 @@ import {
   ArrowRight, Circle, Star, Ticket, Ban, Wand2,
   BookOpen, FolderOpen, Send, ArrowLeft, ExternalLink, LogOut,
   ChevronDown, Copy, Check,
+  PencilLine, ThumbsUp, ThumbsDown, AlertTriangle,
 } from 'lucide-react'
 import { captureTokenFromUrl, getToken, clearToken, redirectToLogin, logout } from './auth.js'
 
@@ -158,6 +159,7 @@ const NAV_ITEMS = [
   { id: 'inventory', label: 'Inventory', icon: Package, desc: 'Resources & offers' },
   { id: 'catalogs', label: 'Catalogs', icon: BookOpen, desc: 'Manage & publish' },
   { id: 'messages', label: 'Message Log', icon: MessageSquare, desc: 'Protocol audit' },
+  { id: 'update_requests', label: 'Pending Changes', icon: PencilLine, desc: 'Buyer update requests' },
   { id: 'support', label: 'Support Tickets', icon: Ticket, desc: 'Customer support' },
   { id: 'ratings', label: 'Ratings', icon: Star, desc: 'Order ratings' },
 ]
@@ -2434,6 +2436,290 @@ function SupportPage() {
   )
 }
 
+// ─── UpdateRequestsPage ────────────────────────────────────────────────────
+// Buyer-initiated contract updates land here PENDING a seller decision (see
+// updatesvc's "Update approval model" doc) -- nothing applies automatically.
+//
+// This page deliberately does NOT diff the two contracts itself. It used to:
+// it flattened both sides to dotted leaf paths and listed every difference,
+// which produced hundreds of rows like
+// "commitments.0.offer.offerAttributes.policies.cancellation.window" -- and
+// because the seller's contract_attributes is routinely null, every single
+// field showed as "new". Unreadable, and not fixable in the UI.
+//
+// The backend now sends a headline plus only the fields a buyer is actually
+// allowed to change, already labelled for humans, with the seller's current
+// value alongside. See bpp-application/internal/orderchange.
+
+// Status pill styling for change requests.
+//
+// Module scope on purpose: this is rendered by UpdateRequestCard, which is a
+// sibling of UpdateRequestsPage, not nested inside it. An earlier version of
+// this page kept an identical map as a local const inside the page component
+// -- when the card was split out, the reference silently escaped its scope
+// and crashed the whole app with "statusCls is not defined" (a blank screen,
+// since there is no error boundary). Note SupportPage still has its own
+// local statusCls for ticket states; these are different vocabularies and
+// are deliberately not shared.
+const UPDATE_STATUS_CLS = {
+  PENDING: 'bg-amber-500/15 text-amber-400 border border-amber-500/25',
+  APPROVED: 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25',
+  REJECTED: 'bg-red-500/15 text-red-400 border border-red-500/25',
+}
+
+// Canned rejection reasons. Reason stays OPTIONAL (product decision) --
+// these are one-tap fills, not a validation gate.
+// Codes, not free text. The code is what travels to the buyer (as a beckn
+// Descriptor on contract.contractAttributes.updateDecision), so the buyer
+// sees consistent wording whichever seller declined -- which is what stops
+// them re-sending the same request. Keep in step with
+// orderchange.RejectReason in bpp-application.
+const REJECT_PRESETS = [
+  { code: 'ALREADY_DISPATCHED', label: 'Already dispatched' },
+  { code: 'OUTSIDE_DELIVERY_AREA', label: 'Outside delivery area' },
+  { code: 'ALREADY_PACKED', label: 'Order already packed' },
+  { code: 'DETAILS_UNVERIFIED', label: 'Could not verify new details' },
+]
+
+function PhaseBadge({ phase }) {
+  if (!phase) return null
+  // An untracked phase is shown greyed and explicitly labelled, rather than
+  // implying the order is sitting at the earliest stage. Order tracking
+  // isn't built yet -- see orderchange.PhaseReporter.
+  const cls = phase.tracked
+    ? 'bg-cyan-500/15 text-cyan-300 border-cyan-500/25'
+    : 'bg-slate-500/10 text-slate-500 border-white/10'
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${cls}`}>
+      <Package size={10} /> {phase.label || 'Unknown'}
+    </span>
+  )
+}
+
+function ChangeRow({ change, strikeBefore }) {
+  return (
+    <tr className="border-b border-white/[0.03] last:border-0">
+      <td className="px-3 py-2 text-slate-300 whitespace-nowrap">{change.label}</td>
+      <td className={`px-3 py-2 ${strikeBefore ? 'text-red-300/70 line-through decoration-red-400/40' : 'text-slate-400'}`}>
+        {change.before || <span className="italic text-slate-600 no-underline">not set</span>}
+      </td>
+      <td className="px-3 py-2 text-emerald-300 font-medium">{change.after}</td>
+    </tr>
+  )
+}
+
+function UpdateRequestCard({ r, expanded, onToggle, deciding, onApprove, onReject }) {
+  const [rejecting, setRejecting] = useState(false)
+  const [reasonCode, setReasonCode] = useState('')
+  const [reason, setReason] = useState('')
+  const changes = r.changes || []
+  const warnings = r.warnings || []
+  const danger = warnings.some(w => w.severity === 'danger')
+
+  return (
+    <div className="px-5 py-3.5">
+      {/* ── Collapsed summary: one line the seller can scan ─────────────── */}
+      <button onClick={onToggle} className="w-full flex items-center gap-3 text-left group">
+        <ChevronDown size={14}
+          className={`shrink-0 text-slate-500 transition-transform ${expanded ? '' : '-rotate-90'}`} />
+
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            {danger && <AlertTriangle size={13} className="text-red-400 shrink-0" />}
+            <span className="text-sm font-semibold text-white truncate">
+              {r.status === 'APPROVED' ? 'Approved change: '
+                : r.status === 'REJECTED' ? 'Declined change: '
+                : 'Buyer wants to change: '}{r.headline}
+            </span>
+          </div>
+          <p className="text-[11px] text-slate-500 mt-0.5 truncate">
+            {r.order?.name ? `${r.order.name} · ` : ''}
+            {r.order?.itemCount ? `${r.order.itemCount} item${r.order.itemCount > 1 ? 's' : ''}` : 'Order'}
+            {r.order?.total ? ` · ${r.order.total}` : ''}
+            {r.order?.placedAt ? ` · placed ${fmtDateShort(r.order.placedAt)}` : ''}
+            {' · asked '}{fmtDateShort(r.createdAt)}
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          <PhaseBadge phase={r.order?.phase} />
+          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${UPDATE_STATUS_CLS[r.status] || 'bg-slate-500/15 text-slate-400'}`}>
+            {r.status}
+          </span>
+        </div>
+      </button>
+
+      {/* ── Expanded: only what matters for the decision ────────────────── */}
+      <AnimatePresence>
+        {expanded && (
+          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
+            className="overflow-hidden">
+            <div className="pt-3.5 pl-7 space-y-3">
+
+              {warnings.map((w, i) => (
+                <div key={i} className={`rounded-lg border px-3 py-2 flex items-start gap-2 text-xs ${
+                  w.severity === 'danger'
+                    ? 'border-red-500/30 bg-red-500/10 text-red-200'
+                    : 'border-amber-500/30 bg-amber-500/10 text-amber-200'}`}>
+                  <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+                  <span>{w.text}</span>
+                </div>
+              ))}
+
+              {changes.length > 0 ? (
+                <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] overflow-hidden">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-white/[0.06]">
+                        {(r.status === 'PENDING'
+                          ? ['Field', 'Currently', 'Buyer asked for']
+                          : r.status === 'APPROVED'
+                            ? ['Field', 'Was', 'Changed to']
+                            : ['Field', 'Kept as', 'They asked for']
+                        ).map(h => (
+                          <th key={h} className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-widest text-slate-500">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {changes.map(c => <ChangeRow key={c.label} change={c} strikeBefore={r.status !== 'REJECTED'} />)}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="text-xs text-slate-500 italic">{r.headline}</p>
+              )}
+
+              <p className="text-[11px] text-slate-600">
+                Order {r.order?.contractStatus || '—'} · Txn {r.transactionId?.slice(0, 8)}… · from {r.bapId}
+              </p>
+
+              {r.status === 'REJECTED' && r.rejectReason && (
+                <p className="text-xs text-red-400"><span className="text-slate-500">Your reason:</span> {r.rejectReason}</p>
+              )}
+
+              {r.status === 'PENDING' && (
+                <div className="space-y-2 pt-0.5">
+                  <div className="flex items-center gap-2">
+                    <button disabled={deciding} onClick={() => onApprove(r.id)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 hover:bg-emerald-500/20 disabled:opacity-50 transition-all">
+                      <ThumbsUp size={13} /> Approve change
+                    </button>
+                    <button disabled={deciding} onClick={() => setRejecting(v => !v)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-500/10 text-red-300 border border-red-500/20 hover:bg-red-500/20 disabled:opacity-50 transition-all">
+                      <ThumbsDown size={13} /> Reject
+                    </button>
+                  </div>
+
+                  {rejecting && (
+                    <div className="space-y-2 rounded-lg border border-red-500/20 bg-red-500/[0.04] px-3 py-2.5">
+                      <p className="text-[11px] text-slate-400">
+                        Pick a reason — the buyer sees it, so they know not to ask again for
+                        the same thing. Optional, and you can add a note.
+                      </p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {REJECT_PRESETS.map(p => (
+                          <button key={p.code} onClick={() => setReasonCode(c => c === p.code ? '' : p.code)}
+                            className={`px-2 py-1 rounded-md text-[11px] border transition-colors ${
+                              reasonCode === p.code
+                                ? 'border-red-400/50 bg-red-500/20 text-red-200'
+                                : 'border-white/10 text-slate-400 hover:border-white/25'}`}>
+                            {p.label}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <input value={reason} onChange={e => setReason(e.target.value)}
+                          placeholder="Reason (optional)"
+                          className="flex-1 px-3 py-2 rounded-lg text-xs text-white placeholder-slate-600 border border-white/[0.08] bg-slate-900 focus:outline-none focus:border-red-500/50 transition-colors" />
+                        <button disabled={deciding} onClick={() => onReject(r.id, reasonCode, reason)}
+                          className="px-3 py-2 rounded-lg text-xs font-bold bg-red-600 hover:bg-red-500 text-white disabled:opacity-50 transition-all">
+                          Confirm reject
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  )
+}
+
+function UpdateRequestsPage() {
+  const [page, setPage] = useState(1)
+  const [statusFilter, setStatusFilter] = useState('PENDING')
+  const [deciding, setDeciding] = useState(null)
+  const [expandedId, setExpandedId] = useState(null)
+  const limit = 20
+  const { data, loading, error, reload } = useApi(
+    `/update-requests?page=${page}&limit=${limit}${statusFilter ? `&status=${statusFilter}` : ''}`,
+    [page, statusFilter],
+  )
+  const items = data?.items || []
+  const total = data?.total ?? 0
+  const totalPages = Math.max(1, Math.ceil(total / limit))
+
+  const decide = async (id, path, body) => {
+    setDeciding(id)
+    try {
+      // apiFetch parses the body and throws on non-2xx already -- do NOT
+      // treat the result as a fetch Response.
+      await apiFetch(`/update-requests/${id}/${path}`, {
+        method: 'POST',
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      })
+      setExpandedId(null)
+      reload()
+    } catch (e) {
+      alert(`Could not ${path} this change: ${e.message}`)
+    } finally {
+      setDeciding(null)
+    }
+  }
+
+  return (
+    <div>
+      <PageHeader title="Pending Changes" subtitle="Buyer-requested order changes awaiting your decision"
+        action={<button onClick={reload} className="flex items-center gap-2 text-xs font-semibold px-4 py-2 rounded-xl text-slate-300 border border-white/10 hover:border-white/20 transition-all"><RefreshCw size={13} /> Refresh</button>} />
+
+      <div className="flex gap-2 mb-4">
+        {['PENDING', 'APPROVED', 'REJECTED', ''].map(s => (
+          <button key={s || 'all'} onClick={() => { setStatusFilter(s); setPage(1); setExpandedId(null) }}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${statusFilter === s ? 'border-cyan-500/40 bg-cyan-500/10 text-cyan-300' : 'border-white/10 text-slate-400 hover:border-white/20'}`}>
+            {s || 'All'}
+          </button>
+        ))}
+      </div>
+
+      {error && <ErrorBox message={error} onRetry={reload} />}
+
+      <Card>
+        {loading ? <LoadingSpinner label="Loading change requests…" /> : (
+          <div className="divide-y divide-white/[0.04]">
+            {items.map(r => (
+              <UpdateRequestCard key={r.id} r={r}
+                expanded={expandedId === r.id}
+                onToggle={() => setExpandedId(v => v === r.id ? null : r.id)}
+                deciding={deciding === r.id}
+                onApprove={id => decide(id, 'approve', null)}
+                onReject={(id, reasonCode, reason) => decide(id, 'reject', { reasonCode, reason })}
+              />
+            ))}
+            {!items.length && (
+              <div className="px-5 py-12 text-center text-slate-500 text-sm">No change requests{statusFilter ? ` with status ${statusFilter}` : ''}</div>
+            )}
+          </div>
+        )}
+        <Pagination page={page} totalPages={totalPages} onPage={setPage} total={total} limit={limit} />
+      </Card>
+    </div>
+  )
+}
+
 // ─── RatingsPage ─────────────────────────────────────────────────────────────
 
 function RatingsPage() {
@@ -3510,6 +3796,7 @@ const PAGES = {
   add_offer: AddOfferPage,
   publish: PublishPage,
   messages: MessagesPage,
+  update_requests: UpdateRequestsPage,
   support: SupportPage,
   ratings: RatingsPage,
 }
