@@ -113,10 +113,16 @@ type Resource struct {
 	Quantity           *quantity       `json:"quantity,omitempty"`
 }
 
+// Descriptor is the Beckn Descriptor: every field is kept so a resource or
+// offer carries the same descriptor it was published with (media, docs, …).
 type Descriptor struct {
-	Name      string `json:"name,omitempty"`
-	ShortDesc string `json:"shortDesc,omitempty"`
-	LongDesc  string `json:"longDesc,omitempty"`
+	Code           string          `json:"code,omitempty"`
+	Name           string          `json:"name,omitempty"`
+	ShortDesc      string          `json:"shortDesc,omitempty"`
+	LongDesc       string          `json:"longDesc,omitempty"`
+	ThumbnailImage string          `json:"thumbnailImage,omitempty"`
+	Docs           json.RawMessage `json:"docs,omitempty"`
+	MediaFile      json.RawMessage `json:"mediaFile,omitempty"`
 }
 
 type Offer struct {
@@ -194,6 +200,27 @@ type breakupItem struct {
 	Title  string  `json:"title"`
 	Amount float64 `json:"amount"`
 	Type   string  `json:"type"`
+	// TaxDetail is set on TAX lines: rate, included, taxableBase, plus ION's
+	// IONTaxDetail taxRegime / taxCategory / eFakturRef. Kept as a map so any
+	// field the seller published passes through unchanged.
+	TaxDetail map[string]any `json:"taxDetail,omitempty"`
+}
+
+// scaled returns the line for qty units: amount and any taxDetail.taxableBase
+// multiplied by qty; the tax rate is unchanged.
+func (b breakupItem) scaled(qty float64) breakupItem {
+	out := b
+	out.Amount = b.Amount * qty
+	if b.TaxDetail != nil {
+		out.TaxDetail = make(map[string]any, len(b.TaxDetail))
+		for k, v := range b.TaxDetail {
+			out.TaxDetail[k] = v
+		}
+		if base, ok := b.TaxDetail["taxableBase"].(float64); ok {
+			out.TaxDetail["taxableBase"] = base * qty
+		}
+	}
+	return out
 }
 
 // inboundCommitmentAttrs mirrors the commitmentAttributes sent by the BAP.

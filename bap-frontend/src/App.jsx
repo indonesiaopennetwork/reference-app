@@ -122,6 +122,8 @@ function parseCatalogs(data) {
         bppUri,
         offerAttr: oa,
         offerConsiderations: offer.considerations || [],
+        // The resource as discover returned it, sent on in select.
+        resourceDetail: { descriptor: res.descriptor, resourceAttributes: res.resourceAttributes },
         breakup,
         sellerAddress,
         returnPolicy: policies.returns,
@@ -464,6 +466,7 @@ function ProductModal({ product, transaction, onClose, onSelect, onInit, onConfi
               </div>
               <p className="font-bold text-emerald-300 text-lg">Order Confirmed!</p>
               <p className="text-sm text-slate-400 text-center">Your order has been placed on the ION network.</p>
+              <div className="w-full mt-2 text-left"><LiveOrderItems txnId={transaction.id} /></div>
               <button onClick={onClose} className="mt-1 text-sm text-slate-400 hover:text-white transition-colors underline underline-offset-4">
                 Continue Shopping
               </button>
@@ -495,7 +498,7 @@ function StarRating({ value, onChange }) {
   );
 }
 
-function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoading, onInit, onConfirm, onDone, onCancel, onRate, onSupport, onRequestStatus }) {
+function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoading, onInit, onConfirm, onDone, onStatusChange, onRate, onSupport, onRequestStatus }) {
   const [ratingValue, setRatingValue] = useState(0);
   const [ratingFeedback, setRatingFeedback] = useState('');
   const [showRatingForm, setShowRatingForm] = useState(false);
@@ -800,17 +803,14 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
               {billing.phone && <p><span className="text-slate-400">Phone:</span> {billing.phone}</p>}
             </div>
 
+            {/* Items — cancel one item, some quantity, or the whole order */}
+            <LiveOrderItems txnId={transaction.id} onStatus={onStatusChange} />
+
             {/* Action buttons */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <button onClick={onRequestStatus}
-                className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-semibold bg-blue-500/10 text-blue-300 border border-blue-500/20 hover:bg-blue-500/20 transition-all">
-                <RefreshCw className="w-3.5 h-3.5" /> Refresh Status
-              </button>
-              <button onClick={onCancel} disabled={isLoading}
-                className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-semibold bg-rose-500/10 text-rose-300 border border-rose-500/20 hover:bg-rose-500/20 transition-all disabled:opacity-50">
-                <Ban className="w-3.5 h-3.5" /> Cancel Order
-              </button>
-            </div>
+            <button onClick={onRequestStatus}
+              className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-semibold bg-blue-500/10 text-blue-300 border border-blue-500/20 hover:bg-blue-500/20 transition-all">
+              <RefreshCw className="w-3.5 h-3.5" /> Refresh Status
+            </button>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <button onClick={() => { setShowRatingForm(v => !v); setShowSupportForm(false); }}
@@ -973,6 +973,7 @@ const STATUS_COLORS = {
   CANCELLED: { bg: 'bg-rose-500/10', text: 'text-rose-400', border: 'border-rose-500/20' },
   INIT_SENT: { bg: 'bg-blue-500/10', text: 'text-blue-400', border: 'border-blue-500/20' },
   CONFIRM_SENT: { bg: 'bg-amber-500/10', text: 'text-amber-400', border: 'border-amber-500/20' },
+  INIT_RECEIVED: { bg: 'bg-emerald-500/10', text: 'text-emerald-300', border: 'border-emerald-500/20' },
   CANCEL_SENT: { bg: 'bg-rose-500/10', text: 'text-rose-400', border: 'border-rose-500/20' },
   UPDATE_SENT: { bg: 'bg-purple-500/10', text: 'text-purple-400', border: 'border-purple-500/20' },
   Return_Initiated: { bg: 'bg-yellow-500/10', text: 'text-yellow-400', border: 'border-yellow-500/20' },
@@ -992,6 +993,69 @@ function fmtOrderDate(iso) {
 
 /* ── helpers to parse contract data ─────────────────────────────────────── */
 
+const fmtIDR = (amount, cur) => {
+  if (amount == null) return '—';
+  try { return new Intl.NumberFormat('id-ID', { style: 'currency', currency: cur || 'IDR', maximumFractionDigits: 0 }).format(amount); }
+  catch { return `${cur || 'IDR'} ${amount}`; }
+};
+
+// ION cancellation reasons a buyer can give (TradeOffer
+// policies.cancellation.allowedReasons; BUYER_FRAUD_SUSPECTED is seller-side).
+const CANCEL_REASONS = [
+  ['CHANGE_OF_MIND', 'Change of mind'],
+  ['WRONG_ITEM_ORDERED', 'Wrong item ordered'],
+  ['ORDERED_WRONG_VARIANT', 'Ordered wrong variant'],
+  ['FOUND_BETTER_PRICE', 'Found a better price'],
+  ['DELIVERY_TOO_LONG', 'Delivery takes too long'],
+  ['INCORRECT_ADDRESS', 'Incorrect address'],
+  ['DUPLICATE_ORDER', 'Duplicate order'],
+  ['PAYMENT_METHOD_CHANGE', 'Payment method change'],
+  ['ITEM_NO_LONGER_NEEDED', 'Item no longer needed'],
+  ['SELLER_UNRESPONSIVE', 'Seller unresponsive'],
+  ['QUALITY_ISSUE_AT_PREVIEW', 'Quality issue at preview'],
+];
+
+// Fulfillment stage of a performance status code (PENDING → Packed → Shipped
+// → Delivered; returns only follow delivery).
+const stageRank = code => {
+  const c = String(code || '').toUpperCase();
+  if (c === 'PACKED') return 1;
+  if (['DISPATCHED', 'SHIPPED', 'IN_TRANSIT', 'OUT_FOR_DELIVERY'].includes(c)) return 2;
+  if (c === 'DELIVERED' || c.startsWith('RETURN')) return 3;
+  return 0;
+};
+
+// Why an item can't be cancelled any more under its offer's cancellation
+// policy (allowed=false, or the cutoffEvent has passed), or null if it can.
+// The BAP and BPP enforce the same rule.
+function cancelBlockedReason(policy, fulfillmentStatus) {
+  if (policy?.allowed === false) return 'This item cannot be cancelled';
+  const stage = stageRank(fulfillmentStatus);
+  const passed = {
+    BEFORE_CONFIRMATION: true,
+    BEFORE_PACKING: stage >= 1,
+    BEFORE_DISPATCH: stage >= 2,
+    BEFORE_SHIPMENT: stage >= 2,
+  }[policy?.cutoffEvent];
+  if (!passed) return null;
+  const when = String(policy.cutoffEvent).toLowerCase().replace(/_/g, ' ');
+  return `Cancellation closed — only allowed ${when}, order is ${fulfillmentStatus || 'confirmed'}`;
+}
+
+// Reason picker limited to what every offer involved allows (all reasons when
+// no offer declares allowedReasons).
+function CancelReasonSelect({ value, onChange, allowedLists = [] }) {
+  const lists = allowedLists.filter(l => Array.isArray(l) && l.length);
+  const options = CANCEL_REASONS.filter(([code]) => lists.every(l => l.includes(code)));
+  return (
+    <select value={value} onChange={e => onChange(e.target.value)}
+      className="bg-slate-900 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-rose-500/40">
+      <option value="">Reason for cancelling…</option>
+      {options.map(([code, label]) => <option key={code} value={code}>{label}</option>)}
+    </select>
+  );
+}
+
 function parseContractDetail(contract) {
   if (!contract || typeof contract !== 'object') return null;
 
@@ -999,14 +1063,34 @@ function parseContractDetail(contract) {
   const commitments = contract.commitments || [];
   const items = commitments.map(c => ({
     id: c.id || '',
-    name: c.descriptor?.name || c.offer?.descriptor?.name || c.id || 'Item',
-    qty: c.quantity?.count ?? 1,
+    // The product (resource) name; the offer name only for orders placed before
+    // commitments carried resource descriptors.
+    name: c.resources?.[0]?.descriptor?.name || c.offer?.descriptor?.name || c.id || 'Item',
+    qty: c.resources?.[0]?.quantity?.unitQuantity ?? c.commitmentAttributes?.quantity?.unitQuantity ?? 1,
     offerId: c.offer?.id || '',
-    resourceId: c.offer?.resourceIds?.[0] || '',
+    resourceId: c.resources?.[0]?.id || c.offer?.resourceIds?.[0] || '',
+    // A cancelled commitment is CLOSED (its ACTIVE replacement carries what remains).
+    cancelled: c.status?.descriptor?.code === 'CLOSED',
+    allowedReasons: c.offer?.offerAttributes?.policies?.cancellation?.allowedReasons,
+    cancelPolicy: c.offer?.offerAttributes?.policies?.cancellation,
   }));
 
-  // Consideration → price
-  const consideration = (contract.consideration || [])[0];
+  // Consideration → price. After a cancellation the old price is CANCELLED and
+  // the ACTIVE one (if any) is what the buyer still pays; cancellation fees are
+  // separate "cancellation-…" considerations.
+  const considerations = contract.consideration || [];
+  const isFee = c => (c.id || '').startsWith('cancellation-');
+  const consideration = considerations.find(c => !isFee(c) && c.status?.code !== 'CANCELLED')
+    || considerations.find(c => !isFee(c)) || considerations[0];
+  const fees = considerations.filter(isFee).map(c => ({
+    id: c.id,
+    amount: c.considerationAttributes?.totalAmount ?? 0,
+    title: c.considerationAttributes?.breakup?.[0]?.title || 'Cancellation fee',
+  }));
+  const refunds = (contract.settlements || [])
+    .filter(st => st.settlementAttributes?.refund)
+    .map(st => ({ id: st.id, ...st.settlementAttributes.refund }));
+  const fullyCancelled = contract.status?.code === 'CANCELLED';
   const consAttr = consideration?.considerationAttributes || {};
   const price = consAttr.totalAmount ?? null;
   const currency = consAttr.currency || 'IDR';
@@ -1028,7 +1112,11 @@ function parseContractDetail(contract) {
     fulfillmentStatus = returnPerformance.status.code;
   }
 
-  return { items, price, currency, breakup, buyer, seller, statusCode, fulfillmentStatus, id: contract.id };
+  return {
+    items, price: fullyCancelled && consideration?.status?.code === 'CANCELLED' ? 0 : price,
+    currency, breakup: fullyCancelled ? [] : breakup, fees, refunds,
+    buyer, seller, statusCode, fulfillmentStatus, id: contract.id,
+  };
 }
 
 const ACTION_LABELS = {
@@ -1043,22 +1131,175 @@ const ACTION_LABELS = {
   rate: { icon: '⭐', label: 'Rated', color: 'text-amber-400' },
   on_rate: { icon: '⭐', label: 'Rating Confirmed', color: 'text-amber-400' },
   on_status: { icon: '📊', label: 'Status Update', color: 'text-slate-400' },
+  update: { icon: '✏️', label: 'Update Requested', color: 'text-sky-400' },
   on_update: { icon: '🔄', label: 'Order Updated', color: 'text-sky-400' },
 };
+
+// Items of a confirmed order with per-item cancellation: pick a quantity and
+// cancel it, or cancel the whole order. Cancelling everything still active
+// goes out as Beckn cancel, anything less as a partial-cancellation update --
+// the BAP decides (/cancel-items). onChanged is called once a request is sent.
+function OrderItemsCard({ txnId, order, txnStatus, onChanged }) {
+  const [cancelQty, setCancelQty] = useState({});   // commitmentId → units to cancel
+  const [cancelling, setCancelling] = useState(null); // commitmentId | 'ALL' | null
+  const [cancelReason, setCancelReason] = useState('');
+
+  const activeItems = order.items.filter(it => !it.cancelled);
+  const blockedReason = it => cancelBlockedReason(it.cancelPolicy, order.fulfillmentStatus)
+    || (stageRank(order.fulfillmentStatus) >= 3 ? 'Already delivered — use Return instead' : null);
+  const cancellable = activeItems.filter(it => !blockedReason(it));
+  // Cancellation is offered on a confirmed order, per item, until its offer's cutoff.
+  const canCancel = txnStatus === 'CONFIRMED' && cancellable.length > 0;
+
+  const cancelItems = async (items, key) => {
+    if (!cancelReason) { alert('Please choose a reason for cancelling.'); return; }
+    const whole = key === 'ALL';
+    if (!window.confirm(whole ? 'Cancel the entire order?' : 'Cancel the selected quantity of this item?')) return;
+    setCancelling(key);
+    try {
+      const r = await apiFetch('/cancel-items', {
+        method: 'POST',
+        body: JSON.stringify({ transaction_id: txnId, items, reason_code: cancelReason }),
+      });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
+      setCancelQty({});
+      onChanged?.();
+    } catch (e) {
+      alert('Cancel failed: ' + e.message);
+    } finally {
+      setCancelling(null);
+    }
+  };
+
+  return (
+    <div className="rounded-xl border border-white/[0.07] overflow-hidden" style={{ background: 'rgba(255,255,255,0.02)' }}>
+      <div className="px-4 py-2.5 border-b border-white/[0.06] flex items-center gap-2">
+        <ShoppingCart className="w-3.5 h-3.5 text-slate-500" />
+        <p className="text-[11px] font-bold uppercase tracking-widest text-slate-500">Items Ordered</p>
+        {['CANCEL_SENT', 'UPDATE_SENT'].includes(txnStatus) && (
+          <span className="ml-auto flex items-center gap-1 text-[10px] text-amber-400"><Loader2 className="w-3 h-3 animate-spin" /> Updating…</span>
+        )}
+      </div>
+      <div className="divide-y divide-white/[0.04]">
+        {order.items.map((item, i) => {
+          const q = Math.min(cancelQty[item.id] ?? 1, item.qty);
+          return (
+            <div key={i} className={`px-4 py-2.5 ${item.cancelled ? 'opacity-60' : ''}`}>
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-slate-800 flex items-center justify-center shrink-0">
+                  {item.cancelled ? <Ban className="w-3.5 h-3.5 text-rose-400" /> : <Package className="w-3.5 h-3.5 text-slate-500" />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className={`text-sm font-medium truncate ${item.cancelled ? 'text-slate-400 line-through' : 'text-white'}`}>{item.name}</p>
+                  {item.resourceId && <p className="text-[10px] font-mono text-slate-600 truncate">{item.resourceId}</p>}
+                </div>
+                <div className="text-right shrink-0 flex items-center gap-2">
+                  {item.cancelled && <span className="text-[10px] font-bold text-rose-400 bg-rose-500/10 border border-rose-500/20 px-1.5 py-0.5 rounded">Cancelled</span>}
+                  <p className="text-xs text-slate-400">×{item.qty}</p>
+                </div>
+              </div>
+              {txnStatus === 'CONFIRMED' && !item.cancelled && blockedReason(item) && (
+                <p className="mt-1.5 text-right text-[10px] text-slate-500">{blockedReason(item)}</p>
+              )}
+              {canCancel && !item.cancelled && !blockedReason(item) && (
+                <div className="mt-2 flex items-center justify-end gap-2">
+                  {item.qty > 1 && (
+                    <div className="flex items-center rounded-lg border border-white/10 overflow-hidden text-xs">
+                      <button className="px-2 py-1 text-slate-400 hover:text-white disabled:opacity-30" disabled={q <= 1}
+                        onClick={() => setCancelQty(m => ({ ...m, [item.id]: q - 1 }))}><Minus className="w-3 h-3" /></button>
+                      <span className="px-2 text-slate-200 tabular-nums">{q}</span>
+                      <button className="px-2 py-1 text-slate-400 hover:text-white disabled:opacity-30" disabled={q >= item.qty}
+                        onClick={() => setCancelQty(m => ({ ...m, [item.id]: q + 1 }))}><Plus className="w-3 h-3" /></button>
+                    </div>
+                  )}
+                  <button disabled={!!cancelling}
+                    onClick={() => cancelItems([{ commitment_id: item.id, quantity: q }], item.id)}
+                    className="px-2.5 py-1 rounded-lg text-[11px] font-semibold text-rose-300 border border-rose-500/30 hover:bg-rose-500/10 disabled:opacity-50">
+                    {cancelling === item.id ? 'Cancelling…' : item.qty > 1 ? `Cancel ${q}` : 'Cancel item'}
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {canCancel && (
+        <div className="px-4 py-2.5 border-t border-white/[0.06] flex flex-wrap items-center justify-end gap-2">
+          <CancelReasonSelect value={cancelReason} onChange={setCancelReason} allowedLists={cancellable.map(it => it.allowedReasons)} />
+          {cancellable.length === activeItems.length && <button disabled={!!cancelling}
+            onClick={() => cancelItems(activeItems.map(it => ({ commitment_id: it.id, quantity: it.qty })), 'ALL')}
+            className="px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-rose-600 hover:bg-rose-500 disabled:opacity-50">
+            {cancelling === 'ALL' ? 'Cancelling…' : 'Cancel entire order'}
+          </button>}
+        </div>
+      )}
+      {(order.fees.length > 0 || order.refunds.length > 0) && (
+        <div className="px-4 py-2.5 border-t border-white/[0.06] space-y-1">
+          {order.fees.map(f => (
+            <div key={f.id} className="flex justify-between text-xs">
+              <span className="text-slate-400">{f.title}</span>
+              <span className="text-amber-400">{fmtIDR(f.amount, order.currency)}</span>
+            </div>
+          ))}
+          {order.refunds.map(r => (
+            <div key={r.id} className="flex justify-between text-xs">
+              <span className="text-slate-400">
+                Refund <span className="text-slate-600">· {String(r.status || '').toLowerCase()}{r.timelineDays ? ` · within ${r.timelineDays} days` : ''}</span>
+              </span>
+              <span className="text-emerald-400">{fmtIDR(r.amount, order.currency)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// OrderItemsCard for a just-confirmed order: loads the latest contract itself
+// and re-fetches until a cancel/update callback lands. onStatus is told only
+// when the order ends up fully CANCELLED -- in-flight states stay in the card.
+function LiveOrderItems({ txnId, onStatus }) {
+  const [data, setData] = useState(null);
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    apiFetch(`/status/${txnId}`).then(r => r.json()).then(d => {
+      setData(d);
+      if (d.status === 'CANCELLED') onStatus?.(d.status);
+    }).catch(() => { });
+  }, [txnId, tick]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!data || !['CANCEL_SENT', 'UPDATE_SENT'].includes(data.status)) return;
+    const t = setTimeout(() => setTick(k => k + 1), 2000);
+    return () => clearTimeout(t);
+  }, [data]);
+  const contract = typeof data?.contract === 'string' ? JSON.parse(data.contract) : data?.contract;
+  const order = parseContractDetail(contract?.message?.contract || contract);
+  if (!order?.items?.length) return null;
+  return <OrderItemsCard txnId={txnId} order={order} txnStatus={data.status} onChanged={() => setTick(k => k + 1)} />;
+}
 
 function OrderDetailPanel({ txnId, onBack }) {
   const [detail, setDetail] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [returning, setReturning] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
-    setLoading(true); setError(null);
+    if (reloadKey === 0) { setLoading(true); setError(null); }
     apiFetch(`/orders/${txnId}`)
       .then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(e.error || 'Failed')))
       .then(d => { setDetail(d); setLoading(false); })
       .catch(e => { setError(String(e)); setLoading(false); });
-  }, [txnId]);
+  }, [txnId, reloadKey]);
+
+  // While a cancel/update is in flight, re-fetch until the BPP's callback lands.
+  useEffect(() => {
+    if (!detail || !['CONFIRM_SENT', 'CANCEL_SENT', 'UPDATE_SENT'].includes(detail.status)) return;
+    const t = setTimeout(() => setReloadKey(k => k + 1), 2000);
+    return () => clearTimeout(t);
+  }, [detail]);
 
   if (loading) return (
     <div className="flex-1 flex items-center justify-center">
@@ -1092,6 +1333,22 @@ function OrderDetailPanel({ txnId, onBack }) {
     if (amount == null) return '—';
     try { return new Intl.NumberFormat('id-ID', { style: 'currency', currency: cur || 'IDR', maximumFractionDigits: 0 }).format(amount); }
     catch { return `${cur || 'IDR'} ${amount}`; }
+  };
+
+  // Pay & Confirm an order left at INIT_RECEIVED (the seller's on_init terms
+  // were received but checkout was never completed) -- same /confirm call as
+  // the checkout; the detail re-fetches until on_confirm lands.
+  const handleConfirm = async () => {
+    setConfirming(true);
+    try {
+      const r = await apiFetch('/confirm', { method: 'POST', body: JSON.stringify({ transaction_id: txnId }) });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
+      setReloadKey(k => k + 1);
+    } catch (e) {
+      alert('Confirm failed: ' + e.message);
+    } finally {
+      setConfirming(false);
+    }
   };
 
   const handleReturn = async () => {
@@ -1156,6 +1413,25 @@ function OrderDetailPanel({ txnId, onBack }) {
         </div>
       </div>
 
+      {detail.status === 'INIT_RECEIVED' && (
+        <div className="rounded-xl border border-emerald-500/20 px-4 py-3 bg-emerald-500/5 flex items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-bold text-emerald-300">Awaiting payment</p>
+            <p className="text-[10px] text-emerald-400/70 mt-0.5">The seller has accepted your order. Pay to confirm it.</p>
+          </div>
+          <button disabled={confirming} onClick={handleConfirm}
+            className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition-colors disabled:opacity-50">
+            {confirming ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ShieldCheck className="w-3.5 h-3.5" />}
+            {confirming ? 'Confirming…' : 'Pay & Confirm'}
+          </button>
+        </div>
+      )}
+      {detail.status === 'CONFIRM_SENT' && (
+        <div className="rounded-xl border border-amber-500/20 px-4 py-3 bg-amber-500/5 flex items-center gap-2 text-xs text-amber-300">
+          <Loader2 className="w-3.5 h-3.5 animate-spin" /> Confirming your order with the seller…
+        </div>
+      )}
+
       {canReturn && (
         <div className="rounded-xl border border-white/[0.07] px-4 py-3 bg-purple-500/10 flex items-center justify-between">
           <div>
@@ -1187,30 +1463,10 @@ function OrderDetailPanel({ txnId, onBack }) {
         )}
       </div>
 
-      {/* Items */}
+      {/* Items + cancellation */}
       {bestContract?.items?.length > 0 && (
-        <div className="rounded-xl border border-white/[0.07] overflow-hidden" style={{ background: 'rgba(255,255,255,0.02)' }}>
-          <div className="px-4 py-2.5 border-b border-white/[0.06] flex items-center gap-2">
-            <ShoppingCart className="w-3.5 h-3.5 text-slate-500" />
-            <p className="text-[11px] font-bold uppercase tracking-widest text-slate-500">Items Ordered</p>
-          </div>
-          <div className="divide-y divide-white/[0.04]">
-            {bestContract.items.map((item, i) => (
-              <div key={i} className="px-4 py-2.5 flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-slate-800 flex items-center justify-center shrink-0">
-                  <Package className="w-3.5 h-3.5 text-slate-500" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-white font-medium truncate">{item.name}</p>
-                  {item.resourceId && <p className="text-[10px] font-mono text-slate-600 truncate">{item.resourceId}</p>}
-                </div>
-                <div className="text-right shrink-0">
-                  <p className="text-xs text-slate-400">×{item.qty}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+        <OrderItemsCard txnId={txnId} order={bestContract} txnStatus={detail.status}
+          onChanged={() => setReloadKey(k => k + 1)} />
       )}
 
       {/* Price / Breakup */}
@@ -1618,6 +1874,7 @@ export default function App() {
             provider_name: product.sellerName,
             offer_attributes: product.offerAttr || {},
             offer_considerations: product.offerConsiderations || [],
+            resource: product.resourceDetail,
             bpp_id: product.bppId || '',
             bpp_uri: product.bppUri || '',
           }],
@@ -1646,6 +1903,7 @@ export default function App() {
             provider_name: i.sellerName || '',
             offer_attributes: i.offerAttr || {},
             offer_considerations: i.offerConsiderations || [],
+            resource: i.resourceDetail,
             bpp_id: i.bppId || '',
             bpp_uri: i.bppUri || '',
           })),
@@ -1713,23 +1971,11 @@ export default function App() {
   };
 
   /* ── Beckn: Cancel ───────────────────────────────────────────────────── */
-  const handleCancel = async () => {
-    if (!transaction) return;
-    if (!window.confirm('Cancel this order?')) return;
-    setIsLoading(true);
-    try {
-      const r = await apiFetch(`/cancel`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transaction_id: transaction.id }),
-      });
-      if (!r.ok) {
-        const err = await r.json().catch(() => ({ error: r.statusText }));
-        throw new Error(err.error || 'Cancel request failed');
-      }
-      setTransaction(p => ({ ...p, status: 'CANCEL_SENT' }));
-    } catch (e) { alert('Cancel failed: ' + e.message); }
-    finally { setIsLoading(false); }
-  };
+  // Cancellations run from the order's items card (LiveOrderItems); keep the
+  // top-level transaction status in step with what it reports.
+  const handleStatusChange = useCallback(status => {
+    setTransaction(p => (p && p.status !== status ? { ...p, status } : p));
+  }, []);
 
   /* ── Beckn: Rate ─────────────────────────────────────────────────────── */
   const handleRate = async (rating, feedback) => {
@@ -2290,7 +2536,7 @@ export default function App() {
                   onInit={handleInit}
                   onConfirm={handleConfirm}
                   onDone={resetCart}
-                  onCancel={handleCancel}
+                  onStatusChange={handleStatusChange}
                   onRate={handleRate}
                   onSupport={handleSupport}
                   onRequestStatus={handleRequestStatus}

@@ -39,6 +39,31 @@ func (s *Service) Process(ctx context.Context, req *OnStatusRequest) {
 		contractJSON = json.RawMessage("null")
 	}
 
+	// Follow the contract's status, so a status request doesn't leave the
+	// transaction stuck at STATUS_SENT (ACTIVE → CONFIRMED, CANCELLED → CANCELLED).
+	var contractStatus struct {
+		Status struct {
+			Code string `json:"code"`
+		} `json:"status"`
+	}
+	_ = json.Unmarshal(contractJSON, &contractStatus)
+	txnStatus := map[string]dbsqlc.TransactionStatus{
+		"ACTIVE":    dbsqlc.TransactionStatusCONFIRMED,
+		"CANCELLED": dbsqlc.TransactionStatusCANCELLED,
+	}[contractStatus.Status.Code]
+	if txnStatus != "" {
+		if err := q.UpsertTransaction(ctx, dbsqlc.UpsertTransactionParams{
+			TransactionID: txID,
+			BapID:         s.cfg.BapID,
+			NetworkID:     strPtr(req.Context.NetworkID),
+			BppID:         strPtr(req.Context.BppID),
+			BppUri:        strPtr(req.Context.BppURI),
+			Status:        txnStatus,
+		}); err != nil {
+			s.lh.WithModule("on_status_svc").Warn().Error(err).Log("upsert transaction failed")
+		}
+	}
+
 	if err := q.UpsertContractSnapshot(ctx, dbsqlc.UpsertContractSnapshotParams{
 		TransactionID: txID,
 		Action:        dbsqlc.BecknActionOnStatus,

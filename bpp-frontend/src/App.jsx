@@ -1136,6 +1136,65 @@ const EMPTY_RESOURCE = () => ({
   net_qty_value: '', net_qty_unit: 'ML',
 })
 
+// IONTaxDetail enums (ion common/Tax/v1) offered in the offer form.
+const TAX_REGIMES = ['PPN', 'PPNBM', 'EXEMPT']
+const TAX_CATEGORIES = ['BKP', 'JKP', 'NON_BKP']
+
+// Per-unit price breakup for an offer consideration: the entered (pre-tax)
+// price as BASE_PRICE plus one TAX line carrying IONTaxDetail. PPN on regular
+// goods follows PMK 131/2024 -- 12% on a DPP (taxableBase) of 11/12 of the
+// price, i.e. 11% effective; PPNBM applies its rate to the full price; EXEMPT
+// declares a zero TAX line. totalAmount = base + tax (tax-exclusive pricing).
+function buildPriceBreakup(o) {
+  const base = Number(o.price)
+  const regime = o.tax_regime || 'PPN'
+  const rate = regime === 'EXEMPT' ? 0 : Number(o.tax_rate || 0) / 100
+  const taxableBase = Math.round((regime === 'PPN' ? base * 11 / 12 : base) * 100) / 100
+  const taxAmount = Math.round(taxableBase * rate)
+  return {
+    breakup: [
+      { title: o.name || o.id, amount: base, type: 'BASE_PRICE' },
+      {
+        title: regime === 'EXEMPT' ? 'Tax exempt' : `${regime} ${Number(o.tax_rate || 0)}%`,
+        amount: taxAmount, type: 'TAX',
+        taxDetail: { rate, included: false, taxableBase, taxRegime: regime, taxCategory: o.tax_category || 'BKP' },
+      },
+    ],
+    totalAmount: base + taxAmount,
+  }
+}
+
+// Tax regime / category / rate inputs for an offer, with a live total preview.
+function OfferTaxFields({ offer, onChange, labelCls, inputCls }) {
+  const exempt = offer.tax_regime === 'EXEMPT'
+  const preview = offer.price ? buildPriceBreakup(offer) : null
+  const tax = preview?.breakup.find(b => b.type === 'TAX')
+  return (
+    <>
+      <div><label className={labelCls}>Tax Regime</label>
+        <select className={inputCls} value={offer.tax_regime || 'PPN'} onChange={e => onChange('tax_regime', e.target.value)}>
+          {TAX_REGIMES.map(t => <option key={t} className="bg-slate-900">{t}</option>)}
+        </select>
+      </div>
+      <div><label className={labelCls}>Tax Category</label>
+        <select className={inputCls} value={offer.tax_category || 'BKP'} onChange={e => onChange('tax_category', e.target.value)}>
+          {TAX_CATEGORIES.map(t => <option key={t} className="bg-slate-900">{t}</option>)}
+        </select>
+      </div>
+      <div><label className={labelCls}>Tax Rate (%)</label>
+        <input type="number" min="0" step="any" className={inputCls} disabled={exempt}
+          value={exempt ? '0' : (offer.tax_rate ?? '')} onChange={e => onChange('tax_rate', e.target.value)} placeholder="12" />
+      </div>
+      {preview && (
+        <p className="col-span-full text-[11px] text-slate-500">
+          {offer.tax_regime === 'PPN' && <>PPN on DPP 11/12 × price (Rp {tax.taxDetail.taxableBase.toLocaleString()}) · </>}
+          Tax Rp {tax.amount.toLocaleString()} · Buyer pays <span className="text-slate-300 font-semibold">Rp {preview.totalAmount.toLocaleString()}</span>
+        </p>
+      )}
+    </>
+  )
+}
+
 // RetailOffer 2.1 policies.returns.method / policies.replacement.method enum.
 const RETURN_METHODS = ['SELLER_PICKUP', 'BUYER_SHIP', 'DROP_OFF']
 // RetailOffer 2.1 policies.returns.restockingFee.type enum.
@@ -1143,6 +1202,8 @@ const FEE_TYPES = ['PERCENTAGE', 'FIXED']
 
 const EMPTY_OFFER = () => ({
   id: '', name: '', short_desc: '', resource_ids: '', price: '', currency: 'IDR',
+  // tax (price is pre-tax; see buildPriceBreakup)
+  tax_regime: 'PPN', tax_category: 'BKP', tax_rate: '12',
   validity_start: '', validity_end: '',
   // offer attributes
   offer_context: 'https://schema.ion.id/release1/schema/extension/trade/TradeOffer/v1/context.jsonld',
@@ -1454,8 +1515,7 @@ function PublishPage({ onNav }) {
                   '@context': 'https://schema.ion.id/release1/schema/extension/trade/TradeConsideration/v1/context.jsonld',
                   '@type': 'ion:IONTradeConsideration',
                   currency: o.currency,
-                  breakup: [{ title: o.name || o.id, amount: Number(o.price), type: 'BASE_PRICE' }],
-                  totalAmount: Number(o.price),
+                  ...buildPriceBreakup(o),
                   paymentMethods: o.cod_available ? ['PREPAID', 'COD', 'DIGITAL_WALLET'] : ['PREPAID', 'DIGITAL_WALLET'],
                 }
               }]
@@ -1760,6 +1820,7 @@ function PublishPage({ onNav }) {
                     <div><label className={labelCls}>Currency</label>
                       <input className={inputCls} value={o.currency} onChange={e => setOfferField(i, 'currency', e.target.value)} placeholder="IDR" />
                     </div>
+                    <OfferTaxFields offer={o} onChange={(k, v) => setOfferField(i, k, v)} labelCls={labelCls} inputCls={inputCls} />
                     <div><label className={labelCls}>Validity Start</label>
                       <input type="datetime-local" className={inputCls} value={o.validity_start} onChange={e => setOfferField(i, 'validity_start', e.target.value)} />
                     </div>
@@ -2029,6 +2090,8 @@ const ACTION_META = {
   on_init: { color: '#c4b5fd', bg: 'rgba(196,181,253,0.1)', label: 'ON_INIT' },
   confirm: { color: '#34d399', bg: 'rgba(52,211,153,0.12)', label: 'CONFIRM' },
   on_confirm: { color: '#6ee7b7', bg: 'rgba(110,231,183,0.1)', label: 'ON_CONFIRM' },
+  cancel: { color: '#f87171', bg: 'rgba(248,113,113,0.12)', label: 'CANCEL' },
+  on_cancel: { color: '#fca5a5', bg: 'rgba(252,165,165,0.1)', label: 'ON_CANCEL' },
 }
 
 function MessagesPage() {
@@ -3047,6 +3110,7 @@ function OfferForm({ off, oSet, offOpen, setOffOpen, catalogId, showResourcePick
             {['IDR', 'INR', 'USD', 'EUR', 'SGD', 'MYR'].map(c => <option key={c} className="bg-slate-900">{c}</option>)}
           </select>
         </div>
+        <OfferTaxFields offer={off} onChange={oSet} labelCls={labelCls} inputCls={inputCls} />
         <div><label className={labelCls}>Validity Start</label>
           <input type="datetime-local" className={inputCls} value={off.validity_start} onChange={e => oSet('validity_start', e.target.value)} />
         </div>
@@ -3427,8 +3491,7 @@ function AddOfferPage({ onNav, catalogId, preselectedResourceId }) {
             '@context': 'https://schema.ion.id/release1/schema/extension/trade/TradeConsideration/v1/context.jsonld',
             '@type': 'ion:IONTradeConsideration',
             currency: off.currency,
-            breakup: [{ title: off.name || off.id, amount: Number(off.price), type: 'BASE_PRICE' }],
-            totalAmount: Number(off.price),
+            ...buildPriceBreakup(off),
             paymentMethods: off.cod_available ? ['PREPAID', 'COD', 'DIGITAL_WALLET'] : ['PREPAID', 'DIGITAL_WALLET'],
           },
         }],
