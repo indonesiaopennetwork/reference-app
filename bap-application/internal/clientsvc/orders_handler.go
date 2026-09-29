@@ -117,7 +117,7 @@ func (h *ClientHandler) HandleListOrders(c *gin.Context) {
 		    SELECT contract, action
 		    FROM contract_snapshots
 		    WHERE transaction_id = t.transaction_id
-		    ORDER BY created_at DESC
+		    ORDER BY updated_at DESC
 		    LIMIT 1
 		) cs ON true
 		WHERE t.buyer_subject = $1
@@ -182,35 +182,44 @@ func (h *ClientHandler) HandleListOrders(c *gin.Context) {
 			item.UpdatedAt = updatedAt.Time.UTC().Format(time.RFC3339)
 		}
 
-		// Extract item name and price from the contract snapshot for quick display
+		// Extract item name, price, and return status from the contract snapshot for quick display
 		var contractData struct {
-			Message struct {
-				Order struct {
-					Items []struct {
-						Descriptor struct {
-							Name string `json:"name"`
-						} `json:"descriptor"`
-					} `json:"items"`
-					Quote struct {
-						Price struct {
-							Value    string `json:"value"`
-							Currency string `json:"currency"`
-						} `json:"price"`
-					} `json:"quote"`
-				} `json:"order"`
-			} `json:"message"`
+			Commitments []struct {
+				Offer struct {
+					Descriptor struct {
+						Name string `json:"name"`
+					} `json:"descriptor"`
+				} `json:"offer"`
+				CommitmentAttributes struct {
+					Price struct {
+						Value    float64 `json:"value"`
+						Currency string  `json:"currency"`
+					} `json:"price"`
+				} `json:"commitmentAttributes"`
+			} `json:"commitments"`
+			Performance []struct {
+				Status struct {
+					Code string `json:"code"`
+				} `json:"status"`
+				PerformanceAttributes struct {
+					Type string `json:"type"`
+				} `json:"performanceAttributes"`
+			} `json:"performance"`
 		}
+
 		if len(item.Contract) > 2 {
 			if err := json.Unmarshal(item.Contract, &contractData); err == nil {
-				order := contractData.Message.Order
-				if len(order.Items) > 0 {
-					item.ItemName = order.Items[0].Descriptor.Name
+				if len(contractData.Commitments) > 0 {
+					item.ItemName = contractData.Commitments[0].Offer.Descriptor.Name
+					item.ItemPrice = contractData.Commitments[0].CommitmentAttributes.Price.Value
+					item.Currency = contractData.Commitments[0].CommitmentAttributes.Price.Currency
 				}
-				if order.Quote.Price.Value != "" {
-					if v, err := strconv.ParseFloat(order.Quote.Price.Value, 64); err == nil {
-						item.ItemPrice = v
+				
+				// Extract return status if any
+				for _, p := range contractData.Performance {
+					if p.PerformanceAttributes.Type == "RETURN" && p.Status.Code != "" {
+						item.Status = p.Status.Code
 					}
-					item.Currency = order.Quote.Price.Currency
 				}
 			}
 		}

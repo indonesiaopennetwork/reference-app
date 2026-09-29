@@ -23,6 +23,36 @@ WHERE c.transaction_id = $1
   AND c.deleted_at IS NULL
 LIMIT 1;
 
+-- name: GetActiveContractByID :one
+-- Returns core contract fields needed to build an on_status payload, using ID.
+SELECT
+    c.id,
+    c.bap_id,
+    c.bap_uri,
+    c.status,
+    c.transaction_id,
+    c.network_id,
+    c.domain,
+    c.contract_attributes,
+    c.created_at,
+    c.updated_at
+FROM contracts c
+WHERE c.id = $1
+  AND c.bpp_id = $2
+  AND c.deleted_at IS NULL
+LIMIT 1;
+
+-- ============================================================
+-- UPDATE FULFILLMENT STATUS
+-- ============================================================
+
+-- name: UpdatePerformanceStatus :exec
+-- Updates the status of contract performances for a contract.
+UPDATE contract_performances SET
+    status_code = $1,
+    updated_at = NOW()
+WHERE contract_id = $2;
+
 -- ============================================================
 -- CANCEL — transition ACTIVE → CANCELLED
 -- ============================================================

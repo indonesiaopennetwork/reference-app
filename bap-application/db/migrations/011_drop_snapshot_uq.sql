@@ -1,0 +1,1 @@
+ALTER TABLE contract_snapshots DROP CONSTRAINT uq_snapshot_txn_action;

@@ -15,6 +15,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -111,6 +112,7 @@ func OptionalAuth(v *Verifier) gin.HandlerFunc {
 		}
 		claims, err := v.verify(c.Request.Context(), raw)
 		if err != nil {
+			log.Printf("OptionalAuth token verification failed: %v", err)
 			c.Next()
 			return
 		}
