@@ -77,10 +77,30 @@ modules:
             type: url
             location: https://schema.ion.id/release1/schema/vendored/beckn/protocol/v2.0.0/beckn.yaml
             cacheTTL: "3600"
+            # Extended Schema validation resolves every ion:IONTrade* @context object in
+            # a payload against schema.ion.id at runtime. An on_discover carrying a
+            # 4-item catalog has 12 such objects, whose transitive $ref closure is 19
+            # distinct documents / ~444 $ref occurrences (TradeResource alone has 23,
+            # reaching RetailResource 2.1, Quantity 2.0, AcceptedPaymentMethod, ...).
+            #
+            # downloadTimeout 90: a COLD resolve of that closure measured ~22s against
+            # a healthy schema.ion.id. The previous 30 left almost no margin and failed
+            # intermittently with "context deadline exceeded" / "TLS handshake timeout"
+            # -- which reads like a schema-shape error in the logs but is a fetch
+            # timeout. A failed download is never cached, so it then re-fails forever.
+            #
+            # maxCacheSize 1000: must exceed the closure size. onix's errors cite
+            # property-level pointers (.../Quantity/2.0/attributes.yaml#/.../unitText),
+            # so entries can be keyed per $ref rather than per document -- the old 100
+            # is below the ~444 occurrence count and risks thrashing a cache that then
+            # never warms.
+            #
+            # Once warm (cacheTTL 86400 = 24h) the same validation is sub-second, so
+            # these budgets are only ever spent once per adapter restart.
             extendedSchema_enabled: "true"
             extendedSchema_cacheTTL: "86400"
-            extendedSchema_maxCacheSize: "100"
-            extendedSchema_downloadTimeout: "30"
+            extendedSchema_maxCacheSize: "1000"
+            extendedSchema_downloadTimeout: "90"
             extendedSchema_allowedDomains: "raw.githubusercontent.com,schema.ion.id,schema.beckn.io"
         cache:
           id: cache
@@ -145,10 +165,30 @@ modules:
             type: url
             location: https://schema.ion.id/release1/schema/vendored/beckn/protocol/v2.0.0/beckn.yaml
             cacheTTL: "3600"
+            # Extended Schema validation resolves every ion:IONTrade* @context object in
+            # a payload against schema.ion.id at runtime. An on_discover carrying a
+            # 4-item catalog has 12 such objects, whose transitive $ref closure is 19
+            # distinct documents / ~444 $ref occurrences (TradeResource alone has 23,
+            # reaching RetailResource 2.1, Quantity 2.0, AcceptedPaymentMethod, ...).
+            #
+            # downloadTimeout 90: a COLD resolve of that closure measured ~22s against
+            # a healthy schema.ion.id. The previous 30 left almost no margin and failed
+            # intermittently with "context deadline exceeded" / "TLS handshake timeout"
+            # -- which reads like a schema-shape error in the logs but is a fetch
+            # timeout. A failed download is never cached, so it then re-fails forever.
+            #
+            # maxCacheSize 1000: must exceed the closure size. onix's errors cite
+            # property-level pointers (.../Quantity/2.0/attributes.yaml#/.../unitText),
+            # so entries can be keyed per $ref rather than per document -- the old 100
+            # is below the ~444 occurrence count and risks thrashing a cache that then
+            # never warms.
+            #
+            # Once warm (cacheTTL 86400 = 24h) the same validation is sub-second, so
+            # these budgets are only ever spent once per adapter restart.
             extendedSchema_enabled: "true"
             extendedSchema_cacheTTL: "86400"
-            extendedSchema_maxCacheSize: "100"
-            extendedSchema_downloadTimeout: "30"
+            extendedSchema_maxCacheSize: "1000"
+            extendedSchema_downloadTimeout: "90"
             extendedSchema_allowedDomains: "raw.githubusercontent.com,schema.ion.id,schema.beckn.io"
         cache:
           id: cache
