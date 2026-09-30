@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useI18n } from './i18n.jsx'
 
-// A guided tour for new sellers: each step optionally switches the dashboard
+// Shared with bap-frontend/src/Tour.jsx: keep the two copies in step.
+
+// A guided tour for new users: each step optionally switches the app
 // to a section (onStep does the navigation), spotlights an element marked
 // data-tour="<target>", and explains it in a card placed beside it. Steps
 // whose target isn't on screen show the card centred without a spotlight.
@@ -8,8 +11,9 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 // Hands-on steps have the user do it themselves: the highlighted element
 // stays clickable and the tour moves on by itself --
 //   action: 'click'       once the target is clicked
-//   until: ({ page }) =>  once this returns true (checked every frame)
-// If a hands-on step's target isn't on screen, Next is offered instead.
+//   until: state =>       once this returns true for the app's `state` prop
+//                         (checked every frame), e.g. ({ page }) => page === 'x'
+// A click step whose target isn't on screen offers Next instead.
 // step.skip = { label, to: <step id> } adds a link jumping past a section.
 
 const PAD = 6
@@ -44,15 +48,17 @@ function cardPosition(rect, h) {
 
 const handsOn = step => !!step && (step.action === 'click' || !!step.until)
 
-export default function Tour({ steps, open, onClose, onStep, page }) {
+export default function Tour({ steps, open, onClose, onStep, state }) {
+  const { t } = useI18n()
   const [index, setIndex] = useState(0)
   const [rect, setRect] = useState(null)
   const [cardH, setCardH] = useState(220)
   const cardRef = useRef(null)
-  const pageRef = useRef(page)
-  pageRef.current = page
+  const stateRef = useRef(state)
+  stateRef.current = state
   const step = steps[index]
-  const waiting = handsOn(step) && !!rect
+  // An until step waits even while its target is gone (a request in flight).
+  const waiting = handsOn(step) && (!!rect || !!step.until)
 
   // The card's real height, for placing it (content varies per step).
   useLayoutEffect(() => {
@@ -78,7 +84,7 @@ export default function Tour({ steps, open, onClose, onStep, page }) {
     let frame, last = '', done = false
     const scrollUntil = performance.now() + 700
     const measure = () => {
-      if (!done && step.until?.({ page: pageRef.current })) { done = true; nextRef.current(); return }
+      if (!done && step.until?.(stateRef.current || {})) { done = true; nextRef.current(); return }
       const el = findTarget(step.target)
       if (el && performance.now() < scrollUntil) el.scrollIntoView({ block: 'nearest' })
       const r = el?.getBoundingClientRect()
@@ -124,13 +130,13 @@ export default function Tour({ steps, open, onClose, onStep, page }) {
 
   // Clicks outside the card don't reach the page, except on the target of a
   // hands-on step: the blocker then leaves a hole around it.
-  const hole = waiting ? {
+  const hole = waiting && rect ? {
     top: rect.top - PAD, left: rect.left - PAD, bottom: rect.bottom + PAD, right: rect.right + PAD,
   } : null
   const block = e => e.stopPropagation()
 
   return (
-    <div className="fixed inset-0 z-[100] pointer-events-none" role="dialog" aria-modal="true" aria-label="Dashboard tour">
+    <div className="fixed inset-0 z-[100] pointer-events-none" role="dialog" aria-modal="true" aria-label={t('Dashboard tour')}>
       {rect ? (
         // Spotlight: a transparent box over the target whose huge shadow dims the rest.
         <div className="absolute rounded-xl pointer-events-none transition-all duration-200"
@@ -158,7 +164,7 @@ export default function Tour({ steps, open, onClose, onStep, page }) {
           <span className="text-[10px] font-bold uppercase tracking-widest text-cyan-400">
             {step.eyebrow || 'Tour'} · {index + 1}/{steps.length}
           </span>
-          <button onClick={onClose} className="text-[11px] text-slate-500 hover:text-white">Skip tour</button>
+          <button onClick={onClose} className="text-[11px] text-slate-500 hover:text-white">{t('Skip tour')}</button>
         </div>
         <p className="text-base font-bold text-white mb-1.5">{step.title}</p>
         <div className="text-sm text-slate-300 leading-relaxed space-y-2">{step.body}</div>
@@ -175,17 +181,17 @@ export default function Tour({ steps, open, onClose, onStep, page }) {
             )}
             {canBack && (
               <button onClick={back} className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-300 border border-white/10 hover:text-white">
-                Back
+                {t('Back')}
               </button>
             )}
             {waiting ? (
               <span className="px-3 py-1.5 rounded-lg text-xs font-semibold text-cyan-300 border border-cyan-400/30 bg-cyan-400/10 whitespace-nowrap">
-                {step.waitLabel || 'Your turn'}
+                {step.waitLabel || t('Your turn')}
               </span>
             ) : (
               <button onClick={next} className="px-4 py-1.5 rounded-lg text-xs font-bold text-white"
                 style={{ background: 'linear-gradient(135deg,#00b8e6 0%,#1e2fa0 100%)' }}>
-                {last ? 'Finish' : 'Next'}
+                {last ? t('Finish') : t('Next')}
               </button>
             )}
           </div>
