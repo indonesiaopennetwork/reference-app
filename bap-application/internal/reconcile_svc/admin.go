@@ -2,7 +2,6 @@ package reconcilesvc
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"net/http"
 	"sort"
@@ -10,22 +9,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
-
-// RequireAdminKey guards the operator API: the request's X-Admin-Key must
-// equal BAP_ADMIN_KEY. With no key configured the operator view is disabled.
-func RequireAdminKey(key string) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		if key == "" {
-			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "operator view disabled: BAP_ADMIN_KEY is not set"})
-			return
-		}
-		if subtle.ConstantTimeCompare([]byte(c.GetHeader("X-Admin-Key")), []byte(key)) != 1 {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid admin key"})
-			return
-		}
-		c.Next()
-	}
-}
 
 // heldOrder is one order whose payment the gateway still holds (not yet
 // released by an agreed reconciliation).
@@ -64,7 +47,7 @@ type bppView struct {
 	Currency   string      `json:"currency"`
 }
 
-// HandleAdminOverview (GET /api/v1/admin/reconciliation): per seller (BPP),
+// HandleAdminOverview (GET /api/v1/reconciliation): per seller (BPP),
 // what the gateway still holds for it, what has been released, and every
 // batch received with its verdicts, payout and messages.
 func (h *Handler) HandleAdminOverview(c *gin.Context) {

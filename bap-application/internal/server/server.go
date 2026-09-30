@@ -73,13 +73,9 @@ func RegisterRoutes(r *gin.Engine, pool *pgxpool.Pool, cfg *config.Config, lh *l
 		webhook.POST("/reconcile", reconcileH.Handle)
 	}
 
-	// Operator API: not for shoppers -- guarded by BAP_ADMIN_KEY (X-Admin-Key).
-	admin := r.Group("/api/v1/admin")
-	admin.Use(reconcilesvc.RequireAdminKey(cfg.BapAdminKey))
-	{
-		reconcileAdminH := reconcilesvc.NewHandler(pool, cfg, lh)
-		admin.GET("/reconciliation", reconcileAdminH.HandleAdminOverview)
-	}
+	// Settlement reconciliation overview (the /reconciliation page) -- open,
+	// no login or key required.
+	r.GET("/api/v1/reconciliation", reconcilesvc.NewHandler(pool, cfg, lh).HandleAdminOverview)
 
 	// Client-facing APIs for the React frontend. OptionalAuth resolves a
 	// buyer identity from the bearer token when present, but never rejects

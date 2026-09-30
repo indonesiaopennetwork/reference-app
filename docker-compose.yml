@@ -557,9 +557,6 @@ services:
       # bypassing onix-bap entirely. Used only when DISCOVER_METHOD=GET.
       CDS_DISCOVER_URL: ${CDS_DISCOVER_URL}
 
-      # Operator API key for /api/v1/admin/* (reconciliation view); unset = disabled.
-      BAP_ADMIN_KEY: ${BAP_ADMIN_KEY:-}
-
       # Same keypair as config/local-simple-bap.yaml's keyManager — one registered identity.
       BAP_PRIVATE_KEY: ${BAP_PRIVATE_KEY}
       BAP_KEY_ID: ${BAP_KEY_ID}
