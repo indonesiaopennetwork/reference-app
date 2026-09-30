@@ -290,7 +290,7 @@ function Sidebar({ active, onNav, open, onClose, onTour }) {
           <Compass size={13} /> Take the tour
         </button>
         <a
-          href={window.__env__?.BAP_URL || import.meta.env.VITE_BAP_URL || "#"}
+          href={`${window.__env__?.BAP_URL || import.meta.env.VITE_BAP_URL || "#"}?token=${encodeURIComponent(getToken() || '')}`}
           target="_blank"
           rel="noopener noreferrer"
           className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-emerald-400 transition-all bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 hover:border-emerald-500/40"
