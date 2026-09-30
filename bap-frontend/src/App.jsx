@@ -2277,7 +2277,7 @@ export default function App() {
           </div>
 
           <a
-            href={window.__env__?.BPP_ADMIN_URL || import.meta.env.VITE_BPP_ADMIN_URL || "#"}
+            href={`${window.__env__?.BPP_ADMIN_URL || import.meta.env.VITE_BPP_ADMIN_URL || "#"}?token=${encodeURIComponent(getToken() || '')}`}
             target="_blank"
             rel="noopener noreferrer" title={t('BPP APP')}
             className="shrink-0 ml-auto sm:ml-0 flex items-center gap-2 px-3 py-2 rounded-xl transition-all text-sm font-medium text-emerald-400 hover:text-emerald-300 border border-emerald-500/20 hover:border-emerald-500/40 bg-emerald-500/10"

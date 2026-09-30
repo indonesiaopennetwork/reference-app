@@ -634,6 +634,23 @@ services:
     networks:
       - beckn
 
+  # ─── ION Experience Demos ───────────────────────────────────────────────
+  # Standalone front page for the whole app -- pure static HTML/CSS/JS, no
+  # build step. Fully independent from landing-page above: it never touches
+  # login/tokens itself, it just links out ("Launch partner demo") to
+  # landing-page's own URL, which handles the real Zitadel flow unchanged.
+  ion-landing-page:
+    build:
+      context: ./ion-landing-page
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      LANDING_PAGE_URL: http://localhost:3002
+    ports:
+      - "3003:80"
+    networks:
+      - beckn
+
 volumes:
   postgres_data:
 
