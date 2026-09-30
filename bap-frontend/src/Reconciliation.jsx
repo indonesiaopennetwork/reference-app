@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Landmark, RefreshCw, ChevronDown, KeyRound, LogOut, Loader2 } from 'lucide-react';
+import { Landmark, RefreshCw, ChevronDown, Loader2 } from 'lucide-react';
 
 // Operator view: settlement reconciliation with each seller (BPP) -- what the
 // payment gateway still holds for them, what has been released, and every
 // /reconcile batch received with this buyer app's verdicts and payout
 // (Beckn extension, docs/specs/reconcile.yaml). Served at /reconciliation,
-// not linked from the shop; the API needs the operator key (BAP_ADMIN_KEY).
+// not linked from the shop; open to anyone (no login or key).
 
-const KEY_STORE = 'bap.adminKey';
 const rupiah = n => (n == null ? '—' : `Rp ${Number(n).toLocaleString('id-ID')}`);
 const fmtWhen = ts => (ts ? new Date(ts).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—');
 const parse = v => { if (typeof v !== 'string') return v; try { return JSON.parse(v); } catch { return v; } };
@@ -31,23 +30,6 @@ function Json({ value }) {
     <pre className="max-h-96 overflow-auto p-3 text-[11px] leading-relaxed font-mono text-slate-300 whitespace-pre">
       {value == null ? 'Nothing yet' : JSON.stringify(parse(value), null, 2)}
     </pre>
-  );
-}
-
-function KeyGate({ onKey, error }) {
-  const [value, setValue] = useState('');
-  return (
-    <div className="min-h-screen flex items-center justify-center px-4">
-      <form onSubmit={e => { e.preventDefault(); if (value.trim()) onKey(value.trim()); }}
-        className="w-full max-w-sm rounded-2xl border border-white/10 bg-white/[0.03] p-6 space-y-4">
-        <div className="flex items-center gap-2 text-white font-bold"><KeyRound className="w-5 h-5 text-cyan-400" /> Operator access</div>
-        <p className="text-xs text-slate-400">Settlement reconciliation is for buyer-app operators. Enter the operator key (<code className="text-slate-300">BAP_ADMIN_KEY</code>).</p>
-        <input type="password" autoFocus value={value} onChange={e => setValue(e.target.value)} placeholder="Operator key"
-          className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-cyan-500/50" />
-        {error && <p className="text-xs text-rose-300">{error}</p>}
-        <button className="w-full py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-bold">Open</button>
-      </form>
-    </div>
   );
 }
 
@@ -185,22 +167,15 @@ function BppCard({ v }) {
 }
 
 export default function Reconciliation() {
-  const [key, setKey] = useState(() => { try { return sessionStorage.getItem(KEY_STORE) || ''; } catch { return ''; } });
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
 
   const load = useCallback(async () => {
-    if (!key) return;
     setLoading(true);
     try {
-      const r = await fetch('/api/v1/admin/reconciliation', { headers: { 'X-Admin-Key': key } });
+      const r = await fetch('/api/v1/reconciliation');
       const body = await r.json().catch(() => ({}));
-      if (r.status === 401) {
-        try { sessionStorage.removeItem(KEY_STORE); } catch { }
-        setKey(''); setError('That operator key was not accepted.');
-        return;
-      }
       if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`);
       setData(body); setError(null);
     } catch (e) {
@@ -208,17 +183,13 @@ export default function Reconciliation() {
     } finally {
       setLoading(false);
     }
-  }, [key]);
+  }, []);
 
   useEffect(() => {
     load();
     const t = setInterval(load, 15000);
     return () => clearInterval(t);
   }, [load]);
-
-  if (!key) {
-    return <KeyGate error={error} onKey={k => { try { sessionStorage.setItem(KEY_STORE, k); } catch { } setError(null); setKey(k); }} />;
-  }
 
   const bpps = data?.bpps || [];
   return (
@@ -232,10 +203,6 @@ export default function Reconciliation() {
         <div className="ml-auto flex items-center gap-2">
           <button onClick={load} className="flex items-center gap-1.5 text-xs text-slate-300 hover:text-white px-3 py-1.5 rounded-lg border border-white/10">
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh
-          </button>
-          <button onClick={() => { try { sessionStorage.removeItem(KEY_STORE); } catch { } setKey(''); setData(null); }}
-            className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white px-3 py-1.5 rounded-lg border border-white/10">
-            <LogOut className="w-3.5 h-3.5" /> Lock
           </button>
         </div>
       </header>
