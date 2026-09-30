@@ -8,9 +8,10 @@ import {
   Activity, Zap, Store, Calendar, Tag, BarChart2, Inbox,
   ArrowRight, Circle, Star, Ticket, Ban, Wand2,
   BookOpen, FolderOpen, Send, ArrowLeft, ExternalLink, LogOut,
-  ChevronDown, Copy, Check, Scale, Pencil,
+  ChevronDown, Copy, Check, Scale, Pencil, Compass,
 } from 'lucide-react'
 import { captureTokenFromUrl, getToken, clearToken, redirectToLogin, logout } from './auth.js'
+import Tour from './Tour.jsx'
 
 const API_BASE = '/api/v1'
 const BRAND = 'linear-gradient(135deg,#00b8e6 0%,#1e2fa0 100%)'
@@ -106,9 +107,9 @@ function StatusBadge({ status }) {
   )
 }
 
-function Card({ children, className = '', style }) {
+function Card({ children, className = '', style, ...rest }) {
   return (
-    <div className={`bg-[#111827] border border-white/[0.07] rounded-2xl ${className}`} style={style}>
+    <div className={`bg-[#111827] border border-white/[0.07] rounded-2xl ${className}`} style={style} {...rest}>
       {children}
     </div>
   )
@@ -162,16 +163,81 @@ function Pagination({ page, totalPages, onPage, total, limit }) {
 
 const NAV_ITEMS = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard, desc: 'Stats & insights' },
+  { id: 'catalogs', label: 'Catalogs', icon: BookOpen, desc: 'Manage & publish' },
   { id: 'orders', label: 'Orders', icon: ShoppingBag, desc: 'Manage contracts' },
   { id: 'inventory', label: 'Inventory', icon: Package, desc: 'Resources & offers' },
-  { id: 'catalogs', label: 'Catalogs', icon: BookOpen, desc: 'Manage & publish' },
   { id: 'reconciliation', label: 'Reconciliation', icon: Scale, desc: 'Settle with buyer apps' },
-  { id: 'messages', label: 'Message Log', icon: MessageSquare, desc: 'Protocol audit' },
   { id: 'support', label: 'Support Tickets', icon: Ticket, desc: 'Customer support' },
   { id: 'ratings', label: 'Ratings', icon: Star, desc: 'Order ratings' },
+  { id: 'messages', label: 'Message Log', icon: MessageSquare, desc: 'Protocol audit' },
 ]
 
-function Sidebar({ active, onNav, open, onClose }) {
+// First-visit walkthrough of each dashboard section (see Tour.jsx). A step's
+// `page` opens that section; `target` is the data-tour element to spotlight.
+// The catalog part is hands-on: the user clicks the real buttons (Auto-fill
+// does the typing) and ends up with a sample catalog published to the network.
+const onPage = p => ({ page }) => page === p
+const TOUR_STEPS = [
+  { eyebrow: 'Welcome', title: 'Your seller dashboard',
+    body: <p>This is where you sell on the ION network: publish what you sell, fulfil the orders buyer apps send you, and get paid. This tour shows each section, and you'll publish a sample catalog along the way. It takes about three minutes.</p> },
+  { eyebrow: 'Overview', page: 'overview', target: 'nav-overview', title: 'Overview',
+    body: <p>Your business at a glance: active and pending orders, today's volume and recent activity.</p> },
+
+  { eyebrow: 'Catalogs', page: 'catalogs', target: 'nav-catalogs', title: "Let's publish a catalog",
+    skip: { label: 'Skip this part', to: 'orders' },
+    body: <><p>Buyers find you through your <b>catalog</b>. You'll now publish a sample one in four steps: create the catalog, add a product, give it an offer, then publish.</p><p className="text-slate-400">You click; <b>Auto-fill</b> does the typing.</p></> },
+  { eyebrow: 'Publish · 1 of 4', page: 'catalogs', target: 'create-catalog', until: onPage('create_catalog'), waitLabel: 'Click Create Catalog',
+    title: 'Create a catalog',
+    body: <p>Click <b>Create Catalog</b>. You can have several catalogs, for example one per store or product line.</p> },
+  { eyebrow: 'Publish · 1 of 4', target: 'catalog-autofill', action: 'click', waitLabel: 'Click Auto-fill Sample',
+    title: 'Fill in the details',
+    body: <p>A catalog needs an ID, a name and a validity period. Your provider details come from your account. Click <b>Auto-fill Sample</b> to fill in an example.</p> },
+  { eyebrow: 'Publish · 1 of 4', target: 'catalog-submit', until: onPage('catalog_detail'), waitLabel: 'Click Create',
+    title: 'Save the catalog',
+    body: <p>The form is filled in. Click <b>Create Catalog &amp; Add Products</b>. The catalog is saved as a <b>Draft</b>; buyers can't see it until you publish.</p> },
+  { eyebrow: 'Publish · 2 of 4', target: 'add-product', until: onPage('add_product'), waitLabel: 'Click Add Product',
+    title: 'Add a product',
+    body: <p>Your catalog is created, but it's empty. Click <b>Add Product</b>.</p> },
+  { eyebrow: 'Publish · 2 of 4', target: 'product-autofill', action: 'click', waitLabel: 'Click Auto-fill',
+    title: 'Describe the product',
+    body: <p>A product has a name, descriptions, an image, stock, and details like brand, weight and packaging. Click <b>Auto-fill</b> for a sample product.</p> },
+  { eyebrow: 'Publish · 2 of 4', target: 'product-submit', until: onPage('add_offer'), waitLabel: 'Click Save',
+    title: 'Save the product',
+    body: <p>Click <b>Save Resource → Setup Offer</b>. The product is saved and you go straight to its offer.</p> },
+  { eyebrow: 'Publish · 3 of 4', target: 'offer-autofill', action: 'click', waitLabel: 'Click Auto-fill',
+    title: 'Create the offer',
+    body: <p>The <b>offer</b> is how you sell the product: its price, tax and policies. The product is already linked. Click <b>Auto-fill</b>.</p> },
+  { eyebrow: 'Publish · 3 of 4', target: 'offer-price', title: 'The price',
+    body: <p>The price is before tax; the tax (PPN 12% by default) is set below it. The buyer's total, including tax, is worked out for you.</p> },
+  { eyebrow: 'Publish · 3 of 4', target: 'offer-policies', title: 'Your policies',
+    body: <><p>Under <b>Policies &amp; Serviceability</b>, decide whether returns and cancellations are allowed, their windows, the cancellation cutoff and any restocking fee. Also set COD and your delivery area and hours.</p><p className="text-slate-400">These rules decide cancellations and returns automatically later. No approval is needed.</p></> },
+  { eyebrow: 'Publish · 3 of 4', target: 'offer-submit', until: onPage('catalog_detail'), waitLabel: 'Click Add Offer',
+    title: 'Save the offer',
+    body: <p>Click <b>Add Offer to Catalog</b>.</p> },
+  { eyebrow: 'Publish · 4 of 4', target: 'publish', until: () => !!document.querySelector('[data-tour="published-badge"]'), waitLabel: 'Click Publish',
+    title: 'Publish to Network',
+    body: <><p>Your catalog now has a product with an offer. Click <b>Publish to Network</b> and confirm.</p><p className="text-slate-400">Buyer apps on the network can then find it and place orders.</p></> },
+  { eyebrow: 'Published', target: 'published-badge', title: "You're live",
+    body: <><p>Your catalog is <b>Published</b>: buyers can find it now.</p><p className="text-slate-400">You can edit any product or offer here. Publish again to send the changes. Add your own catalogs the same way.</p></> },
+
+  { id: 'orders', eyebrow: 'Orders', page: 'orders', target: 'nav-orders', title: 'Orders',
+    body: <><p>Orders arrive here once a buyer confirms. Open one and move it <b>Packed → Shipped</b>; it becomes <b>Delivered</b> automatically.</p><p className="text-slate-400">Cancellations and returns follow your offer's policies. You'll see the outcome here.</p></> },
+  { eyebrow: 'Inventory', page: 'inventory', target: 'nav-inventory', title: 'Inventory',
+    body: <p>Everything you sell across catalogs: products, offers and live stock. Stock goes down when an order is confirmed and back up when one is cancelled or returned.</p> },
+  { eyebrow: 'Reconciliation', page: 'reconciliation', target: 'nav-reconciliation', title: 'Get paid',
+    body: <p>After delivery plus your settlement window, an order's payment falls <b>due</b>. Send <b>reconcile</b> to the buyer app; when it agrees, the payment gateway releases the held funds to you.</p> },
+  { eyebrow: 'Support', page: 'support', target: 'nav-support', title: 'Support tickets',
+    body: <p>Help requests buyers raise about their orders.</p> },
+  { eyebrow: 'Ratings', page: 'ratings', target: 'nav-ratings', title: 'Ratings',
+    body: <p>How buyers rated their orders.</p> },
+  { eyebrow: 'Message Log', page: 'messages', target: 'nav-messages', title: 'Message Log',
+    body: <p>Every Beckn message you sent or received, with its full payload. Useful when something doesn't look right.</p> },
+  { eyebrow: 'Done', target: 'tour-button', title: "You're all set",
+    body: <p>Start by creating your first catalog. You can run this tour again any time from here.</p> },
+]
+const TOUR_DONE_KEY = 'bpp.tourDone'
+
+function Sidebar({ active, onNav, open, onClose, onTour }) {
   const navContent = (
     <>
       {/* Logo */}
@@ -195,9 +261,9 @@ function Sidebar({ active, onNav, open, onClose }) {
       {/* Nav */}
       <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
         {NAV_ITEMS.map(({ id, label, icon: Icon, desc }) => {
-          const isActive = active === id || (id === 'catalogs' && ['catalog_detail', 'create_catalog', 'add_product'].includes(active))
+          const isActive = active === id || (id === 'catalogs' && ['catalog_detail', 'create_catalog', 'add_product', 'add_offer', 'edit_product', 'edit_offer', 'publish'].includes(active))
           return (
-            <button key={id} onClick={() => { onNav(id); onClose?.() }}
+            <button key={id} data-tour={`nav-${id}`} onClick={() => { onNav(id); onClose?.() }}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all group ${isActive ? 'text-white' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
                 }`}
               style={isActive ? { background: 'rgba(0,184,230,0.12)', border: '1px solid rgba(0,184,230,0.25)' } : {}}
@@ -219,6 +285,10 @@ function Sidebar({ active, onNav, open, onClose }) {
 
       {/* Footer */}
       <div className="px-4 py-3 border-t border-white/[0.06] space-y-3">
+        <button data-tour="tour-button" onClick={() => { onClose?.(); onTour?.() }}
+          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-cyan-300 transition-all bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/20 hover:border-cyan-500/40">
+          <Compass size={13} /> Take the tour
+        </button>
         <a
           href={window.__env__?.BAP_URL || import.meta.env.VITE_BAP_URL || "#"}
           target="_blank"
@@ -2897,7 +2967,7 @@ function CatalogsPage({ onNav }) {
           <h1 className="text-2xl font-bold text-white tracking-tight">Catalogs</h1>
           <p className="text-sm text-slate-500 mt-0.5">Create catalogs, add products, and publish to the network</p>
         </div>
-        <button onClick={() => onNav('create_catalog')}
+        <button data-tour="create-catalog" onClick={() => onNav('create_catalog')}
           className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white shadow-lg transition-all hover:scale-105 active:scale-95"
           style={{ background: BRAND }}>
           <Plus size={15} /> Create Catalog
@@ -3080,7 +3150,7 @@ function CreateCatalogPage({ onNav }) {
           <h1 className="text-2xl font-bold text-white tracking-tight">Create Catalog</h1>
           <p className="text-sm text-slate-500 mt-0.5">Fill in the catalog details — add products after creation</p>
         </div>
-        <button type="button" onClick={handleAutoFill}
+        <button type="button" data-tour="catalog-autofill" onClick={handleAutoFill}
           className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold border border-purple-500/30 text-purple-400 hover:bg-purple-500/10 transition-colors">
           <Wand2 size={13} /> Auto-fill Sample
         </button>
@@ -3088,7 +3158,7 @@ function CreateCatalogPage({ onNav }) {
 
       {error && <ErrorBox message={error} />}
 
-      <Card>
+      <Card data-tour="catalog-form">
         <form onSubmit={handleSubmit} className="space-y-5">
           <p className="text-xs uppercase tracking-widest text-slate-500 font-bold pb-2 border-b border-white/[0.06]">Catalog Info</p>
 
@@ -3131,7 +3201,7 @@ function CreateCatalogPage({ onNav }) {
               className="px-5 py-2.5 rounded-xl text-sm font-semibold border border-white/[0.10] text-slate-400 hover:text-white transition-colors">
               Cancel
             </button>
-            <button type="submit" disabled={loading}
+            <button type="submit" data-tour="catalog-submit" disabled={loading}
               className="flex-1 px-5 py-2.5 rounded-xl text-sm font-semibold text-white shadow-lg transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50"
               style={{ background: BRAND }}>
               {loading ? 'Creating…' : 'Create Catalog & Add Products →'}
@@ -3201,7 +3271,7 @@ function CatalogDetailPage({ onNav, catalogId }) {
               <div className="flex items-center gap-3">
                 <h1 className="text-2xl font-bold text-white tracking-tight">{cat.name || catalogId}</h1>
                 {cat.isPublished ? (
-                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-400">
+                  <span data-tour="published-badge" className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-400">
                     <CheckCircle2 size={10} /> Published
                   </span>
                 ) : (
@@ -3221,11 +3291,11 @@ function CatalogDetailPage({ onNav, catalogId }) {
             className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold border border-slate-500/30 text-slate-400 hover:bg-slate-500/10 transition-colors">
             <Tag size={14} /> Add Offer
           </button>
-          <button onClick={() => onNav('add_product', { catalogId })}
+          <button data-tour="add-product" onClick={() => onNav('add_product', { catalogId })}
             className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold border border-blue-500/30 text-blue-400 hover:bg-blue-500/10 transition-colors">
             <Plus size={14} /> Add Product
           </button>
-          <button onClick={handlePublish} disabled={publishing}
+          <button data-tour="publish" onClick={handlePublish} disabled={publishing}
             className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white shadow-lg transition-all hover:scale-105 active:scale-95 disabled:opacity-50"
             style={{ background: BRAND }}>
             {publishing ? <RefreshCw size={14} className="animate-spin" /> : <Send size={14} />}
@@ -3423,7 +3493,7 @@ function OfferForm({ off, oSet, offOpen, setOffOpen, catalogId, lockId, showReso
             <input className={inputCls} value={off.resource_ids} onChange={e => oSet('resource_ids', e.target.value)} placeholder="item-flask-mh500" />
           </div>
         )}
-        <div><label className={labelCls}>Price</label>
+        <div data-tour="offer-price"><label className={labelCls}>Price</label>
           <input className={inputCls} type="number" min="0" step="0.01" value={off.price} onChange={e => oSet('price', e.target.value)} placeholder="499" />
         </div>
         <div><label className={labelCls}>Currency</label>
@@ -3444,7 +3514,7 @@ function OfferForm({ off, oSet, offOpen, setOffOpen, catalogId, lockId, showReso
       </div>
 
       {/* Policies collapsible */}
-      <button type="button" onClick={() => setOffOpen(s => ({ ...s, pol: !s.pol }))}
+      <button type="button" data-tour="offer-policies" onClick={() => setOffOpen(s => ({ ...s, pol: !s.pol }))}
         className="mt-4 w-full flex items-center justify-between text-xs font-semibold text-slate-400 hover:text-slate-200 transition-colors pt-3 border-t border-white/[0.06]">
         <span>📋 Policies &amp; Serviceability</span>
         <ChevronRightIcon size={13} className={`transition-transform ${offOpen.pol ? 'rotate-90' : ''}`} />
@@ -3640,7 +3710,7 @@ function AddProductPage({ onNav, catalogId, editResourceId }) {
           <p className="text-xs text-slate-500 font-mono mt-0.5">catalog: {catalogId}</p>
         </div>
         {!editing && (
-          <button type="button" onClick={handleAutoFill}
+          <button type="button" data-tour="product-autofill" onClick={handleAutoFill}
             className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold border border-purple-500/30 text-purple-400 hover:bg-purple-500/10 transition-colors">
             <Wand2 size={13} /> Auto-fill
           </button>
@@ -3651,7 +3721,7 @@ function AddProductPage({ onNav, catalogId, editResourceId }) {
       {loadingItem && <LoadingSpinner label="Loading product…" />}
 
       <form onSubmit={handleSubmit} className={`space-y-4 ${loadingItem ? 'hidden' : ''}`}>
-        <Card className="p-4 sm:p-6">
+        <Card className="p-4 sm:p-6" data-tour="product-form">
           <p className="text-xs uppercase tracking-widest text-slate-500 font-bold pb-3 border-b border-white/[0.06] mb-4">📦 Resource Details</p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -3770,7 +3840,7 @@ function AddProductPage({ onNav, catalogId, editResourceId }) {
             className="px-5 py-3 rounded-xl text-sm font-semibold border border-white/[0.10] text-slate-400 hover:text-white transition-colors text-center">
             Cancel
           </button>
-          <button type="submit" disabled={loading}
+          <button type="submit" data-tour="product-submit" disabled={loading}
             className="flex-1 px-5 py-3 rounded-xl text-sm font-semibold text-white shadow-lg transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50 flex items-center justify-center gap-2"
             style={{ background: BRAND }}>
             {loading ? <><RefreshCw size={14} className="animate-spin" /> Saving…</> : editing ? <><Check size={14} /> Save Changes</> : <><Plus size={14} /> Save Resource → Setup Offer</>}
@@ -3884,7 +3954,7 @@ function AddOfferPage({ onNav, catalogId, preselectedResourceId, editOfferId }) 
           <p className="text-xs text-slate-500 font-mono mt-0.5">catalog: {catalogId}</p>
         </div>
         {!editing && (
-          <button type="button" onClick={handleAutoFill}
+          <button type="button" data-tour="offer-autofill" onClick={handleAutoFill}
             className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold border border-purple-500/30 text-purple-400 hover:bg-purple-500/10 transition-colors">
             <Wand2 size={13} /> Auto-fill
           </button>
@@ -3906,7 +3976,7 @@ function AddOfferPage({ onNav, catalogId, preselectedResourceId, editOfferId }) 
             className="px-5 py-3 rounded-xl text-sm font-semibold border border-white/[0.10] text-slate-400 hover:text-white transition-colors text-center">
             Cancel
           </button>
-          <button type="submit" disabled={loading}
+          <button type="submit" data-tour="offer-submit" disabled={loading}
             className="flex-1 px-5 py-3 rounded-xl text-sm font-semibold text-white shadow-lg transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50 flex items-center justify-center gap-2"
             style={{ background: BRAND }}>
             {loading ? <><RefreshCw size={14} className="animate-spin" /> {editing ? 'Saving…' : 'Adding…'}</> : editing ? <><Check size={14} /> Save Changes</> : <><Tag size={14} /> Add Offer to Catalog</>}
@@ -3946,6 +4016,27 @@ export default function App() {
 
   const onNav = (target, extra = {}) => { setPage(target); setNavExtra(extra); setSidebarOpen(false) }
 
+  // Guided tour: opens by itself on a seller's first visit, and from the
+  // sidebar's "Take the tour" any time after.
+  const [tourOpen, setTourOpen] = useState(false)
+  useEffect(() => {
+    if (!authReady) return
+    let done = false
+    try { done = localStorage.getItem(TOUR_DONE_KEY) === '1' } catch { }
+    if (!done) setTourOpen(true)
+  }, [authReady])
+  const closeTour = useCallback(() => {
+    setTourOpen(false)
+    setSidebarOpen(false)
+    try { localStorage.setItem(TOUR_DONE_KEY, '1') } catch { }
+  }, [])
+  // Each step opens its section; on small screens the sidebar (drawer) is
+  // opened too so the highlighted menu item is visible.
+  const onTourStep = useCallback(step => {
+    if (step.page) { setPage(step.page); setNavExtra(step.extra || {}) }
+    setSidebarOpen(window.innerWidth < 1024 && !!step.target && (step.target.startsWith('nav-') || step.target === 'tour-button'))
+  }, [])
+
   // Gate on a token before rendering anything real. There's no login UI
   // here at all -- landing-page is the single entry point (see
   // src/auth.js); a visit with no token, ever, redirects there.
@@ -3972,7 +4063,8 @@ export default function App() {
 
   return (
     <div className="flex min-h-screen" style={{ background: '#080d1e' }}>
-      <Sidebar active={page} onNav={onNav} open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+      <Sidebar active={page} onNav={onNav} open={sidebarOpen} onClose={() => setSidebarOpen(false)} onTour={() => setTourOpen(true)} />
+      <Tour steps={TOUR_STEPS} open={tourOpen} onClose={closeTour} onStep={onTourStep} page={page} />
 
       <main className="flex-1 lg:ml-64 min-h-screen overflow-y-auto">
         <div className="bg-orange-500 text-white text-xs sm:text-sm text-center py-1.5 px-4">
