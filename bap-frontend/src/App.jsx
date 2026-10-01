@@ -8,7 +8,7 @@ import {
   User, Phone, Home, ChevronLeft, Banknote,
   Ban, MessageSquare, RefreshCw, ThumbsUp,
   History, Wand2, ExternalLink, ChevronDown, ChevronUp, LogOut,
-  Compass, AlertCircle,
+  Compass, AlertCircle, Copy,
 } from 'lucide-react';
 import Tour from './Tour.jsx';
 import { useI18n, rich, LanguageToggle, tNow, localeNow } from './i18n.jsx';
@@ -1764,6 +1764,114 @@ function OrderDetailPanel({ txnId, onBack }) {
   );
 }
 
+/* ─────────────────────────── Payload viewer ────────────────────────────── */
+// Same as bpp-frontend's message log: a collapsible JSON tree -- click the
+// ▸/▾ toggle (or a folded {…} summary) on any object or array to fold it;
+// everything starts expanded.
+function JsonNode({ name, value, depth, last }) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(true);
+  const isArr = Array.isArray(value);
+  const isObj = value !== null && typeof value === 'object';
+  const comma = last ? '' : ',';
+  const label = name !== undefined && (
+    <><span className="text-sky-300">"{name}"</span><span className="text-slate-500">: </span></>
+  );
+  const indent = { paddingLeft: depth ? 14 : 0 };
+
+  if (!isObj) {
+    const color = typeof value === 'string' ? 'text-emerald-300'
+      : typeof value === 'number' ? 'text-amber-300'
+        : typeof value === 'boolean' ? 'text-violet-300' : 'text-slate-500';
+    return <div style={indent}>{label}<span className={color}>{JSON.stringify(value)}</span><span className="text-slate-500">{comma}</span></div>;
+  }
+
+  const entries = isArr ? value.map((v, i) => [i, v]) : Object.entries(value);
+  const [openCh, closeCh] = isArr ? ['[', ']'] : ['{', '}'];
+  const toggle = e => { e.stopPropagation(); setOpen(o => !o); };
+  const toggler = entries.length > 0 && (
+    <button onClick={toggle} className="inline-block w-3 -ml-3 text-slate-500 hover:text-cyan-400" aria-label={open ? t('Collapse') : t('Expand')}>
+      {open ? '▾' : '▸'}
+    </button>
+  );
+
+  if (!entries.length) {
+    return <div style={indent}>{label}<span className="text-slate-400">{openCh}{closeCh}</span><span className="text-slate-500">{comma}</span></div>;
+  }
+
+  if (!open) {
+    return (
+      <div style={indent}>
+        {toggler}{label}
+        <button onClick={toggle} className="text-slate-400 hover:text-cyan-400">
+          {openCh}<span className="px-1 text-slate-500 italic">{t(isArr ? '{count} items' : '{count} keys', { count: entries.length })}</span>{closeCh}
+        </button>
+        <span className="text-slate-500">{comma}</span>
+      </div>
+    );
+  }
+
+  return (
+    <div style={indent}>
+      <div>{toggler}{label}<span className="text-slate-400">{openCh}</span></div>
+      {entries.map(([k, v], i) => (
+        <JsonNode key={k} name={isArr ? undefined : k} value={v} depth={depth + 1} last={i === entries.length - 1} />
+      ))}
+      <div><span className="text-slate-400">{closeCh}</span><span className="text-slate-500">{comma}</span></div>
+    </div>
+  );
+}
+
+// One message opened: request / response tabs, the error if any, and the
+// payload as a collapsible tree with copy-to-clipboard.
+function PayloadPanel({ message: m }) {
+  const { t } = useI18n();
+  const tabs = [
+    { id: 'request', label: m.direction === 'OUTBOUND' ? t('Request sent') : t('Message received'), data: m.request_payload },
+    ...(m.response_payload != null ? [{ id: 'response', label: m.direction === 'OUTBOUND' ? t('Response received') : t('Response sent'), data: m.response_payload }] : []),
+  ];
+  const [tab, setTab] = useState('request');
+  const [copied, setCopied] = useState(false);
+  const current = tabs.find(x => x.id === tab) || tabs[0];
+  const text = current.data == null ? '' : JSON.stringify(current.data, null, 2);
+
+  const copy = async e => {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch { /* clipboard blocked */ }
+  };
+
+  return (
+    <div className="rounded-lg border border-white/[0.07] bg-slate-950/60 overflow-hidden" onClick={e => e.stopPropagation()}>
+      <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 border-b border-white/[0.06] flex-wrap">
+        <div className="flex gap-1">
+          {tabs.map(x => (
+            <button key={x.id} onClick={() => setTab(x.id)}
+              className={`px-2 py-1 rounded-md text-[11px] font-semibold transition-colors ${current.id === x.id ? 'text-white bg-white/[0.08]' : 'text-slate-400 hover:text-slate-200'}`}>
+              {x.label}
+            </button>
+          ))}
+        </div>
+        {text && (
+          <button onClick={copy} className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-white transition-colors">
+            {copied ? <CheckCircle2 className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />} {copied ? t('Copied') : t('Copy')}
+          </button>
+        )}
+      </div>
+      {text ? (
+        <div className="max-h-[28rem] overflow-auto p-2.5 text-[10.5px] leading-relaxed font-mono text-slate-300 whitespace-pre">
+          <JsonNode value={current.data} depth={0} last />
+        </div>
+      ) : (
+        <div className="p-2.5 text-xs text-slate-500">{t('No payload recorded')}</div>
+      )}
+    </div>
+  );
+}
+
 /* ─────────────────────────── MessageLogPanel ────────────────────────────── */
 // The buyer's own Beckn messages (GET /messages): their searches (discover /
 // on_discover) and every message of their orders, newest first. Each row
@@ -1882,15 +1990,7 @@ function MessageLogPanel() {
                     {m.url && <> · <span className="font-mono">{m.url}</span></>}
                     {m.processing_duration_ms != null && <> · {m.processing_duration_ms} ms</>}
                   </p>
-                  {[[m.direction === 'OUTBOUND' ? t('Request sent') : t('Message received'), m.request_payload],
-                    [m.direction === 'OUTBOUND' ? t('Response received') : t('Response sent'), m.response_payload]].map(([label, body]) => (
-                    <div key={label} className="rounded-lg border border-white/[0.07] bg-slate-950/60 overflow-hidden">
-                      <p className="px-2.5 py-1.5 text-[10px] font-semibold text-slate-400 border-b border-white/[0.06]">{label}</p>
-                      <pre className="max-h-72 overflow-auto p-2.5 text-[10.5px] leading-relaxed font-mono text-slate-300 whitespace-pre">
-                        {body == null ? t('Nothing') : JSON.stringify(body, null, 2)}
-                      </pre>
-                    </div>
-                  ))}
+                  <PayloadPanel message={m} />
                 </div>
               )}
             </div>
