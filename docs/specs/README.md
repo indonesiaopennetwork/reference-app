@@ -1,9 +1,11 @@
-# Beckn protocol extension: Reconcile
+# ION network extension: Reconcile
 
-`reconcile.yaml` adds `/reconcile` and `/on_reconcile` to Beckn v2.0.0 for
-settling money between a seller (BPP) and a buyer app (BAP). Core schemas
-(Context, Contract, Settlement, Descriptor, Ack/Nack) are referenced from the
-core spec, not redefined.
+`reconcile.yaml` is ION's network extension specification (ION 0.1.0-draft).
+It adds `/reconcile` and `/on_reconcile` to Beckn v2.0.0 for settling money
+between a seller (BPP) and a buyer app (BAP). Core schemas (Context, Contract,
+Settlement, Descriptor, Ack/Nack) are referenced from the core spec, not
+redefined. The settlement terms in `settlementAttributes` (`settlementBasis`,
+`settlementWindow`) are ION TradeSettlement's.
 
 ## Money model: escrow at the payment gateway
 
