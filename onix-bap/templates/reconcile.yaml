@@ -1,65 +1,26 @@
 openapi: 3.1.1
 info:
-  title: Beckn Protocol Extension — Reconcile
-  version: 0.1.0
-  description: >
-    Extends Beckn Protocol v2.0.0 with a settlement reconciliation exchange
-    between a Provider NP (BPP) and a Consumer NP (BAP).
-
-
-    **Money model (escrow).** The buyer pays through the payment gateway,
-    which *holds* the funds. Once a day (end of day), the BPP looks for
-    contracts whose settlement falls due that day and, **per BAP**, sends one
-    `/reconcile` carrying those contracts — each with its full settlement
-    history, exactly as in `/confirm`, `/on_cancel` and `/on_update` — plus a
-    settlement summary. The BAP answers with `/on_reconcile`; its AGREED is
-    what releases the held funds from the gateway to the BPP's account.
-
-
-    **Who pays a refund** depends on whether the contract's payment was
-    already released:
-
-    - Refund *before* the contract is reconciled — paid by the gateway from
-      the held funds (`refund.source: PAYMENT_GATEWAY`); it reduces what the
-      gateway releases.
-
-    - Refund *after* the contract is reconciled (e.g. a return inside the
-      return window but after a `AFTER_DELIVERY` / `P1D` settlement) — the funds
-      are already with the BPP, so the BPP refunds the buyer from its own
-      account (`refund.source: PROVIDER`). It is reported in the next batch
-      but does not change what the gateway releases.
-
-
-    The BPP sets `refund.source` when it creates a refund settlement: a
-    contract whose payment settlement is not yet AGREED / ADJUSTED in a
-    reconciliation is refunded from the gateway, otherwise by the provider.
-
-
-    Core schemas (Context, Contract, Settlement, Descriptor, Ack/Nack
-    responses) are referenced from the core specification and not redefined
-    here.
-
-
-    **When a contract is due.** Every settlement carries the seller's payout
-    terms in `settlementAttributes`: `settlementBasis` (the event that starts
-    the payout — `ON_CONFIRMATION`, `AFTER_SHIPMENT`, `AFTER_DELIVERY` or `AFTER_RETURN_WINDOW`, as in ION TradeSettlement) and
-    `settlementWindow` (an ISO 8601 duration after that event). A contract is
-    due on `basis event time + settlementWindow`; e.g. `AFTER_DELIVERY` / `P1D` is
-    one day after delivery. A contract cancelled before its basis event ever
-    happens is due at `cancellation time + settlementWindow`. A contract is
-    reconciled once; a settlement added to it afterwards (e.g. a return's
-    refund) makes it due again in a later batch, contributing only the
-    settlements not yet reconciled.
-
-
-    **Reconciliation state per settlement** uses the fields RetailSettlement
-    already defines in `settlementAttributes`: `reconciliationId` (the batch)
-    and `reconciliationStatus` (`PENDING` in `/reconcile`; `AGREED`,
-    `DISPUTED` or `ADJUSTED` after `/on_reconcile`).
-
-
-    **Extension to RetailSettlement.refund:** `source`
-    (`PAYMENT_GATEWAY` | `PROVIDER`, see RefundSource) — who paid the refund.
+  title: ION (Indonesia Open Network) — Network Extension Specification
+  version: 0.1.0-draft
+  description: "ION — Indonesia Open Network. Single-file network extension specification.\n\nRELATIONSHIP TO BECKN:\nThis\
+    \ file EXTENDS Beckn Protocol v2.0.0. It does NOT copy or embed Beckn.\nEvery reference to a Beckn type uses $ref: beckn.yaml#/...\
+    \ pointing to the\nlocal copy at schema/core/v2/api/v2.0.0/beckn.yaml.\nWhen Beckn releases a new version, only beckn.yaml\
+    \ needs updating.\n\nWHAT THIS FILE CONTAINS:\n- L2: ION network profile (x-ion-profile block) — signing rules, regulatory\n\
+    \  requirements, payment rails, conformance matrix for Indonesia\n- L3: ION protocol endpoint extensions — /raise family\
+    \ (6 endpoints) and\n  /reconcile + /on_reconcile (2 endpoints). These 8 endpoints extend the\n  30 core Beckn endpoints.\
+    \ Beckn's 30 endpoints live in beckn.yaml only.\n- L4: ION core attribute packs — cross-sector extensions that mount on\n\
+    \  Beckn's *Attributes slots (address, identity, payment, tax, participant,\n  product, localization, rating, support,\
+    \ raise, reconcile)\n- L5: ION sector attribute packs — trade and logistics extensions that mount\n  on the same *Attributes\
+    \ slots for sector-specific fields\n\nEXTENSION CONTRACT:\nEvery L4/L5 schema carries x-beckn-attaches-to naming the Beckn\
+    \ *Attributes\nslot it mounts onto. Every schema allOf's with\nbeckn.yaml#/components/schemas/Attributes to inherit @context/@type\n\
+    requirements. This is what makes ION a non-forking extension of Beckn.\n\nCROSS-SCHEMA CONDITIONAL RULES:\nFive rules\
+    \ whose trigger field lives in a different schema bag than the\nrequired field are declared in x-ion-conditional-rules\
+    \ below. Standard\nJSON Schema if/then/else cannot express cross-bag conditions. ONIX\n(the ION validator) enforces these\
+    \ at network boundaries.\n\nVALIDATOR USAGE:\nRun beckn.yaml + ion.yaml together through any OpenAPI 3.1.1 validator.\n\
+    Do not merge them — they are designed to be used as two separate files.\n\nBECKN v2.0 TERMINOLOGY:\nThis spec targets Beckn v2.0.0 LTS. Key terminology changes from earlier versions:\n- resources[] replaces the legacy items[] array. Do NOT use items[].\n- performance[] replaces fulfillments[] in Contract. Do NOT use fulfillments[].\n- Consumer Node (CN) replaces BAP. Provider Node (PN) replaces BPP.\n  Wire-level field names bapId/bapUri/bppId/bppUri are RETAINED for backward compatibility.\n\nPARTICIPANT EXCEPTION:\nBeckn v2.0 Participant has no participantAttributes wrapper. IONParticipant and\nLogisticsAgent fields attach as DIRECT PROPERTIES on the Participant object — not\ninside a participantAttributes bag. This is the single exception to the\n*Attributes container pattern. See core/participant/v1 and logistics/agent/v1.\n\n@CONTEXT AND @TYPE PLACEMENT RULE:\n@context and @type belong ONLY on *Attributes extension containers and the top-level\nContract object. Specifically, ONLY these fields carry @context and @type:\n  Resource.resourceAttributes, Offer.offerAttributes, Provider.providerAttributes,\n  Commitment.commitmentAttributes, Consideration.considerationAttributes,\n  Performance.performanceAttributes, Settlement.settlementAttributes,\n  Contract.contractAttributes, Tracking.trackingAttributes,\n  RatingInput.target.targetAttributes, Support.channels[]\n\nCore Beckn objects — Descriptor, Location, Catalog, Resource, Offer, Commitment,\nConsideration, Performance, Participant, Entitlement, Contract — MUST NOT carry\n@context or @type directly. Any ION schema or example that places @context/@type\non a non-Attributes object is non-conformant and MUST be corrected."
+  contact:
+    name: ION Network
+    url: https://schema.ion.id
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0

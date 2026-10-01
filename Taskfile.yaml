@@ -109,7 +109,7 @@ tasks:
 
   specs:sync:
     desc: >-
-      Copy the Beckn extension spec (docs/specs/reconcile.yaml) into the
+      Copy the ION network extension spec (docs/specs/reconcile.yaml) into the
       onix-bap / onix-bpp image templates, where the cloud adapters load it
       from /app/config (local compose mounts docs/specs directly). Run after
       editing the spec, before redeploying the adapters.
