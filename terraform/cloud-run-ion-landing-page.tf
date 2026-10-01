@@ -1,0 +1,59 @@
+# Public static front-end for ion-landing-page. Proxies to the public URL
+# of the GCS bucket from gcs-ion-landing-page.tf
+# (https://storage.googleapis.com/<bucket>/...) -- see
+# ion-landing-page/nginx.conf.template. Domain-mapped to the custom domain
+# -- see domain-mapping.tf.
+
+resource "google_cloud_run_v2_service" "ion_landing_page" {
+  name                = "ion-landing-page"
+  project             = var.project_id
+  location            = var.region
+  ingress             = "INGRESS_TRAFFIC_ALL"
+  deletion_protection = false
+  depends_on          = [google_project_service.apis, google_storage_bucket_iam_member.ion_landing_page_public_read]
+
+  template {
+    service_account       = google_service_account.cloud_run_sa.email
+    execution_environment = "EXECUTION_ENVIRONMENT_GEN2"
+
+    scaling {
+      min_instance_count = 0
+      max_instance_count = 3
+    }
+
+    containers {
+      name  = "ion-landing-page"
+      image = local.images.ion_landing_page
+
+      # Read by index.html's launchPartnerDemo() via env.sh/env-config.js --
+      # points at the existing, untouched landing-page service.
+      env {
+        name  = "LANDING_PAGE_URL"
+        value = "https://${var.landing_page_domain}"
+      }
+
+      # nginx.conf.template proxy_pass's to this bucket's public URL
+      # (https://storage.googleapis.com/<bucket>/...) instead of reading it
+      # off a mounted volume -- see ion-landing-page/nginx.conf.template.
+      env {
+        name  = "ION_LANDING_PAGE_BUCKET"
+        value = google_storage_bucket.ion_landing_page_static.name
+      }
+
+      ports {
+        container_port = 80
+      }
+
+      resources {
+        limits = {
+          cpu    = "1"
+          memory = "512Mi"
+        }
+      }
+    }
+  }
+
+  lifecycle {
+    ignore_changes = [template[0].containers[0].image]
+  }
+}

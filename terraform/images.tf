@@ -14,6 +14,7 @@ locals {
     dedi_static_server   = "${local.registry}/dedi-static-server:${var.image_tag}"
     discovery_service    = "${local.registry}/discovery-service:${var.image_tag}"
     landing_page         = "${local.registry}/landing-page:${var.image_tag}"
+    ion_landing_page     = "${local.registry}/ion-landing-page:${var.image_tag}"
     otel_collector       = "${local.registry}/otel-collector:${var.image_tag}"
   }
 

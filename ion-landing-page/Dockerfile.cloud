@@ -1,0 +1,12 @@
+# Cloud-only variant: no baked-in content -- index.html is fetched live
+# from the GCS bucket via proxy_pass (see nginx.conf.template). Local dev
+# (docker-compose) still uses the plain Dockerfile + nginx.conf, serving
+# a baked-in copy -- see ion-landing-page/Dockerfile.
+FROM nginx:alpine
+
+COPY nginx.conf.template /etc/nginx/templates/default.conf.template
+COPY env.sh /docker-entrypoint.d/40-env.sh
+RUN chmod +x /docker-entrypoint.d/40-env.sh
+
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]

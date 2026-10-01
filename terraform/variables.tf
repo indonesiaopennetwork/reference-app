@@ -235,6 +235,11 @@ variable "landing_page_domain" {
   type        = string
 }
 
+variable "ion_landing_page_domain" {
+  description = "Custom domain for ion-landing-page (the front page)."
+  type        = string
+}
+
 variable "zitadel_domain" {
   description = "Custom domain for the self-hosted Zitadel instance (see cloud-run-zitadel.tf) — this becomes ZITADEL_EXTERNALDOMAIN and the issuer bap/bpp/landing-page verify tokens against. Same Search Console verification requirement as the other domains above."
   type        = string

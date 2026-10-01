@@ -53,6 +53,15 @@ tasks:
       - gsutil cp "{{.INDEX_FILE}}" "gs://{{.DEDI_BUCKET}}/.well-known/dedi.index.json"
       - gsutil cp "{{.REGISTRY_FILE}}" "gs://{{.DEDI_BUCKET}}/dedi/ion-scratch-registry.json"
 
+  deploy-ion-landing-page-files:
+    desc: >-
+      Upload ion-landing-page's static index.html to its GCS bucket.
+    vars:
+      ION_LANDING_PAGE_BUCKET:
+        sh: cd terraform && terraform output -raw ion_landing_page_bucket
+    cmds:
+      - gsutil cp ion-landing-page/index.html "gs://{{.ION_LANDING_PAGE_BUCKET}}/index.html"
+
   _ensure-future-next-update:
     internal: true
     cmds:
@@ -253,6 +262,25 @@ tasks:
       - terraform plan -target=google_cloud_run_v2_service.dedi_static -target=google_cloud_run_v2_service_iam_member.dedi_static_public_invoker -target=google_cloud_run_domain_mapping.dedi_apex -target=google_cloud_run_domain_mapping.dedi_www -out=dedi-server.tfplan
       - terraform apply dedi-server.tfplan
 
+  deploy:ion-landing-page-bucket:
+    desc: >-
+      Create the ion-landing-page static bucket and its public-read IAM
+      binding only -- no dependency on any other service, can run any time.
+    dir: terraform
+    cmds:
+      - terraform plan -target=google_storage_bucket.ion_landing_page_static -target=google_storage_bucket_iam_member.ion_landing_page_public_read -out=ion-landing-page-bucket.tfplan
+      - terraform apply ion-landing-page-bucket.tfplan
+
+  deploy:ion-landing-page-server:
+    desc: >-
+      Create the ion-landing-page Cloud Run service, its public invoker
+      binding, and its domain mapping. Run AFTER deploy:ion-landing-page-bucket
+      and task deploy-ion-landing-page-files have succeeded.
+    dir: terraform
+    cmds:
+      - terraform plan -target=google_cloud_run_v2_service.ion_landing_page -target=google_cloud_run_v2_service_iam_member.ion_landing_page_public_invoker -target=google_cloud_run_domain_mapping.ion_landing_page -out=ion-landing-page-server.tfplan
+      - terraform apply ion-landing-page-server.tfplan
+
   deploy:phase1:
     desc: >-
       Minimum-steps deployment, part 1: runs bootstrap through bringing up
@@ -427,6 +455,15 @@ tasks:
       - task: _redeploy-service
         vars: {CONTEXT_DIR: landing-page, IMAGE: landing-page, SERVICE: landing-page, CONTAINER: landing-page}
 
+  redeploy:ion-landing-page:
+    desc: >-
+      Rebuild, push, and redeploy ONLY the ion-landing-page nginx image.
+      Builds from Dockerfile.cloud (proxy_pass to the GCS bucket's public
+      URL) -- NOT the plain Dockerfile used for local docker-compose.
+    cmds:
+      - task: _redeploy-service
+        vars: {CONTEXT_DIR: ion-landing-page, IMAGE: ion-landing-page, SERVICE: ion-landing-page, CONTAINER: ion-landing-page, DOCKERFILE: Dockerfile.cloud}
+
   redeploy:discovery-service:
     desc: Rebuild, push, and redeploy ONLY discovery-service.
     cmds:
@@ -457,4 +494,5 @@ tasks:
       - task: redeploy:onix-catalog-publish
       - task: redeploy:dedi-static-server
       - task: redeploy:landing-page
+      - task: redeploy:ion-landing-page
       - task: redeploy:discovery-service

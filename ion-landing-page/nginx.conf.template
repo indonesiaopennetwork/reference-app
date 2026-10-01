@@ -1,0 +1,40 @@
+server {
+    listen 80;
+
+    # Unchanged from the local/mount-based setup -- local to this
+    # container, never fetched from the bucket. See env.sh.
+    location = /env-config.js {
+        root /usr/share/nginx/env-config-out;
+    }
+
+    # GCS has no real "index" concept for a bare bucket-root request --
+    # fetch the index.html object explicitly.
+    location = / {
+        proxy_pass https://storage.googleapis.com/${ION_LANDING_PAGE_BUCKET}/index.html;
+        proxy_ssl_server_name on;
+        proxy_set_header Host storage.googleapis.com;
+    }
+
+    # Everything else: forward the request path straight through as the
+    # GCS object key, falling back to index.html for anything that
+    # doesn't exist as an object (mirrors the old
+    # try_files $uri $uri/ /index.html behaviour, now over HTTP instead
+    # of local disk).
+    location / {
+        proxy_pass https://storage.googleapis.com/${ION_LANDING_PAGE_BUCKET}/;
+        proxy_ssl_server_name on;
+        proxy_set_header Host storage.googleapis.com;
+        proxy_intercept_errors on;
+        error_page 404 = /__index_fallback;
+    }
+
+    # A named location (@name) can't have a proxy_pass with a URI part --
+    # nginx requires an exact-match location for that, hence this instead.
+    # internal; blocks it from being requested directly by a client.
+    location = /__index_fallback {
+        internal;
+        proxy_pass https://storage.googleapis.com/${ION_LANDING_PAGE_BUCKET}/index.html;
+        proxy_ssl_server_name on;
+        proxy_set_header Host storage.googleapis.com;
+    }
+}
