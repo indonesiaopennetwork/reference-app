@@ -106,6 +106,20 @@ resource "google_cloud_run_domain_mapping" "landing_page" {
   }
 }
 
+resource "google_cloud_run_domain_mapping" "ion_landing_page" {
+  name     = var.ion_landing_page_domain
+  location = var.region
+  project  = var.project_id
+
+  metadata {
+    namespace = var.project_id
+  }
+
+  spec {
+    route_name = google_cloud_run_v2_service.ion_landing_page.name
+  }
+}
+
 resource "google_cloud_run_domain_mapping" "zitadel" {
   name     = var.zitadel_domain
   location = var.region

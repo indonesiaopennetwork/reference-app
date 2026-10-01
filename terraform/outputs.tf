@@ -47,6 +47,16 @@ output "dedi_static_server_url" {
   value = google_cloud_run_v2_service.dedi_static.uri
 }
 
+output "ion_landing_page_bucket" {
+  value       = google_storage_bucket.ion_landing_page_static.name
+  description = "GCS bucket serving ion-landing-page's static files -- upload here directly, e.g.: gsutil cp ion-landing-page/index.html gs://<this>/index.html"
+}
+
+output "ion_landing_page_url" {
+  value       = google_cloud_run_v2_service.ion_landing_page.uri
+  description = "Public URL — the ion-landing-page front page."
+}
+
 output "landing_page_url" {
   value       = google_cloud_run_v2_service.landing_page.uri
   description = "Public URL — the entry-point page with buttons to the buyer and seller apps."
@@ -85,6 +95,11 @@ output "landing_page_domain_url" {
   description = "Custom domain URL for the landing page."
 }
 
+output "ion_landing_page_domain_url" {
+  value       = "https://${var.ion_landing_page_domain}"
+  description = "Custom domain URL for ion-landing-page."
+}
+
 output "zitadel_domain_url" {
   value       = "https://${var.zitadel_domain}"
   description = "Custom domain URL for Zitadel."
@@ -118,6 +133,11 @@ output "bpp_frontend_domain_dns_records" {
 output "landing_page_domain_dns_records" {
   value       = google_cloud_run_domain_mapping.landing_page.status[0].resource_records
   description = "DNS records to create at your registrar for var.landing_page_domain."
+}
+
+output "ion_landing_page_domain_dns_records" {
+  value       = google_cloud_run_domain_mapping.ion_landing_page.status[0].resource_records
+  description = "DNS records to create at your registrar for var.ion_landing_page_domain."
 }
 
 output "zitadel_domain_dns_records" {
