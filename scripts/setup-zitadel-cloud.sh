@@ -30,7 +30,7 @@ done
 
 cd terraform
 BASE_URL="${ZITADEL_ISSUER:-$(terraform output -raw zitadel_domain_url)}"
-LANDING_PAGE_URL="${LANDING_PAGE_URL:-$(terraform output -raw landing_page_domain_url)}"
+LANDING_PAGE_URL="${LANDING_PAGE_URL:-$(terraform output -raw landing_page_public_url)}"
 MACHINEKEY_BUCKET="$(terraform output -raw zitadel_machinekey_bucket)"
 cd ..
 

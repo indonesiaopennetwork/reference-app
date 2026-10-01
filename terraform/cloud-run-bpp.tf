@@ -117,7 +117,7 @@ resource "google_cloud_run_v2_service" "bpp" {
         # CORS exception on POST /api/v1/auth/bootstrap -- see
         # bpp-application/internal/server/server.go's registerAuthRoutes.
         name  = "LANDING_PAGE_ORIGIN"
-        value = "https://${var.landing_page_domain}"
+        value = local.landing_page_origin
       }
       env {
         name = "BPP_PRIVATE_KEY"

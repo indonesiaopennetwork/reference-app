@@ -95,6 +95,11 @@ output "landing_page_domain_url" {
   description = "Custom domain URL for the landing page."
 }
 
+output "landing_page_public_url" {
+  value       = local.landing_page_url
+  description = "Canonical public URL of the landing page (under ion-landing-page's domain) -- what Zitadel's redirect URIs must use."
+}
+
 output "ion_landing_page_domain_url" {
   value       = "https://${var.ion_landing_page_domain}"
   description = "Custom domain URL for ion-landing-page."
