@@ -31,11 +31,19 @@ resource "google_cloud_run_v2_service" "ion_landing_page" {
         value = local.landing_page_url
       }
 
-      # nginx.conf.template proxies /tsp/remiges/ to this host -- see
-      # local.landing_page_url.
+      # nginx.conf.template proxies /tsp/remiges/, /tsp/remiges/cn/ and
+      # /tsp/remiges/pn/ to these hosts -- see local.landing_page_url.
       env {
         name  = "LANDING_PAGE_UPSTREAM"
         value = trimprefix(google_cloud_run_v2_service.landing_page.uri, "https://")
+      }
+      env {
+        name  = "BAP_FRONTEND_UPSTREAM"
+        value = trimprefix(google_cloud_run_v2_service.bap_frontend.uri, "https://")
+      }
+      env {
+        name  = "BPP_FRONTEND_UPSTREAM"
+        value = trimprefix(google_cloud_run_v2_service.bpp_frontend.uri, "https://")
       }
 
       # nginx.conf.template proxy_pass's to this bucket's public URL

@@ -6,14 +6,17 @@
 # entrypoint.sh at container startup (mirrors onix-bap/entrypoint.sh's
 # templating pattern).
 
-# Canonical public URL of landing-page: mounted under ion-landing-page's
-# domain via its nginx proxy (see ion-landing-page/nginx.conf.template).
-# var.landing_page_domain stays mapped too, but every link and the bpp CORS
-# origin point here -- login tokens live in this origin's localStorage, so
-# links must all agree on one URL or logout won't clear them.
+# Canonical public URLs of landing-page, bap-frontend and bpp-frontend:
+# mounted under ion-landing-page's domain via its nginx proxy (see
+# ion-landing-page/nginx.conf.template). Their own custom domains stay
+# mapped too, but every link and the bpp CORS origin point here -- login
+# tokens live in this origin's localStorage, so links must all agree on one
+# URL or logout won't clear them.
 locals {
   landing_page_url    = "https://${var.ion_landing_page_domain}/tsp/remiges"
   landing_page_origin = "https://${var.ion_landing_page_domain}"
+  bap_frontend_url    = "${local.landing_page_url}/cn"
+  bpp_frontend_url    = "${local.landing_page_url}/pn"
 }
 
 resource "google_cloud_run_v2_service" "landing_page" {
@@ -49,11 +52,11 @@ resource "google_cloud_run_v2_service" "landing_page" {
 
       env {
         name  = "BAP_URL"
-        value = "https://${var.bap_frontend_domain}"
+        value = local.bap_frontend_url
       }
       env {
         name  = "BPP_URL"
-        value = "https://${var.bpp_frontend_domain}"
+        value = local.bpp_frontend_url
       }
       env {
         # Public bpp API URL -- landing-page's bootstrap() call hits
