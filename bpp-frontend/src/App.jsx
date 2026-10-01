@@ -649,10 +649,10 @@ function OrderDetailDrawer({ order, onClose }) {
                     </Card>
                   </section>
 
-                  {/* Fulfillment Actions */}
+                  {/* Performance Actions */}
                   {data?.contract?.status === 'ACTIVE' && (
                     <section>
-                      <SectionTitle>{t('Fulfillment Actions')}</SectionTitle>
+                      <SectionTitle>{t('Performance Actions')}</SectionTitle>
                       
                       {returnPerfs.length > 0 ? (
                         <Card className="p-4 space-y-2">

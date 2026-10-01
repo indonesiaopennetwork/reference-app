@@ -166,7 +166,7 @@ export default {
   "Flask 500ml Yellow": "Termos 500ml Kuning",
   "FRI": "JUM",
   "Fulfillment": "Pemenuhan",
-  "Fulfillment Actions": "Tindakan Pemenuhan",
+  "Performance Actions": "Tindakan Pelaksanaan",
   "Full description…": "Deskripsi lengkap…",
   "Full product description…": "Deskripsi lengkap produk…",
   "Gateway refund": "Pengembalian dana gateway",

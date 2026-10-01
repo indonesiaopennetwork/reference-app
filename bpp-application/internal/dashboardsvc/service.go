@@ -16,11 +16,13 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/remiges-tech/logharbour/logharbour"
 
 	"github.com/ion/winroom/bpp/db/sqlc"
 	"github.com/ion/winroom/bpp/internal/auth"
+	"github.com/ion/winroom/bpp/internal/cancellation"
 	"github.com/ion/winroom/bpp/internal/config"
 	"github.com/ion/winroom/bpp/internal/statussvc"
 )
@@ -621,39 +623,12 @@ func (h *Handler) triggerUnsolicitedOnStatus(contractID uuid.UUID, status string
 		return
 	}
 
-	var contractMap map[string]interface{}
-
-	// If contract_attributes is present, use it. Otherwise, fall back to beckn_message_log
-	if len(row.ContractAttributes) > 0 && string(row.ContractAttributes) != "null" {
-		if err := json.Unmarshal(row.ContractAttributes, &contractMap); err != nil {
-			h.lh.WithModule("dashboardsvc").Err().Error(err).Log("failed to parse contract attributes for unsolicited on_status")
-			return
-		}
-	}
-
-	if contractMap == nil {
-		var lastPayloadStr string
-		err = h.pool.QueryRow(bgCtx, `
-			SELECT request_payload 
-			FROM beckn_message_log 
-			WHERE transaction_id = $1 AND action IN ('on_confirm', 'confirm', 'on_init', 'init') 
-			ORDER BY created_at DESC LIMIT 1
-		`, row.TransactionID).Scan(&lastPayloadStr)
-		if err != nil {
-			h.lh.WithModule("dashboardsvc").Err().Error(err).Log("failed to find previous contract payload for unsolicited on_status")
-			return
-		}
-
-		var parsedReq struct {
-			Message struct {
-				Contract map[string]interface{} `json:"contract"`
-			} `json:"message"`
-		}
-		if err := json.Unmarshal([]byte(lastPayloadStr), &parsedReq); err != nil {
-			h.lh.WithModule("dashboardsvc").Err().Error(err).Log("failed to parse previous contract payload")
-			return
-		}
-		contractMap = parsedReq.Message.Contract
+	// The contract as last stored, else as last sent (on_confirm etc.); the
+	// shared loader also renames pre-ION settlement terms.
+	contractMap, err := cancellation.LatestContract(bgCtx, h.pool, row.TransactionID, row.ContractAttributes)
+	if err != nil {
+		h.lh.WithModule("dashboardsvc").Err().Error(err).Log("failed to load contract for unsolicited on_status")
+		return
 	}
 
 	if contractMap == nil {
@@ -721,8 +696,48 @@ func (h *Handler) triggerUnsolicitedOnStatus(contractID uuid.UUID, status string
 	url := h.resolveOnStatusURL(bapURI)
 	body, _ := json.Marshal(onStatusReq)
 
+	// Record it in the message log (OUTBOUND on_status), ACK or NACK, as
+	// every other Beckn call is.
+	start := time.Now()
+	var respBody []byte
+	var sendErr error
+	defer func() {
+		ack := sqlc.AckStatusACK
+		var errMsg *string
+		if sendErr != nil {
+			ack = sqlc.AckStatusNACK
+			m := sendErr.Error()
+			errMsg = &m
+		}
+		var resp json.RawMessage
+		if json.Valid(respBody) {
+			resp = respBody
+		}
+		dur := int32(time.Since(start).Milliseconds())
+		if err := q.InsertMessageLog(bgCtx, sqlc.InsertMessageLogParams{
+			TransactionID:        pgtype.UUID{Bytes: row.TransactionID, Valid: true},
+			MessageID:            outMsgID,
+			Action:               sqlc.BecknActionOnStatus,
+			Direction:            sqlc.MessageDirectionOUTBOUND,
+			Url:                  &url,
+			BapID:                &row.BapID,
+			BapUri:               &row.BapUri,
+			BppID:                &h.cfg.BppID,
+			BppUri:               &h.cfg.BppURI,
+			NetworkID:            &networkID,
+			AckStatus:            sqlc.NullAckStatus{AckStatus: ack, Valid: true},
+			RequestPayload:       body,
+			ResponsePayload:      resp,
+			ErrorMessage:         errMsg,
+			ProcessingDurationMs: &dur,
+		}); err != nil {
+			h.lh.WithModule("dashboardsvc").Warn().Error(err).Log("failed to write beckn_message_log for on_status")
+		}
+	}()
+
 	req, err := http.NewRequestWithContext(bgCtx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
+		sendErr = err
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -730,11 +745,17 @@ func (h *Handler) triggerUnsolicitedOnStatus(contractID uuid.UUID, status string
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
+		sendErr = err
 		h.lh.WithModule("dashboardsvc").Err().Error(err).Log("failed unsolicited on_status")
 		return
 	}
 	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, _ = io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		sendErr = fmt.Errorf("BAP returned non-2xx status %d: %s", resp.StatusCode, respBody)
+		h.lh.WithModule("dashboardsvc").Warn().Error(sendErr).Log("unsolicited on_status NACKed")
+		return
+	}
 	h.lh.WithModule("dashboardsvc").Info().Log("unsolicited on_status sent: " + string(respBody))
 }
 
