@@ -268,11 +268,14 @@ func (h *Handler) HandleListMessages(c *gin.Context) {
 		limit = 50
 	}
 
-	bppID := h.cfg.BppID
+	// Only the logged-in seller's messages: other sellers on this BPP share
+	// its bpp_id, so that alone would show everyone's.
+	providerID := auth.ProviderIDFromContext(c)
 	q := sqlc.New(h.pool)
 	rows, err := q.ListRecentMessages(c.Request.Context(), sqlc.ListRecentMessagesParams{
-		BppID: &bppID,
-		Limit: int32(limit),
+		BppID:      h.cfg.BppID,
+		ProviderID: &providerID,
+		RowLimit:   int32(limit),
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

@@ -552,26 +552,42 @@ func (q *Queries) ListOffers(ctx context.Context, arg ListOffersParams) ([]ListO
 const listRecentMessages = `-- name: ListRecentMessages :many
 
 SELECT
-    id,
-    message_id,
-    action,
-    direction,
-    ack_status,
-    transaction_id,
-    url,
-    error_message,
-    request_payload,
-    response_payload,
-    created_at
-FROM beckn_message_log
-WHERE bpp_id = $1
-ORDER BY created_at DESC
-LIMIT $2
+    m.id,
+    m.message_id,
+    m.action,
+    m.direction,
+    m.ack_status,
+    m.transaction_id,
+    m.url,
+    m.error_message,
+    m.request_payload,
+    m.response_payload,
+    m.created_at
+FROM beckn_message_log m
+WHERE m.bpp_id = $1::text
+  AND (
+    $2::text IS NULL
+    OR m.transaction_id IN (
+        SELECT c.transaction_id FROM contracts c
+         WHERE c.bpp_id = $1::text AND c.provider_id = $2::text)
+    OR m.request_payload->'message'->>'reconciliationId' IN (
+        SELECT r.id FROM reconciliations r
+         WHERE r.bpp_id = $1::text AND r.provider_id = $2::text)
+    OR EXISTS (
+        SELECT 1
+          FROM catalogs k,
+               jsonb_array_elements(COALESCE(m.request_payload->'message'->'catalogs', '[]'::jsonb)) pc
+         WHERE k.bpp_id = $1::text AND k.provider_id = $2::text
+           AND pc->>'id' IN (k.id, k.bpp_id || '/' || k.id))
+  )
+ORDER BY m.created_at DESC
+LIMIT $3::int
 `
 
 type ListRecentMessagesParams struct {
-	BppID *string `json:"bpp_id"`
-	Limit int32   `json:"limit"`
+	BppID      string  `json:"bpp_id"`
+	ProviderID *string `json:"provider_id"`
+	RowLimit   int32   `json:"row_limit"`
 }
 
 type ListRecentMessagesRow struct {
@@ -591,8 +607,13 @@ type ListRecentMessagesRow struct {
 // ============================================================
 // MESSAGE LOG
 // ============================================================
+// provider_id scopes the log to one seller (the dashboard always passes the
+// session's); NULL lists every seller's. A message belongs to a seller through
+// its order (contracts.transaction_id, from select onwards), its
+// reconciliation batch (message.reconciliationId), or the catalog it
+// publishes (message.catalogs[].id, "<bppId>/<catalogId>").
 func (q *Queries) ListRecentMessages(ctx context.Context, arg ListRecentMessagesParams) ([]ListRecentMessagesRow, error) {
-	rows, err := q.db.Query(ctx, listRecentMessages, arg.BppID, arg.Limit)
+	rows, err := q.db.Query(ctx, listRecentMessages, arg.BppID, arg.ProviderID, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}

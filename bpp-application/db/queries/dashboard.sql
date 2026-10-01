@@ -208,19 +208,39 @@ WHERE offer_id = $1
 -- ============================================================
 
 -- name: ListRecentMessages :many
+-- provider_id scopes the log to one seller (the dashboard always passes the
+-- session's); NULL lists every seller's. A message belongs to a seller through
+-- its order (contracts.transaction_id, from select onwards), its
+-- reconciliation batch (message.reconciliationId), or the catalog it
+-- publishes (message.catalogs[].id, "<bppId>/<catalogId>").
 SELECT
-    id,
-    message_id,
-    action,
-    direction,
-    ack_status,
-    transaction_id,
-    url,
-    error_message,
-    request_payload,
-    response_payload,
-    created_at
-FROM beckn_message_log
-WHERE bpp_id = $1
-ORDER BY created_at DESC
-LIMIT $2;
+    m.id,
+    m.message_id,
+    m.action,
+    m.direction,
+    m.ack_status,
+    m.transaction_id,
+    m.url,
+    m.error_message,
+    m.request_payload,
+    m.response_payload,
+    m.created_at
+FROM beckn_message_log m
+WHERE m.bpp_id = sqlc.arg(bpp_id)::text
+  AND (
+    sqlc.narg(provider_id)::text IS NULL
+    OR m.transaction_id IN (
+        SELECT c.transaction_id FROM contracts c
+         WHERE c.bpp_id = sqlc.arg(bpp_id)::text AND c.provider_id = sqlc.narg(provider_id)::text)
+    OR m.request_payload->'message'->>'reconciliationId' IN (
+        SELECT r.id FROM reconciliations r
+         WHERE r.bpp_id = sqlc.arg(bpp_id)::text AND r.provider_id = sqlc.narg(provider_id)::text)
+    OR EXISTS (
+        SELECT 1
+          FROM catalogs k,
+               jsonb_array_elements(COALESCE(m.request_payload->'message'->'catalogs', '[]'::jsonb)) pc
+         WHERE k.bpp_id = sqlc.arg(bpp_id)::text AND k.provider_id = sqlc.narg(provider_id)::text
+           AND pc->>'id' IN (k.id, k.bpp_id || '/' || k.id))
+  )
+ORDER BY m.created_at DESC
+LIMIT sqlc.arg(row_limit)::int;
