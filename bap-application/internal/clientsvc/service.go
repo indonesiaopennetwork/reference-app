@@ -75,6 +75,7 @@ func (s *ClientService) Discover(ctx context.Context, req *ClientDiscoverRequest
 	txnID := uuid.New()
 	msgID := uuid.New()
 	txnIDStr := txnID.String()
+	s.recordDiscoverer(ctx, txnID, req.BuyerSubject)
 
 	textQuery := req.TextSearch
 	if req.ProviderName != "" {
@@ -121,6 +122,19 @@ func (s *ClientService) Discover(ctx context.Context, req *ClientDiscoverRequest
 // discovery-service's identity being resolvable through onix-bap's
 // network registry (see discovery-service/CONTEXT.md D20/D21) — at the
 // cost of not being the spec's real adapter-mediated topology.
+// recordDiscoverer notes which buyer made a discover, so their message log
+// can show it (see HandleListMessages). Anonymous searches aren't recorded.
+func (s *ClientService) recordDiscoverer(ctx context.Context, txnID uuid.UUID, buyerSubject *string) {
+	if buyerSubject == nil || *buyerSubject == "" {
+		return
+	}
+	if _, err := s.pool.Exec(ctx,
+		`INSERT INTO discover_requests (transaction_id, buyer_subject) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+		txnID, *buyerSubject); err != nil {
+		s.lh.WithModule("beckn_client").Warn().Error(err).Log("failed to record the buyer of a discover")
+	}
+}
+
 // Logs an OUTBOUND row to beckn_message_log capturing both the request and the response.
 func (s *ClientService) DiscoverSync(ctx context.Context, req *ClientDiscoverRequest) (json.RawMessage, error) {
 	if s.cfg.CDSDiscoverURL == "" {
@@ -130,6 +144,7 @@ func (s *ClientService) DiscoverSync(ctx context.Context, req *ClientDiscoverReq
 	start := time.Now()
 	msgID := uuid.New()
 	txnID := uuid.New()
+	s.recordDiscoverer(ctx, txnID, req.BuyerSubject)
 
 	textQuery := req.TextSearch
 	if req.ProviderName != "" {

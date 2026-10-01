@@ -128,6 +128,9 @@ func (h *ClientHandler) HandleDiscover(c *gin.Context) {
 		TextSearch:   q,
 		ProviderName: providerName,
 	}
+	if sub, ok := auth.SubjectFromContext(c); ok {
+		req.BuyerSubject = &sub
+	}
 
 	var (
 		resp json.RawMessage
