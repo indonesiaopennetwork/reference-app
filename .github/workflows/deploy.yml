@@ -1,0 +1,236 @@
+# Deploy to Cloud Run on every push (or merge) to main.
+#
+# Only what changed is redeployed, the same way `task redeploy:<service>`
+# does it: build the image, push it to Artifact Registry tagged with the
+# commit, then `gcloud run services update --image` (Terraform ignores image
+# changes on purpose -- see terraform/README.md "Code change in any service").
+#   - A change under <app>/db/migrations runs that app's migration job first.
+#   - A change to docs/specs/reconcile.yaml (the ION network extension spec)
+#     is copied into the onix-bap / onix-bpp templates (task specs:sync) and
+#     both adapters are redeployed.
+#   - A change to ion-landing-page/index.html uploads it to its GCS bucket.
+# Run it by hand from the Actions tab to redeploy everything.
+#
+# One-time setup -- repository variables (Settings -> Secrets and variables
+# -> Actions -> Variables):
+#   GCP_PROJECT_ID                  the project terraform/ deploys to
+#   GCP_REGION                      optional, default asia-southeast2
+#   GCP_ARTIFACT_REPO               optional, default beckn-app
+#   GCP_WORKLOAD_IDENTITY_PROVIDER  projects/<number>/locations/global/workloadIdentityPools/<pool>/providers/<provider>
+#   GCP_DEPLOY_SERVICE_ACCOUNT      the service account the workflow acts as
+# See docs/deploy-github-actions.md for creating the identity pool and the
+# deploy service account (no JSON key is stored in GitHub).
+
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      deploy_all:
+        description: Redeploy every service, not only what changed
+        type: boolean
+        default: false
+      run_migrations:
+        description: Run both migration jobs
+        type: boolean
+        default: false
+
+# One deploy at a time; a newer push waits rather than cancelling a rollout halfway.
+concurrency:
+  group: deploy-main
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write # Workload Identity Federation
+
+env:
+  PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+  REGION: ${{ vars.GCP_REGION || 'asia-southeast2' }}
+  REPO: ${{ vars.GCP_ARTIFACT_REPO || 'beckn-app' }}
+
+jobs:
+  changes:
+    name: What changed
+    runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.plan.outputs.services }}
+      migrations: ${{ steps.plan.outputs.migrations }}
+      landing_files: ${{ steps.plan.outputs.landing_files }}
+      tag: ${{ steps.plan.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check configuration
+        env:
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          GCP_DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+        run: |
+          missing=""
+          for v in GCP_PROJECT_ID GCP_WORKLOAD_IDENTITY_PROVIDER GCP_DEPLOY_SERVICE_ACCOUNT; do
+            [ -n "${!v}" ] || missing="$missing $v"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Set these repository variables first:$missing (see docs/deploy-github-actions.md)"
+            exit 1
+          fi
+
+      - name: Plan the deploy
+        id: plan
+        env:
+          BEFORE: ${{ github.event.before }}
+          DEPLOY_ALL: ${{ github.event_name == 'workflow_dispatch' && inputs.deploy_all }}
+          RUN_MIGRATIONS: ${{ github.event_name == 'workflow_dispatch' && inputs.run_migrations }}
+        run: |
+          set -euo pipefail
+          # Every deployable image: id|build context|Dockerfile|image name|service:container targets
+          catalog='
+          bap|bap-application|Dockerfile|bap-application|bap:bap
+          bpp|bpp-application|Dockerfile|bpp-application|bpp:bpp
+          bap-frontend|bap-frontend|Dockerfile|bap-frontend|bap-frontend:bap-frontend
+          bpp-frontend|bpp-frontend|Dockerfile|bpp-frontend|bpp-frontend:bpp-frontend
+          onix-bap|onix-bap|Dockerfile|onix-bap|beckn-onix-bap:onix-bap
+          onix-bpp|onix-bpp|Dockerfile|onix-bpp|beckn-onix-bpp:onix-bpp
+          onix-catalog-publish|onix-catalog-publish|Dockerfile|onix-catalog-publish|onix-catalog-publish:onix-catalog-publish
+          dedi-static-server|dedi-static-server|Dockerfile|dedi-static-server|dedi-static-server:dedi-static-server
+          landing-page|landing-page|Dockerfile|landing-page|landing-page:landing-page
+          ion-landing-page|ion-landing-page|Dockerfile.cloud|ion-landing-page|ion-landing-page:ion-landing-page
+          discovery-service|discovery-service|Dockerfile|discovery-service|discovery-service:discovery-service
+          otel-collector|otel-collector|Dockerfile|otel-collector|beckn-onix-bap:otel-collector beckn-onix-bpp:otel-collector
+          '
+
+          # Files changed by this push. A first push or a force-push has no
+          # usable "before" commit, so everything counts as changed.
+          if [ "$DEPLOY_ALL" = "true" ] || [ -z "$BEFORE" ] || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            all=true; changed=""
+          else
+            all=false; changed="$(git diff --name-only "$BEFORE" "$GITHUB_SHA")"
+          fi
+          echo "Changed files:"; echo "${changed:-(deploying everything)}"
+          touched() { [ "$all" = true ] || grep -qE "$1" <<<"$changed"; }
+
+          services="[]"
+          while IFS='|' read -r id ctx dockerfile image targets; do
+            [ -n "$id" ] || continue
+            id="$(echo "$id" | xargs)"
+            pattern="^${ctx}/"
+            case "$id" in
+              # The ION spec is copied into the onix images at build time.
+              onix-bap|onix-bpp) pattern="^(${ctx}/|docs/specs/reconcile\.yaml$)" ;;
+              # index.html is served from the bucket, not baked into the image.
+              ion-landing-page) pattern="^ion-landing-page/(Dockerfile\.cloud|nginx\.conf\.template|env\.sh)$" ;;
+            esac
+            if touched "$pattern"; then
+              services="$(jq -c --arg id "$id" --arg ctx "$ctx" --arg df "$dockerfile" --arg image "$image" --arg targets "$targets" \
+                '. + [{id: $id, context: $ctx, dockerfile: $df, image: $image, targets: $targets}]' <<<"$services")"
+            fi
+          done <<<"$catalog"
+
+          migrations="[]"
+          for app in bap bpp; do
+            if [ "$RUN_MIGRATIONS" = "true" ] || touched "^${app}-application/db/migrations/"; then
+              migrations="$(jq -c --arg app "$app" '. + [$app]' <<<"$migrations")"
+            fi
+          done
+
+          landing_files=false
+          touched '^ion-landing-page/index\.html$' && landing_files=true
+
+          echo "services=$services" >> "$GITHUB_OUTPUT"
+          echo "migrations=$migrations" >> "$GITHUB_OUTPUT"
+          echo "landing_files=$landing_files" >> "$GITHUB_OUTPUT"
+          echo "tag=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Deploy plan for \`$(git rev-parse --short HEAD)\`"
+            echo "- Services: $(jq -r 'map(.id) | if length == 0 then "none" else join(", ") end' <<<"$services")"
+            echo "- Migrations: $(jq -r 'if length == 0 then "none" else map("migrate-" + .) | join(", ") end' <<<"$migrations")"
+            echo "- Landing page files: $landing_files"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  migrate:
+    name: Migrate ${{ matrix.app }}
+    needs: changes
+    if: needs.changes.outputs.migrations != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        app: ${{ fromJSON(needs.changes.outputs.migrations) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Build and push the migration image
+        run: |
+          gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+          image="$REGION-docker.pkg.dev/$PROJECT_ID/$REPO/${{ matrix.app }}-application-migrate:${{ needs.changes.outputs.tag }}"
+          docker build -t "$image" -f "${{ matrix.app }}-application/Dockerfile.migrate" "${{ matrix.app }}-application"
+          docker push "$image"
+          echo "IMAGE=$image" >> "$GITHUB_ENV"
+      - name: Run migrate-${{ matrix.app }}
+        run: |
+          gcloud run jobs update "migrate-${{ matrix.app }}" --project="$PROJECT_ID" --region="$REGION" --image="$IMAGE"
+          gcloud run jobs execute "migrate-${{ matrix.app }}" --project="$PROJECT_ID" --region="$REGION" --wait
+
+  deploy:
+    name: Deploy ${{ matrix.service.id }}
+    needs: [changes, migrate]
+    # Runs after the migrations, or without them when none changed; never
+    # after a failed migration.
+    if: >-
+      !cancelled() && needs.changes.result == 'success' &&
+      needs.changes.outputs.services != '[]' &&
+      (needs.migrate.result == 'success' || needs.migrate.result == 'skipped')
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJSON(needs.changes.outputs.services) }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Sync the ION spec into the onix templates
+        if: matrix.service.id == 'onix-bap' || matrix.service.id == 'onix-bpp'
+        run: cp docs/specs/reconcile.yaml "${{ matrix.service.context }}/templates/reconcile.yaml"
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Build and push
+        run: |
+          gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+          image="$REGION-docker.pkg.dev/$PROJECT_ID/$REPO/${{ matrix.service.image }}:${{ needs.changes.outputs.tag }}"
+          docker build -t "$image" -f "${{ matrix.service.context }}/${{ matrix.service.dockerfile }}" "${{ matrix.service.context }}"
+          docker push "$image"
+          echo "IMAGE=$image" >> "$GITHUB_ENV"
+      - name: Roll out a new revision
+        run: |
+          for target in ${{ matrix.service.targets }}; do
+            service="${target%%:*}"; container="${target##*:}"
+            echo "==> $service (container $container)"
+            gcloud run services update "$service" --project="$PROJECT_ID" --region="$REGION" \
+              --container="$container" --image="$IMAGE"
+          done
+
+  landing-files:
+    name: Upload ion-landing-page files
+    needs: changes
+    if: needs.changes.outputs.landing_files == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Upload index.html
+        run: gcloud storage cp ion-landing-page/index.html "gs://$PROJECT_ID-ion-landing-page-static/index.html"
