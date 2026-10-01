@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import Tour from './Tour.jsx';
 import { useI18n, rich, LanguageToggle, tNow, localeNow } from './i18n.jsx';
-import { captureTokenFromUrl, getToken, clearToken, redirectToLogin, logout } from './auth.js';
+import { captureTokenFromUrl, getToken, getProviderId, clearToken, redirectToLogin, logout } from './auth.js';
 
 // BPP target, network ID, and BAP identity are all server-side config (BAP .env).
 // The frontend only needs the API base path.
@@ -89,7 +89,7 @@ function parseCatalogs(data) {
       }
 
       // Seller / provider
-      const provider = offer.provider || {};
+      const provider = offer.provider || cat.provider || res.provider || {};
       const sellerName = provider.descriptor?.name || '';
       const sellerAddress = provider.availableAt?.[0]?.address;
 
@@ -1960,6 +1960,7 @@ export default function App() {
   const [catalog, setCatalog] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [providerQuery, setProviderQuery] = useState('');
   const [cart, setCart] = useState([]);
   const [transaction, setTransaction] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -2000,16 +2001,18 @@ export default function App() {
   // if it was already in flight past that point, its AbortError is
   // ignored rather than clearing what the newer search just showed.
   const discoverAbortRef = useRef(null);
-  const discover = useCallback((q = '') => {
+  const discover = useCallback((q = '', provider = '') => {
     discoverAbortRef.current?.abort();
     const controller = new AbortController();
     discoverAbortRef.current = controller;
 
     setIsSearching(true);
     setError(null);
-    const path = q.trim()
-      ? `/discover?q=${encodeURIComponent(q.trim())}`
-      : `/discover`;
+    let path = `/discover`;
+    const params = new URLSearchParams();
+    if (q.trim()) params.append('q', q.trim());
+    if (provider.trim()) params.append('provider_name', provider.trim());
+    if (params.toString()) path += `?${params.toString()}`;
 
     apiFetch(path, { signal: controller.signal })
       .then(r => { if (!r.ok) throw new Error(`Status ${r.status}`); return r.json(); })
@@ -2055,7 +2058,14 @@ export default function App() {
     const v = e.target.value;
     setSearchQuery(v);
     clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => discover(v), 500);
+    debounceRef.current = setTimeout(() => discover(v, providerQuery), 500);
+  };
+
+  const handleProviderChange = e => {
+    const v = e.target.value;
+    setProviderQuery(v);
+    clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => discover(searchQuery, v), 500);
   };
 
   /* ── Derived: categories + filtered + sorted catalog ─────────────────── */
@@ -2063,12 +2073,22 @@ export default function App() {
 
   const visibleCatalog = catalog
     .filter(p => activeCategory === 'All' || p.category === activeCategory)
+    .filter(p => !providerQuery.trim() || p.sellerName.toLowerCase().includes(providerQuery.toLowerCase().trim()))
     .sort((a, b) => {
       if (sortBy === 'price_asc') return a.price - b.price;
       if (sortBy === 'price_desc') return b.price - a.price;
       if (sortBy === 'name') return a.name.localeCompare(b.name);
       return 0;
     });
+
+  const myProviderId = getProviderId();
+  const myResources = visibleCatalog.filter(p => p.providerId === myProviderId);
+  const otherResources = visibleCatalog.filter(p => p.providerId !== myProviderId);
+
+  const catalogSections = [
+    { title: 'My Resources', icon: <User className="w-5 h-5 text-emerald-400" />, items: myResources },
+    { title: 'All other resources', icon: <Package className="w-5 h-5 text-sky-400" />, items: otherResources }
+  ];
 
   /* ── Cart ─────────────────────────────────────────────────────────────── */
   const updateQty = (id, delta) =>
@@ -2316,8 +2336,8 @@ export default function App() {
 
           {/* Phones: the language switch sits beside the search box. */}
           <div className="order-last sm:order-none basis-full sm:basis-auto flex-1 max-w-2xl mx-auto flex items-center gap-2">
-          <form data-tour="search" onSubmit={e => { e.preventDefault(); clearTimeout(debounceRef.current); discover(searchQuery); }} className="flex-1 min-w-0">
-            <div className="search-glow relative flex items-center bg-white/[0.06] border border-white/10 rounded-xl transition-all duration-300">
+          <form data-tour="search" onSubmit={e => { e.preventDefault(); clearTimeout(debounceRef.current); discover(searchQuery, providerQuery); }} className="flex-1 min-w-0 flex gap-2">
+            <div className="search-glow relative flex-1 flex items-center bg-white/[0.06] border border-white/10 rounded-xl transition-all duration-300">
               {isSearching
                 ? <Loader2 className="absolute left-3 w-4 h-4 text-emerald-400 animate-spin" />
                 : <Search className="absolute left-3 w-4 h-4 text-slate-400" />
@@ -2328,7 +2348,21 @@ export default function App() {
                 className="w-full bg-transparent pl-9 pr-4 py-2.5 text-sm text-white placeholder-slate-500 outline-none"
               />
               {searchQuery && (
-                <button type="button" onClick={() => { setSearchQuery(''); discover(''); }}
+                <button type="button" onClick={() => { setSearchQuery(''); discover('', providerQuery); }}
+                  className="absolute right-3 text-slate-400 hover:text-white transition-colors">
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+            <div className="search-glow relative w-48 flex items-center bg-white/[0.06] border border-white/10 rounded-xl transition-all duration-300 hidden sm:flex">
+              <Store className="absolute left-3 w-4 h-4 text-slate-400" />
+              <input
+                type="text" value={providerQuery} onChange={handleProviderChange}
+                placeholder="Provider name…"
+                className="w-full bg-transparent pl-9 pr-4 py-2.5 text-sm text-white placeholder-slate-500 outline-none"
+              />
+              {providerQuery && (
+                <button type="button" onClick={() => { setProviderQuery(''); discover(searchQuery, ''); }}
                   className="absolute right-3 text-slate-400 hover:text-white transition-colors">
                   <X className="w-4 h-4" />
                 </button>
@@ -2461,7 +2495,7 @@ export default function App() {
             <Package className="w-14 h-14 opacity-20" />
             <p className="font-medium">{t('Could not reach the network.')}</p>
             <p className="text-sm opacity-60">{t('Check your connection and try again.')}</p>
-            <button onClick={() => discover(searchQuery)}
+            <button onClick={() => discover(searchQuery, providerQuery)}
               className="mt-1 px-5 py-2 rounded-xl text-sm font-semibold text-white transition-all"
               style={{ background: 'linear-gradient(135deg,#00b8e6,#1e2fa0)' }}>
               {t('Retry')}
@@ -2485,114 +2519,130 @@ export default function App() {
           </div>
         )}
 
-        {visibleCatalog.length > 0 && (
-          <motion.div layout className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
-            <AnimatePresence>
-              {visibleCatalog.map((product, i) => {
-                const inCart = cart.find(c => c.id === product.id);
-                const cardKey = `${product.bppId}::${product.id}`;
-                return (
-                  <motion.div
-                    key={cardKey} layout
-                    initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, scale: 0.95 }}
-                    transition={{ duration: 0.22, delay: i * 0.025 }}
-                    className="product-card glass rounded-2xl overflow-hidden flex flex-col cursor-pointer group"
-                    onClick={() => setSelectedProduct(product)}
-                  >
-                    {/* Image */}
-                    <div className="relative h-44 overflow-hidden bg-slate-800/60 shrink-0">
-                      <img
-                        src={product.image} alt={product.name}
-                        className="w-full h-full object-cover opacity-85 group-hover:opacity-100 group-hover:scale-105 transition-all duration-500"
-                        onError={e => { e.target.src = FALLBACK_IMG; }}
-                      />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent" />
-                      {/* Category badge */}
-                      <span className="absolute top-2.5 left-2.5 bg-black/55 backdrop-blur-md text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-full border border-white/10 text-slate-300">
-                        {product.category.length > 18 ? product.category.slice(0, 18) + '…' : product.category}
-                      </span>
-                      {/* COD badge */}
-                      {product.codAvailable && (
-                        <span className="absolute top-2.5 right-2.5 bg-amber-500/90 text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full text-white">
-                          {t('COD')}
+        {visibleCatalog.length > 0 && catalogSections.map((section, sIdx) => (
+          <div key={sIdx} className={`rounded-3xl p-6 sm:p-8 border border-white/[0.05] bg-white/[0.02] ${sIdx > 0 ? "mt-8" : ""}`}>
+            {section.title && (
+              <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-3">
+                <div className="p-2 rounded-xl bg-white/[0.04]">
+                  {section.icon}
+                </div>
+                {section.title}
+              </h2>
+            )}
+            {section.items.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-10 bg-white/[0.01] rounded-2xl border border-dashed border-white/10">
+                <p className="text-slate-400 text-sm">{t('No resources found in this section.')}</p>
+              </div>
+            ) : (
+              <motion.div layout className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+              <AnimatePresence>
+                {section.items.map((product, i) => {
+                  const inCart = cart.find(c => c.id === product.id);
+                  const cardKey = `${product.bppId}::${product.id}`;
+                  return (
+                    <motion.div
+                      key={cardKey} layout
+                      initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.95 }}
+                      transition={{ duration: 0.22, delay: i * 0.025 }}
+                      className="product-card glass rounded-2xl overflow-hidden flex flex-col cursor-pointer group"
+                      onClick={() => setSelectedProduct(product)}
+                    >
+                      {/* Image */}
+                      <div className="relative h-44 overflow-hidden bg-slate-800/60 shrink-0">
+                        <img
+                          src={product.image} alt={product.name}
+                          className="w-full h-full object-cover opacity-85 group-hover:opacity-100 group-hover:scale-105 transition-all duration-500"
+                          onError={e => { e.target.src = FALLBACK_IMG; }}
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent" />
+                        {/* Category badge */}
+                        <span className="absolute top-2.5 left-2.5 bg-black/55 backdrop-blur-md text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-full border border-white/10 text-slate-300">
+                          {product.category.length > 18 ? product.category.slice(0, 18) + '…' : product.category}
                         </span>
-                      )}
-                      {/* Offer validity */}
-                      {product.offerValidity && (
-                        <span className="absolute bottom-2.5 left-2.5 text-[10px] text-slate-300 bg-black/50 backdrop-blur px-2 py-0.5 rounded-full flex items-center gap-1">
-                          <Calendar className="w-2.5 h-2.5" /> {t('Till {date}', { date: fmtDay(product.offerValidity) })}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Body */}
-                    <div className="p-3.5 flex flex-col flex-grow gap-1.5">
-                      <h3 className="text-sm font-semibold leading-snug line-clamp-2">{product.name}</h3>
-                      {product.shortDesc && (
-                        <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed">{product.shortDesc}</p>
-                      )}
-
-                      {/* Seller + delivery info */}
-                      <div className="flex flex-col gap-1 mt-0.5">
-                        {product.sellerName && (
-                          <p className="text-[11px] text-slate-500 flex items-center gap-1 truncate">
-                            <Store className="w-3 h-3 shrink-0" /> {product.sellerName}
-                          </p>
+                        {/* COD badge */}
+                        {product.codAvailable && (
+                          <span className="absolute top-2.5 right-2.5 bg-amber-500/90 text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full text-white">
+                            {t('COD')}
+                          </span>
                         )}
-                        <div className="flex gap-1.5 flex-wrap">
-                          {product.deliveryRange && (
-                            <span className="text-[10px] text-blue-400 flex items-center gap-0.5">
-                              <MapPin className="w-2.5 h-2.5" />{product.deliveryRange}
-                            </span>
+                        {/* Offer validity */}
+                        {product.offerValidity && (
+                          <span className="absolute bottom-2.5 left-2.5 text-[10px] text-slate-300 bg-black/50 backdrop-blur px-2 py-0.5 rounded-full flex items-center gap-1">
+                            <Calendar className="w-2.5 h-2.5" /> {t('Till {date}', { date: fmtDay(product.offerValidity) })}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Body */}
+                      <div className="p-3.5 flex flex-col flex-grow gap-1.5">
+                        <h3 className="text-sm font-semibold leading-snug line-clamp-2">{product.name}</h3>
+                        {product.shortDesc && (
+                          <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed">{product.shortDesc}</p>
+                        )}
+
+                        {/* Seller + delivery info */}
+                        <div className="flex flex-col gap-1 mt-0.5">
+                          {product.sellerName && (
+                            <p className="text-[11px] text-slate-500 flex items-center gap-1 truncate">
+                              <Store className="w-3 h-3 shrink-0" /> {product.sellerName}
+                            </p>
                           )}
-                          {product.deliveryHours && (
-                            <span className="text-[10px] text-slate-500 flex items-center gap-0.5">
-                              <Clock className="w-2.5 h-2.5" />{product.deliveryHours}
-                            </span>
+                          <div className="flex gap-1.5 flex-wrap">
+                            {product.deliveryRange && (
+                              <span className="text-[10px] text-blue-400 flex items-center gap-0.5">
+                                <MapPin className="w-2.5 h-2.5" />{product.deliveryRange}
+                              </span>
+                            )}
+                            {product.deliveryHours && (
+                              <span className="text-[10px] text-slate-500 flex items-center gap-0.5">
+                                <Clock className="w-2.5 h-2.5" />{product.deliveryHours}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Price + cart controls */}
+                        <div className="mt-auto pt-2.5 flex items-center justify-between gap-2 border-t border-white/[0.05]">
+                          <span className="text-base font-bold">{fmt(product.price, product.currency)}</span>
+
+                          {inCart ? (
+                            <div
+                              onClick={e => e.stopPropagation()}
+                              className="flex items-center gap-0 rounded-xl overflow-hidden border"
+                              style={{ borderColor: 'rgba(0,184,230,0.3)', background: 'rgba(0,184,230,0.1)' }}
+                            >
+                              <button onClick={() => updateQty(product.id, -1)}
+                                className="w-8 h-8 flex items-center justify-center hover:bg-white/10 transition-colors"
+                                style={{ color: '#00b8e6' }}>
+                                <Minus className="w-3 h-3" />
+                              </button>
+                              <span className="w-7 text-center text-sm font-bold" style={{ color: '#00b8e6' }}>{inCart.qty}</span>
+                              <button onClick={() => updateQty(product.id, 1)}
+                                className="w-8 h-8 flex items-center justify-center hover:bg-white/10 transition-colors"
+                                style={{ color: '#00b8e6' }}>
+                                <Plus className="w-3 h-3" />
+                              </button>
+                            </div>
+                          ) : (
+                            <button data-tour={sIdx === 0 && i === 0 ? 'add-first' : undefined}
+                              onClick={e => { e.stopPropagation(); addToCart(product); }}
+                              className="flex items-center gap-1 px-3.5 py-1.5 rounded-xl text-xs font-bold text-white transition-all active:scale-95 shadow"
+                              style={{ background: 'linear-gradient(135deg,#00b8e6,#1e2fa0)' }}
+                            >
+                              <Plus className="w-3.5 h-3.5" /> {t('ADD')}
+                            </button>
                           )}
                         </div>
                       </div>
-
-                      {/* Price + cart controls */}
-                      <div className="mt-auto pt-2.5 flex items-center justify-between gap-2 border-t border-white/[0.05]">
-                        <span className="text-base font-bold">{fmt(product.price, product.currency)}</span>
-
-                        {inCart ? (
-                          <div
-                            onClick={e => e.stopPropagation()}
-                            className="flex items-center gap-0 rounded-xl overflow-hidden border"
-                            style={{ borderColor: 'rgba(0,184,230,0.3)', background: 'rgba(0,184,230,0.1)' }}
-                          >
-                            <button onClick={() => updateQty(product.id, -1)}
-                              className="w-8 h-8 flex items-center justify-center hover:bg-white/10 transition-colors"
-                              style={{ color: '#00b8e6' }}>
-                              <Minus className="w-3 h-3" />
-                            </button>
-                            <span className="w-7 text-center text-sm font-bold" style={{ color: '#00b8e6' }}>{inCart.qty}</span>
-                            <button onClick={() => updateQty(product.id, 1)}
-                              className="w-8 h-8 flex items-center justify-center hover:bg-white/10 transition-colors"
-                              style={{ color: '#00b8e6' }}>
-                              <Plus className="w-3 h-3" />
-                            </button>
-                          </div>
-                        ) : (
-                          <button data-tour={i === 0 ? 'add-first' : undefined}
-                            onClick={e => { e.stopPropagation(); addToCart(product); }}
-                            className="flex items-center gap-1 px-3.5 py-1.5 rounded-xl text-xs font-bold text-white transition-all active:scale-95 shadow"
-                            style={{ background: 'linear-gradient(135deg,#00b8e6,#1e2fa0)' }}
-                          >
-                            <Plus className="w-3.5 h-3.5" /> {t('ADD')}
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </motion.div>
-                );
-              })}
-            </AnimatePresence>
-          </motion.div>
-        )}
+                    </motion.div>
+                  );
+                })}
+              </AnimatePresence>
+              </motion.div>
+            )}
+          </div>
+        ))}
       </main>
 
       {/* ── Sticky cart footer (Swiggy-style) ────────────────────────────── */}

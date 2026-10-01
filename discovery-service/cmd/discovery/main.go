@@ -55,7 +55,13 @@ func main() {
 	// key, every direction -- see handlers.AckSigner.
 	discoverHandler := handlers.NewDiscoverHandler(svc, cfg.MaxRequestBodyBytes, logger, ackSigner)
 
-	verifyDiscover := handlers.VerifyMiddleware(buildVerifier(cfg, logger), ackSigner, cfg.MaxRequestBodyBytes, logger)
+	verifier := buildVerifier(cfg, logger)
+	var sigVerifier handlers.SignatureVerifier
+	if verifier != nil {
+		sigVerifier = verifier
+	}
+
+	verifyDiscover := handlers.VerifyMiddleware(sigVerifier, ackSigner, cfg.MaxRequestBodyBytes, logger)
 
 	mux := http.NewServeMux()
 	mux.Handle("POST /discover", verifyDiscover(discoverHandler))
