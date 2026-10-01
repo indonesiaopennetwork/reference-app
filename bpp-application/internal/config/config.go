@@ -34,9 +34,9 @@ type Config struct {
 	BppCallerURL string
 
 	// SettlementBasis / SettlementWindow are this seller's payout terms,
-	// written into every settlement's settlementAttributes (ONDC-style,
-	// pending their addition to the ION schema): the event that starts the
-	// payout (DELIVERY | SHIPMENT | RETURN_WINDOW_EXPIRY) and the ISO 8601
+	// written into every settlement's settlementAttributes (ION
+	// TradeSettlement): the event that starts the payout (ON_CONFIRMATION |
+	// AFTER_SHIPMENT | AFTER_DELIVERY | AFTER_RETURN_WINDOW) and the ISO 8601
 	// duration after it within which settlement happens.
 	SettlementBasis  string
 	SettlementWindow string
@@ -107,7 +107,7 @@ func Load() (*Config, error) {
 		NetworkID:    os.Getenv("NETWORK_ID"),
 		BppCallerURL: os.Getenv("BPP_CALLER_URL"),
 
-		SettlementBasis:  getEnv("SETTLEMENT_BASIS", "DELIVERY"),
+		SettlementBasis:  NormalizeSettlementBasis(getEnv("SETTLEMENT_BASIS", "AFTER_DELIVERY")),
 		SettlementWindow: getEnv("SETTLEMENT_WINDOW", "P1D"),
 
 		CDSPublishURL:  os.Getenv("CDS_PUBLISH_URL"),
@@ -185,4 +185,21 @@ func getEnv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// legacySettlementBasis maps the names used before ION's TradeSettlement
+// schema defined settlementBasis to ION's.
+var legacySettlementBasis = map[string]string{
+	"DELIVERY":             "AFTER_DELIVERY",
+	"SHIPMENT":             "AFTER_SHIPMENT",
+	"RETURN_WINDOW_EXPIRY": "AFTER_RETURN_WINDOW",
+}
+
+// NormalizeSettlementBasis returns ION's name for a settlement basis, so a
+// config or stored settlement that still uses an old name keeps working.
+func NormalizeSettlementBasis(basis string) string {
+	if ion, ok := legacySettlementBasis[basis]; ok {
+		return ion
+	}
+	return basis
 }

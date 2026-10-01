@@ -24,7 +24,7 @@ info:
       gateway releases.
 
     - Refund *after* the contract is reconciled (e.g. a return inside the
-      return window but after a `DELIVERY` / `P1D` settlement) — the funds
+      return window but after a `AFTER_DELIVERY` / `P1D` settlement) — the funds
       are already with the BPP, so the BPP refunds the buyer from its own
       account (`refund.source: PROVIDER`). It is reported in the next batch
       but does not change what the gateway releases.
@@ -42,9 +42,9 @@ info:
 
     **When a contract is due.** Every settlement carries the seller's payout
     terms in `settlementAttributes`: `settlementBasis` (the event that starts
-    the payout — `DELIVERY`, `SHIPMENT` or `RETURN_WINDOW_EXPIRY`) and
+    the payout — `ON_CONFIRMATION`, `AFTER_SHIPMENT`, `AFTER_DELIVERY` or `AFTER_RETURN_WINDOW`, as in ION TradeSettlement) and
     `settlementWindow` (an ISO 8601 duration after that event). A contract is
-    due on `basis event time + settlementWindow`; e.g. `DELIVERY` / `P1D` is
+    due on `basis event time + settlementWindow`; e.g. `AFTER_DELIVERY` / `P1D` is
     one day after delivery. A contract cancelled before its basis event ever
     happens is due at `cancellation time + settlementWindow`. A contract is
     reconciled once; a settlement added to it afterwards (e.g. a return's
@@ -302,7 +302,7 @@ components:
           format: date
         settlementBasis:
           type: string
-          enum: [DELIVERY, SHIPMENT, RETURN_WINDOW_EXPIRY]
+          enum: [ON_CONFIRMATION, AFTER_SHIPMENT, AFTER_DELIVERY, AFTER_RETURN_WINDOW]
           description: The payout basis of the contracts in the batch.
         settlementWindow:
           type: string

@@ -8,7 +8,7 @@ import {
   Activity, Zap, Store, Calendar, Tag, BarChart2, Inbox,
   ArrowRight, Circle, Star, Ticket, Ban, Wand2,
   BookOpen, FolderOpen, Send, ArrowLeft, ExternalLink, LogOut,
-  ChevronDown, Copy, Check, Scale, Pencil, Compass,
+  ChevronDown, Copy, Check, Scale, Pencil, Compass, Lock,
 } from 'lucide-react'
 import { captureTokenFromUrl, getToken, clearToken, redirectToLogin, logout } from './auth.js'
 import Tour from './Tour.jsx'
@@ -220,9 +220,9 @@ const tourSteps = t => [
     body: <p>{rich(t('Click <b>Add Offer to Catalog</b>.'))}</p> },
   { eyebrow: t('Publish · {n} of 4', { n: 4 }), target: 'publish', until: () => !!document.querySelector('[data-tour="published-badge"]'), waitLabel: t('Click Publish'),
     title: t('Publish to Network'),
-    body: <><p>{rich(t('Your catalog now has a product with an offer. Click <b>Publish to Network</b> and confirm.'))}</p><p className="text-slate-400">{t('Buyer apps on the network can then find it and place orders.')}</p></> },
+    body: <><p>{rich(t('Your catalog now has a product with an offer. Click <b>Publish to Network</b> and confirm.'))}</p><p className="text-slate-400">{t('Buyer apps on the network can then find it and place orders. Once published, the catalog is locked and can no longer be edited.')}</p></> },
   { eyebrow: t('Published'), target: 'published-badge', title: t("You're live"),
-    body: <><p>{rich(t('Your catalog is <b>Published</b>: buyers can find it now.'))}</p><p className="text-slate-400">{t('You can edit any product or offer here. Publish again to send the changes. Add your own catalogs the same way.')}</p></> },
+    body: <><p>{rich(t('Your catalog is <b>Published</b>: buyers can find it now.'))}</p><p className="text-slate-400">{t('A published catalog is locked: its products and offers can no longer be changed. To sell something different, create a new catalog the same way.')}</p></> },
 
   { id: 'orders', eyebrow: t('Orders'), page: 'orders', target: 'nav-orders', title: t('Orders'),
     body: <><p>{rich(t('Orders arrive here once a buyer confirms. Open one and move it <b>Packed → Shipped</b>; it becomes <b>Delivered</b> automatically.'))}</p><p className="text-slate-400">{t("Cancellations and returns follow your offer's policies. You'll see the outcome here.")}</p></> },
@@ -246,21 +246,22 @@ function Sidebar({ active, onNav, open, onClose, onTour }) {
   const navContent = (
     <>
       {/* Logo */}
-      <div className="px-5 pt-5 pb-4 border-b border-white/[0.06] flex items-center justify-between">
-        <div>
-          <span className="text-lg font-bold text-white tracking-tight">
+      <div className="px-5 pt-5 pb-4 border-b border-white/[0.06]">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-lg font-bold text-white tracking-tight truncate">
             ION <span className="font-normal text-slate-400">{t('Reference App')}</span>
           </span>
-          <div className="mt-3 flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <p className="text-[10px] text-slate-500 font-medium">{t('BPP Admin · ION Network')}</p>
-          </div>
+          {onClose && (
+            <button onClick={onClose} className="lg:hidden p-1.5 rounded-lg text-slate-500 hover:text-white">
+              <X size={18} />
+            </button>
+          )}
         </div>
-        {onClose && (
-          <button onClick={onClose} className="lg:hidden p-1.5 rounded-lg text-slate-500 hover:text-white">
-            <X size={18} />
-          </button>
-        )}
+        <div className="mt-3 flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+          <p className="text-[10px] text-slate-500 font-medium truncate">{t('BPP Admin · ION Network')}</p>
+          <LanguageToggle className="ml-auto" />
+        </div>
       </div>
 
       {/* Nav */}
@@ -290,13 +291,10 @@ function Sidebar({ active, onNav, open, onClose, onTour }) {
 
       {/* Footer */}
       <div className="px-4 py-3 border-t border-white/[0.06] space-y-3">
-        <div className="flex gap-2">
-          <button data-tour="tour-button" onClick={() => { onClose?.(); onTour?.() }}
-            className="flex-1 min-w-0 flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-cyan-300 transition-all bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/20 hover:border-cyan-500/40">
-            <Compass size={13} className="shrink-0" /> <span className="truncate">{t('Take the tour')}</span>
-          </button>
-          <LanguageToggle />
-        </div>
+        <button data-tour="tour-button" onClick={() => { onClose?.(); onTour?.() }}
+          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-cyan-300 transition-all bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/20 hover:border-cyan-500/40">
+          <Compass size={13} className="shrink-0" /> <span className="truncate">{t('Take the tour')}</span>
+        </button>
         <a
           href={`${window.__env__?.BAP_URL || import.meta.env.VITE_BAP_URL || "#"}?token=${encodeURIComponent(getToken() || '')}`}
           target="_blank"
@@ -1624,6 +1622,10 @@ function PublishPage({ onNav }) {
   const [loading, setLoading] = useState(false)
   const [autoFillIdx, setAutoFillIdx] = useState(0)
   const ownProvider = useOwnProvider()
+  // The provider is the seller's own account, never typed in.
+  useEffect(() => {
+    if (ownProvider) setForm(f => ({ ...f, provider_id: ownProvider.id, provider_name: ownProvider.name }))
+  }, [ownProvider])
   // track which resource/offer "advanced" sections are expanded
   const [resOpen, setResOpen] = useState({})
   const [offOpen, setOffOpen] = useState({})
@@ -1773,10 +1775,12 @@ function PublishPage({ onNav }) {
                   <input className={inputCls} value={form.catalog_name} onChange={e => setField('catalog_name', e.target.value)} placeholder={t('Venky Bazaar Catalog')} required />
                 </div>
                 <div><label className={labelCls}>{t('Provider ID *')}</label>
-                  <input className={inputCls} value={form.provider_id} onChange={e => setField('provider_id', e.target.value)} placeholder="provider-venky-bazaar" required />
+                  <input className={inputCls + ' opacity-60 cursor-not-allowed'} value={form.provider_id} readOnly placeholder={t('Loading…')}
+                    title={t('Your provider comes from your account')} />
                 </div>
                 <div><label className={labelCls}>{t('Provider Name *')}</label>
-                  <input className={inputCls} value={form.provider_name} onChange={e => setField('provider_name', e.target.value)} placeholder="Venky.Mahadevan@Bazaar" required />
+                  <input className={inputCls + ' opacity-60 cursor-not-allowed'} value={form.provider_name} readOnly placeholder={t('Loading…')}
+                    title={t('Your provider comes from your account')} />
                 </div>
                 <div className="col-span-2">
                   <label className={labelCls}>{t('Catalog Type')} <span className="text-slate-600 font-normal">({t('optional')})</span></label>
@@ -3066,14 +3070,22 @@ function CatalogsPage({ onNav }) {
                         className="px-2.5 py-1 rounded-md text-xs font-medium border border-white/[0.10] text-slate-300 hover:text-white hover:border-white/30 transition-colors flex items-center gap-1">
                         <Eye size={11} /> {t('View')}
                       </button>
-                      <button onClick={() => onNav('add_product', { catalogId: cat.id })}
-                        className="px-2.5 py-1 rounded-md text-xs font-medium border border-blue-500/30 text-blue-400 hover:bg-blue-500/10 transition-colors flex items-center gap-1">
-                        <Plus size={11} /> {t('Product')}
-                      </button>
-                      <button onClick={() => handlePublish(cat.id)} disabled={publishing === cat.id}
-                        className="px-2.5 py-1 rounded-md text-xs font-medium border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 transition-colors flex items-center gap-1 disabled:opacity-40">
-                        {publishing === cat.id ? <RefreshCw size={11} className="animate-spin" /> : <Send size={11} />} {t('Publish')}
-                      </button>
+                      {cat.isPublished ? (
+                        <span className="px-2.5 py-1 text-xs text-slate-500 flex items-center gap-1" title={t('Published catalogs can no longer be edited')}>
+                          <Lock size={11} /> {t('Locked')}
+                        </span>
+                      ) : (
+                        <>
+                          <button onClick={() => onNav('add_product', { catalogId: cat.id })}
+                            className="px-2.5 py-1 rounded-md text-xs font-medium border border-blue-500/30 text-blue-400 hover:bg-blue-500/10 transition-colors flex items-center gap-1">
+                            <Plus size={11} /> {t('Product')}
+                          </button>
+                          <button onClick={() => handlePublish(cat.id)} disabled={publishing === cat.id}
+                            className="px-2.5 py-1 rounded-md text-xs font-medium border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 transition-colors flex items-center gap-1 disabled:opacity-40">
+                            {publishing === cat.id ? <RefreshCw size={11} className="animate-spin" /> : <Send size={11} />} {t('Publish')}
+                          </button>
+                        </>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -3130,6 +3142,10 @@ function CreateCatalogPage({ onNav }) {
   const inputCls = 'w-full px-3 py-2 rounded-lg text-sm text-white placeholder-slate-600 border border-white/[0.08] bg-slate-900 focus:outline-none focus:border-blue-500/50 transition-colors'
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+  // The provider is the seller's own account, never typed in.
+  useEffect(() => {
+    if (ownProvider) setForm(f => ({ ...f, provider_id: ownProvider.id, provider_name: ownProvider.name }))
+  }, [ownProvider])
 
   const handleAutoFill = () => {
     const seed = CATALOG_AUTOFILL_POOL[_catalogFillIdx % CATALOG_AUTOFILL_POOL.length]
@@ -3207,14 +3223,19 @@ function CreateCatalogPage({ onNav }) {
             </div>
           </div>
 
-          <p className="text-xs uppercase tracking-widest text-slate-500 font-bold pb-2 border-b border-white/[0.06] mt-4">{t('Provider')}</p>
+          <p className="text-xs uppercase tracking-widest text-slate-500 font-bold pb-2 border-b border-white/[0.06] mt-4 flex items-center gap-2">
+            {t('Provider')}
+            <span className="normal-case tracking-normal font-medium text-slate-600 flex items-center gap-1"><Lock size={10} /> {t('From your account')}</span>
+          </p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div><label className={labelCls}>{t('Provider ID *')}</label>
-              <input className={inputCls} value={form.provider_id} onChange={e => set('provider_id', e.target.value)} placeholder="provider-venky-bazaar" required />
+              <input className={inputCls + ' opacity-60 cursor-not-allowed'} value={form.provider_id} readOnly placeholder={t('Loading…')}
+                title={t('Your provider comes from your account')} />
             </div>
             <div><label className={labelCls}>{t('Provider Name *')}</label>
-              <input className={inputCls} value={form.provider_name} onChange={e => set('provider_name', e.target.value)} placeholder="Venky Bazaar" required />
+              <input className={inputCls + ' opacity-60 cursor-not-allowed'} value={form.provider_name} readOnly placeholder={t('Loading…')}
+                title={t('Your provider comes from your account')} />
             </div>
           </div>
 
@@ -3262,6 +3283,9 @@ function CatalogDetailPage({ onNav, catalogId }) {
   offers.forEach(o => {
     (o.resourceIds || []).forEach(rid => { offerByResourceId[rid] = o })
   })
+
+  // A published catalog is locked: no new or edited products or offers.
+  const locked = !!cat.isPublished
 
   const handlePublish = async () => {
     if (!window.confirm(t('Publish this catalog to the Beckn network?'))) return
@@ -3320,6 +3344,12 @@ function CatalogDetailPage({ onNav, catalogId }) {
             </>
           )}
         </div>
+        {locked ? (
+          <span className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-slate-400 border border-white/[0.08]"
+            title={t('Published catalogs can no longer be edited')}>
+            <Lock size={13} /> {t('Locked')}
+          </span>
+        ) : (
         <div className="flex gap-2">
           <button onClick={() => onNav('add_offer', { catalogId })}
             className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold border border-slate-500/30 text-slate-400 hover:bg-slate-500/10 transition-colors">
@@ -3336,6 +3366,7 @@ function CatalogDetailPage({ onNav, catalogId }) {
             {publishing ? t('Publishing…') : t('Publish to Network')}
           </button>
         </div>
+        )}
       </div>
 
       {error && <ErrorBox message={error} />}
@@ -3374,17 +3405,19 @@ function CatalogDetailPage({ onNav, catalogId }) {
         <div className="flex items-center justify-between mb-4">
           <div>
             <p className="text-sm font-bold text-slate-200">{t('Products')}</p>
-            {cat.isPublished && <p className="text-[11px] text-slate-500">{t('Edits reach the network when you publish again.')}</p>}
+            {locked && <p className="text-[11px] text-slate-500">{t('Published catalogs can no longer be edited. To sell something different, create a new catalog.')}</p>}
           </div>
           <div className="flex gap-2">
             <button onClick={reload} className="p-1.5 rounded-lg border border-white/[0.08] text-slate-500 hover:text-white transition-colors">
               <RefreshCw size={13} />
             </button>
-            <button onClick={() => onNav('add_product', { catalogId })}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition-all hover:scale-105"
-              style={{ background: BRAND }}>
-              <Plus size={12} /> {t('Add Product')}
-            </button>
+            {!locked && (
+              <button onClick={() => onNav('add_product', { catalogId })}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition-all hover:scale-105"
+                style={{ background: BRAND }}>
+                <Plus size={12} /> {t('Add Product')}
+              </button>
+            )}
           </div>
         </div>
         {loading ? <LoadingSpinner /> : (
@@ -3424,7 +3457,7 @@ function CatalogDetailPage({ onNav, catalogId }) {
                       {offer?.validityStart ? `${fmtDate(offer.validityStart)} – ${fmtDate(offer.validityEnd)}` : '—'}
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex justify-end gap-1.5">
+                      {!locked && <div className="flex justify-end gap-1.5">
                         <button onClick={() => onNav('edit_product', { catalogId, editResourceId: r.id })}
                           className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold border border-white/[0.08] text-slate-300 hover:text-white hover:border-white/20 transition-colors whitespace-nowrap">
                           <Pencil size={11} /> {t('Edit product')}
@@ -3440,7 +3473,7 @@ function CatalogDetailPage({ onNav, catalogId }) {
                             <Plus size={11} /> {t('Add offer')}
                           </button>
                         )}
-                      </div>
+                      </div>}
                     </td>
                   </tr>
                 )
@@ -3448,7 +3481,7 @@ function CatalogDetailPage({ onNav, catalogId }) {
               {!resources.length && (
                 <tr><td colSpan={6} className="px-4 py-12 text-center text-slate-500">
                   {t('No products yet.')}{' '}
-                  <button onClick={() => onNav('add_product', { catalogId })} className="text-blue-400 hover:underline">{t('Add the first product →')}</button>
+                  {!locked && <button onClick={() => onNav('add_product', { catalogId })} className="text-blue-400 hover:underline">{t('Add the first product →')}</button>}
                 </td></tr>
               )}
             </tbody>
@@ -4120,7 +4153,8 @@ export default function App() {
             </svg>
           </button>
           <span className="text-sm font-semibold text-white">{t('BPP Admin')}</span>
-          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse ml-auto" />
+          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+          <LanguageToggle className="ml-auto" />
         </div>
 
         <div className="p-4 sm:p-6 lg:p-9">

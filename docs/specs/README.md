@@ -29,8 +29,8 @@ settlement. If the contract's payment settlement is not yet `AGREED` /
 the provider pays it. `source` extends RetailSettlement's `refund` object,
 which allows extra fields.
 
-With `DELIVERY` / `P1D` and a longer return window, returns made after day 1
-are provider-paid. `RETURN_WINDOW_EXPIRY` as the basis keeps funds held until
+With `AFTER_DELIVERY` / `P1D` and a longer return window, returns made after day 1
+are provider-paid. `AFTER_RETURN_WINDOW` as the basis keeps funds held until
 returns are no longer possible.
 
 ## When a contract is due
@@ -38,7 +38,7 @@ returns are no longer possible.
 Each settlement carries the seller's payout terms,
 `settlementAttributes.settlementBasis` and `settlementWindow`. A contract is
 due at `basis event time + settlementWindow`, for example one day after
-delivery for `DELIVERY` / `P1D`. A contract cancelled before delivery is due
+delivery for `AFTER_DELIVERY` / `P1D`. A contract cancelled before delivery is due
 at `cancellation time + settlementWindow`.
 
 A contract is reconciled once. A settlement added later (for example a

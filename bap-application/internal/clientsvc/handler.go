@@ -2,6 +2,7 @@ package clientsvc
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -60,7 +61,11 @@ func (h *ClientHandler) HandleInit(c *gin.Context) {
 
 	if err := h.svc.Init(c.Request.Context(), &req); err != nil {
 		h.lh.WithModule("client_handler").Err().Error(err).Log("init failed")
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		status := http.StatusInternalServerError
+		if errors.Is(err, ErrQuoteUnavailable) {
+			status = http.StatusConflict
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
 		return
 	}
 

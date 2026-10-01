@@ -26,7 +26,7 @@
       "bppId": "onix-bap-x7m2wmy7nq-et.a.run.app",
       "currency": "IDR",
       "settlementDate": "2026-10-01",
-      "settlementBasis": "DELIVERY",
+      "settlementBasis": "AFTER_DELIVERY",
       "settlementWindow": "P1D",
       "contractCount": 1,
       "totalPaidAmount": 0,

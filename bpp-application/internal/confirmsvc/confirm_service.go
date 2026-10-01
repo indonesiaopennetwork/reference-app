@@ -248,8 +248,7 @@ func validateSettlements(c ConfirmContract) error {
 }
 
 // withSettlementTerms adds settlementBasis / settlementWindow (the seller's
-// payout terms, ONDC-style -- not yet in the ION TradeSettlement schema, which
-// allows extra properties) to a settlementAttributes object.
+// payout terms, ION TradeSettlement) to a settlementAttributes object.
 func withSettlementTerms(raw json.RawMessage, basis, window string) json.RawMessage {
 	var attrs map[string]any
 	if json.Unmarshal(raw, &attrs) != nil || attrs == nil {

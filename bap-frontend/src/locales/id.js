@@ -344,4 +344,10 @@ export default {
   'Disputed': 'Disanggah',
   'Adjusted': 'Disesuaikan',
   'committed': 'diproses',
+  'No longer available': 'Tidak tersedia lagi',
+  'The seller no longer has: {items}.': 'Penjual tidak lagi memiliki: {items}.',
+  'The seller could not price this order.': 'Penjual tidak dapat memberi harga untuk pesanan ini.',
+  'Remove it from your cart and try again, or choose another product.': 'Hapus dari keranjang lalu coba lagi, atau pilih produk lain.',
+  'Remove unavailable items': 'Hapus barang yang tidak tersedia',
+  'Some items are no longer available from the seller.': 'Beberapa barang tidak lagi tersedia dari penjual.',
 }

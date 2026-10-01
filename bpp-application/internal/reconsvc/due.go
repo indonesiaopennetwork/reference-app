@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/ion/winroom/bpp/internal/cancellation"
+	"github.com/ion/winroom/bpp/internal/config"
 )
 
 // DueContract is a contract with settlements not yet reconciled, and when
@@ -175,7 +176,7 @@ func (s *Service) assess(d *DueContract, deliveredAt, cancelledAt *time.Time, no
 	// Payout terms come from the payment settlement; the BPP's config is the
 	// fallback for settlements created before the terms existed.
 	pa := asMap(asMap(payment)["settlementAttributes"])
-	d.Basis, d.Window = str(pa["settlementBasis"]), str(pa["settlementWindow"])
+	d.Basis, d.Window = config.NormalizeSettlementBasis(str(pa["settlementBasis"])), str(pa["settlementWindow"])
 	if d.Basis == "" {
 		d.Basis = s.cfg.SettlementBasis
 	}
@@ -185,14 +186,18 @@ func (s *Service) assess(d *DueContract, deliveredAt, cancelledAt *time.Time, no
 
 	// What starts the clock: a payment still to reconcile waits for the basis
 	// event (or the cancellation, if that never came); settlements added after
-	// the payment was reconciled count from the latest refund.
+	// the payment was reconciled count from the latest refund. Shipment isn't
+	// recorded on its own, so AFTER_SHIPMENT counts from delivery.
 	paymentPending := payment != nil && str(pa["reconciliationId"]) == ""
+	paidAt, paidErr := time.Parse(time.RFC3339, str(pa["settledAt"]))
 	switch {
 	case !paymentPending && latestRefundAt != nil:
 		d.BasisEvent, d.BasisAt = "refund", latestRefundAt
+	case d.Basis == "ON_CONFIRMATION" && paidErr == nil:
+		d.BasisEvent, d.BasisAt = "confirmed", &paidAt
 	case deliveredAt != nil:
 		d.BasisEvent, d.BasisAt = "delivered", deliveredAt
-		if d.Basis == "RETURN_WINDOW_EXPIRY" {
+		if d.Basis == "AFTER_RETURN_WINDOW" {
 			t := deliveredAt.Add(longestReturnWindow(d.contract))
 			d.BasisEvent, d.BasisAt = "return window closed", &t
 		}

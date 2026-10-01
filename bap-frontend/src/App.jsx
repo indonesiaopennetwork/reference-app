@@ -8,7 +8,7 @@ import {
   User, Phone, Home, ChevronLeft, Banknote,
   Ban, MessageSquare, RefreshCw, ThumbsUp,
   History, Wand2, ExternalLink, ChevronDown, ChevronUp, LogOut,
-  Compass,
+  Compass, AlertCircle,
 } from 'lucide-react';
 import Tour from './Tour.jsx';
 import { useI18n, rich, LanguageToggle, tNow, localeNow } from './i18n.jsx';
@@ -161,7 +161,48 @@ function parseOnSelectContract(contract) {
     offerName: commitment?.offer?.descriptor?.name,
     returnPolicy: pol.returns,
     cancelPolicy: pol.cancellation,
+    // The seller marks an item it no longer has as CLOSED and leaves it out
+    // of the price; with nothing priced there is no consideration at all.
+    unavailable: (contract.commitments || [])
+      .filter(c => (c.status?.descriptor?.code || c.status?.code) === 'CLOSED')
+      .map(c => ({
+        ids: (c.resources || []).map(r => r.id),
+        name: c.resources?.[0]?.descriptor?.name || c.offer?.descriptor?.name || c.resources?.[0]?.id || c.offer?.id,
+      })),
+    unpriced: !consideration,
   };
+}
+
+// An order can't go ahead when any item is unavailable or nothing is priced.
+const quoteBlocked = q => !!q && (q.unavailable.length > 0 || q.unpriced);
+
+/* ─────────────────────────── UnavailablePanel ───────────────────────────── */
+// Shown instead of the quote when the seller can't supply the order. The
+// seller doesn't name an item it no longer has, so nameOf (from the cart or
+// the product shown) supplies the name the buyer knows it by.
+function UnavailablePanel({ quote, onRemove, nameOf = () => null }) {
+  const { t } = useI18n();
+  const names = quote.unavailable.map(u => u.ids.map(nameOf).find(Boolean) || u.name).filter(Boolean);
+  return (
+    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
+      className="rounded-xl border border-rose-500/25 bg-rose-500/5 px-4 py-3 space-y-2" data-tour="unavailable">
+      <p className="flex items-center gap-2 text-sm font-semibold text-rose-300">
+        <AlertCircle className="w-4 h-4 shrink-0" /> {t('No longer available')}
+      </p>
+      <p className="text-xs text-slate-300">
+        {names.length > 0
+          ? t('The seller no longer has: {items}.', { items: names.join(', ') })
+          : t('The seller could not price this order.')}
+      </p>
+      <p className="text-xs text-slate-500">{t('Remove it from your cart and try again, or choose another product.')}</p>
+      {onRemove && (
+        <button onClick={() => onRemove(quote.unavailable.flatMap(u => u.ids))}
+          className="w-full mt-1 py-2.5 rounded-xl text-xs font-semibold bg-rose-500/15 text-rose-200 border border-rose-500/30 hover:bg-rose-500/25 transition-all">
+          {t('Remove unavailable items')}
+        </button>
+      )}
+    </motion.div>
+  );
 }
 
 const fmt = (amount, currency = 'IDR') => {
@@ -299,9 +340,10 @@ function OfferInfoPanel({ product }) {
 
 /* ─────────────────────────── ConfirmedQuotePanel ────────────────────────── */
 // Shows the BPP-confirmed quote from on_select (may differ from catalog price)
-function ConfirmedQuotePanel({ quote, onInit, isLoading }) {
+function ConfirmedQuotePanel({ quote, onInit, isLoading, nameOf }) {
   const { t } = useI18n();
   if (!quote) return null;
+  if (quoteBlocked(quote)) return <UnavailablePanel quote={quote} nameOf={nameOf} />;
   const { total, currency, breakup, paymentMethods, codAvailable,
     seller, returnPolicy, cancelPolicy } = quote;
   return (
@@ -456,7 +498,8 @@ function ProductModal({ product, transaction, onClose, onSelect, onInit, onConfi
 
           {/* on_select confirmed quote */}
           {status === 'QUOTE_RECEIVED' && (
-            <ConfirmedQuotePanel quote={confirmedQuote} onInit={onInit} isLoading={isLoading} />
+            <ConfirmedQuotePanel quote={confirmedQuote} onInit={onInit} isLoading={isLoading}
+              nameOf={id => (id === product.id ? product.name : null)} />
           )}
 
           {/* Init received — confirm */}
@@ -514,7 +557,7 @@ function StarRating({ value, onChange }) {
   );
 }
 
-function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoading, onInit, onConfirm, onDone, onStatusChange, onRate, onSupport, onRequestStatus }) {
+function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoading, onInit, onConfirm, onDone, onStatusChange, onRate, onSupport, onRequestStatus, onRemoveItems }) {
   const { t } = useI18n();
   const [ratingValue, setRatingValue] = useState(0);
   const [ratingFeedback, setRatingFeedback] = useState('');
@@ -533,6 +576,7 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
     : null;
 
   const currency = confirmedQuote?.currency || 'IDR';
+  const blocked = quoteBlocked(confirmedQuote);
 
   /* ── Stepper ───────────────────────────────────────────────────────── */
   const STEPS = [t('Quote'), t('Billing'), t('Confirm'), t('Done')];
@@ -612,8 +656,14 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
           </div>
         )}
 
+        {/* ── Step: Quote received, but the seller can't supply it ────── */}
+        {status === 'QUOTE_RECEIVED' && blocked && (
+          <UnavailablePanel quote={confirmedQuote} onRemove={onRemoveItems}
+            nameOf={id => cart.find(i => i.id === id)?.name} />
+        )}
+
         {/* ── Step: Quote received → show BPP quote + billing form ────── */}
-        {status === 'QUOTE_RECEIVED' && (
+        {status === 'QUOTE_RECEIVED' && !blocked && (
           <div className="space-y-4">
             {/* BPP confirmed quote */}
             {confirmedQuote && (
@@ -925,7 +975,7 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
       </div>
 
       {/* ── Sticky action footer ────────────────────────────────────── */}
-      {(status === 'QUOTE_RECEIVED' || status === 'INIT_RECEIVED') && (
+      {((status === 'QUOTE_RECEIVED' && !blocked) || status === 'INIT_RECEIVED') && (
         <div className="px-5 py-4 border-t border-white/[0.07] shrink-0">
           {status === 'QUOTE_RECEIVED' && (
             <button onClick={onInit} disabled={isLoading} data-tour="init"
@@ -2117,7 +2167,7 @@ export default function App() {
     if (!transaction) return;
     setIsLoading(true);
     try {
-      await apiFetch(`/init`, {
+      const r = await apiFetch(`/init`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           transaction_id: transaction.id,
@@ -2133,6 +2183,11 @@ export default function App() {
           },
         }),
       });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        // 409: the seller can no longer supply this order.
+        throw new Error(r.status === 409 ? t('Some items are no longer available from the seller.') : (err.error || `HTTP ${r.status}`));
+      }
       setTransaction(p => ({ ...p, status: 'INIT_SENT' }));
     } catch (e) { alert(t('Init failed: {error}', { error: e.message })); }
     finally { setIsLoading(false); }
@@ -2218,6 +2273,13 @@ export default function App() {
       alert(t('Support ticket created! The seller will get back to you.'));
     } catch (e) { alert(t('Support request failed: {error}', { error: e.message })); }
     finally { setIsLoading(false); }
+  };
+
+  /* ── Drop items the seller no longer has, back to the cart ─────────── */
+  const removeUnavailable = ids => {
+    setCart(prev => prev.filter(i => !ids.includes(i.id)));
+    setTransaction(null);
+    setCartCheckout(false);
   };
 
   /* ── Reset cart checkout back to browsing ─────────────────────────────── */
@@ -2750,6 +2812,7 @@ export default function App() {
                   onRate={handleRate}
                   onSupport={handleSupport}
                   onRequestStatus={handleRequestStatus}
+                  onRemoveItems={removeUnavailable}
                 />
               )}
             </motion.aside>
