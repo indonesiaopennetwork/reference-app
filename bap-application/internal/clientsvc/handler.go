@@ -119,10 +119,15 @@ func (h *ClientHandler) HandleStatus(c *gin.Context) {
 // Requires a non-empty textSearch — defaults to "coffee" for the initial catalog load.
 func (h *ClientHandler) HandleDiscover(c *gin.Context) {
 	q := c.Query("q")
-	if q == "" {
+	providerName := c.Query("provider_name")
+	if q == "" && providerName == "" {
 		q = "coffee"
 	}
-	req := ClientDiscoverRequest{TextSearch: q}
+
+	req := ClientDiscoverRequest{
+		TextSearch:   q,
+		ProviderName: providerName,
+	}
 
 	var (
 		resp json.RawMessage

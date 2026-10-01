@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Landmark, RefreshCw, ChevronDown, Loader2 } from 'lucide-react';
 import { useI18n, LanguageToggle, localeNow } from './i18n.jsx';
+import { basePath } from './auth.js';
 
 // Operator view: settlement reconciliation with each seller (BPP) -- what the
 // payment gateway still holds for them, what has been released, and every
@@ -190,7 +191,7 @@ export default function Reconciliation() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await fetch('/api/v1/reconciliation');
+      const r = await fetch(`${basePath}api/v1/reconciliation`);
       const body = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`);
       setData(body); setError(null);

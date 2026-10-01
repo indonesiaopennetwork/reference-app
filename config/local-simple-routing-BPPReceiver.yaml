@@ -17,6 +17,6 @@ routingRules:
   - version: "2.0.0"
     targetType: "url"
     target:
-      url: "http://mock-cds:8086"
+      url: "https://34.47.138.217.sslip.io/beckn/discover"
     endpoints:
       - discover

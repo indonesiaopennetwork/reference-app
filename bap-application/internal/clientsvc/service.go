@@ -76,10 +76,16 @@ func (s *ClientService) Discover(ctx context.Context, req *ClientDiscoverRequest
 	msgID := uuid.New()
 	txnIDStr := txnID.String()
 
+	textQuery := req.TextSearch
+	if req.ProviderName != "" {
+		textQuery = textQuery + " " + req.ProviderName
+	}
+	intent := map[string]any{
+		"textSearch": strings.TrimSpace(textQuery),
+	}
+
 	msgJSON, _ := json.Marshal(map[string]any{
-		"intent": map[string]any{
-			"textSearch": req.TextSearch,
-		},
+		"intent": intent,
 	})
 
 	becknReq := BecknRequest{
@@ -125,6 +131,14 @@ func (s *ClientService) DiscoverSync(ctx context.Context, req *ClientDiscoverReq
 	msgID := uuid.New()
 	txnID := uuid.New()
 
+	textQuery := req.TextSearch
+	if req.ProviderName != "" {
+		textQuery = textQuery + " " + req.ProviderName
+	}
+	intent := map[string]any{
+		"textSearch": strings.TrimSpace(textQuery),
+	}
+
 	becknReq := map[string]any{
 		"context": map[string]any{
 			"version":       "2.0.0",
@@ -137,9 +151,7 @@ func (s *ClientService) DiscoverSync(ctx context.Context, req *ClientDiscoverReq
 			"networkId":     s.cfg.NetworkID,
 		},
 		"message": map[string]any{
-			"intent": map[string]any{
-				"textSearch": req.TextSearch,
-			},
+			"intent": intent,
 		},
 	}
 
