@@ -37,6 +37,7 @@ build_and_push onix-bpp                "${ROOT}/onix-bpp"
 build_and_push onix-catalog-publish    "${ROOT}/onix-catalog-publish"
 build_and_push dedi-static-server      "${ROOT}/dedi-static-server"
 build_and_push landing-page            "${ROOT}/landing-page"
+build_and_push ion-landing-page        "${ROOT}/ion-landing-page" Dockerfile.cloud
 build_and_push discovery-service       "${ROOT}/discovery-service"
 build_and_push otel-collector          "${ROOT}/otel-collector"
 
