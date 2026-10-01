@@ -18,6 +18,7 @@ export default function App() {
   const [state, setState] = useState('loading') // loading | needs-profile | ready | error
   const [errorMessage, setErrorMessage] = useState('')
   const [token, setToken] = useState(null)
+  const [providerId, setProviderId] = useState(null)
 
   useEffect(() => {
     async function run() {
@@ -43,6 +44,9 @@ export default function App() {
         if (result.needsBusinessName) {
           setState('needs-profile')
         } else {
+          if (result.providerId) {
+            setProviderId(result.providerId)
+          }
           setState('ready')
         }
       } catch (err) {
@@ -56,7 +60,10 @@ export default function App() {
 
   async function handleProfileSubmit(businessName) {
     try {
-      await bootstrap(token, businessName)
+      const result = await bootstrap(token, businessName)
+      if (result.providerId) {
+        setProviderId(result.providerId)
+      }
       setState('ready')
     } catch (err) {
       console.error(err)
@@ -84,7 +91,7 @@ export default function App() {
     return <SellerProfileForm onSubmit={handleProfileSubmit} />
   }
 
-  return <Landing token={token} />
+  return <Landing token={token} providerId={providerId} />
 }
 
 function CenteredMessage({ text, children }) {
@@ -136,9 +143,9 @@ function SellerProfileForm({ onSubmit }) {
   )
 }
 
-function Landing({ token }) {
-  const buyerUrl = `${config.bapUrl}/?token=${encodeURIComponent(token)}`
-  const sellerUrl = `${config.bppUrl}/?token=${encodeURIComponent(token)}`
+function Landing({ token, providerId }) {
+  const buyerUrl = `${config.bapUrl}/?token=${encodeURIComponent(token)}${providerId ? `&providerId=${encodeURIComponent(providerId)}` : ''}`
+  const sellerUrl = `${config.bppUrl}/?token=${encodeURIComponent(token)}${providerId ? `&providerId=${encodeURIComponent(providerId)}` : ''}`
   return (
     <div className="relative min-h-screen flex items-center justify-center p-6">
       <button

@@ -182,62 +182,106 @@ const NAV_ITEMS = [
 // does the typing) and ends up with a sample catalog published to the network.
 const onPage = p => ({ page }) => page === p
 const tourSteps = t => [
-  { eyebrow: t('Welcome'), title: t('Your seller dashboard'),
-    body: <p>{t("This is where you sell on the ION network: publish what you sell, fulfil the orders buyer apps send you, and get paid. This tour shows each section, and you'll publish a sample catalog along the way. It takes about three minutes.")}</p> },
-  { eyebrow: t('Overview'), page: 'overview', target: 'nav-overview', title: t('Overview'),
-    body: <p>{t("Your business at a glance: active and pending orders, today's volume and recent activity.")}</p> },
+  {
+    eyebrow: t('Welcome'), title: t('Your seller dashboard'),
+    body: <p>{t("This is where you sell on the ION network: publish what you sell, fulfil the orders buyer apps send you, and get paid. This tour shows each section, and you'll publish a sample catalog along the way. It takes about three minutes.")}</p>
+  },
+  {
+    eyebrow: t('Overview'), page: 'overview', target: 'nav-overview', title: t('Overview'),
+    body: <p>{t("Your business at a glance: active and pending orders, today's volume and recent activity.")}</p>
+  },
 
-  { eyebrow: t('Catalogs'), page: 'catalogs', target: 'nav-catalogs', title: t("Let's publish a catalog"),
+  {
+    eyebrow: t('Catalogs'), page: 'catalogs', target: 'nav-catalogs', title: t("Let's publish a catalog"),
     skip: { label: t('Skip this part'), to: 'orders' },
-    body: <><p>{rich(t("Buyers find you through your <b>catalog</b>. You'll now publish a sample one in four steps: create the catalog, add a product, give it an offer, then publish."))}</p><p className="text-slate-400">{rich(t('You click; <b>Auto-fill</b> does the typing.'))}</p></> },
-  { eyebrow: t('Publish · {n} of 4', { n: 1 }), page: 'catalogs', target: 'create-catalog', until: onPage('create_catalog'), waitLabel: t('Click Create Catalog'),
+    body: <><p>{rich(t("Buyers find you through your <b>catalog</b>. You'll now publish a sample one in four steps: create the catalog, add a product, give it an offer, then publish."))}</p><p className="text-slate-400">{rich(t('You click; <b>Auto-fill</b> does the typing.'))}</p></>
+  },
+  {
+    eyebrow: t('Publish · {n} of 4', { n: 1 }), page: 'catalogs', target: 'create-catalog', until: onPage('create_catalog'), waitLabel: t('Click Create Catalog'),
     title: t('Create a catalog'),
-    body: <p>{rich(t('Click <b>Create Catalog</b>. You can have several catalogs, for example one per store or product line.'))}</p> },
-  { eyebrow: t('Publish · {n} of 4', { n: 1 }), target: 'catalog-autofill', action: 'click', waitLabel: t('Click Auto-fill Sample'),
+    body: <p>{rich(t('Click <b>Create Catalog</b>. You can have several catalogs, for example one per store or product line.'))}</p>
+  },
+  {
+    eyebrow: t('Publish · {n} of 4', { n: 1 }), target: 'catalog-autofill', action: 'click', waitLabel: t('Click Auto-fill Sample'),
     title: t('Fill in the details'),
-    body: <p>{rich(t('A catalog needs an ID, a name and a validity period. Your provider details come from your account. Click <b>Auto-fill Sample</b> to fill in an example.'))}</p> },
-  { eyebrow: t('Publish · {n} of 4', { n: 1 }), target: 'catalog-submit', until: onPage('catalog_detail'), waitLabel: t('Click Create'),
+    body: <p>{rich(t('A catalog needs an ID, a name and a validity period. Your provider details come from your account. Click <b>Auto-fill Sample</b> to fill in an example.'))}</p>
+  },
+  {
+    eyebrow: t('Publish · {n} of 4', { n: 1 }), target: 'catalog-submit', until: onPage('catalog_detail'), waitLabel: t('Click Create'),
     title: t('Save the catalog'),
-    body: <p>{rich(t("The form is filled in. Click <b>Create Catalog & Add Products</b>. The catalog is saved as a <b>Draft</b>; buyers can't see it until you publish."))}</p> },
-  { eyebrow: t('Publish · {n} of 4', { n: 2 }), target: 'add-product', until: onPage('add_product'), waitLabel: t('Click Add Product'),
+    body: <p>{rich(t("The form is filled in. Click <b>Create Catalog & Add Products</b>. The catalog is saved as a <b>Draft</b>; buyers can't see it until you publish."))}</p>
+  },
+  {
+    eyebrow: t('Publish · {n} of 4', { n: 2 }), target: 'add-product', until: onPage('add_product'), waitLabel: t('Click Add Product'),
     title: t('Add a product'),
-    body: <p>{rich(t("Your catalog is created, but it's empty. Click <b>Add Product</b>."))}</p> },
-  { eyebrow: t('Publish · {n} of 4', { n: 2 }), target: 'product-autofill', action: 'click', waitLabel: t('Click Auto-fill'),
+    body: <p>{rich(t("Your catalog is created, but it's empty. Click <b>Add Product</b>."))}</p>
+  },
+  {
+    eyebrow: t('Publish · {n} of 4', { n: 2 }), target: 'product-autofill', action: 'click', waitLabel: t('Click Auto-fill'),
     title: t('Describe the product'),
-    body: <p>{rich(t('A product has a name, descriptions, an image, stock, and details like brand, weight and packaging. Click <b>Auto-fill</b> for a sample product.'))}</p> },
-  { eyebrow: t('Publish · {n} of 4', { n: 2 }), target: 'product-submit', until: onPage('add_offer'), waitLabel: t('Click Save'),
+    body: <p>{rich(t('A product has a name, descriptions, an image, stock, and details like brand, weight and packaging. Click <b>Auto-fill</b> for a sample product.'))}</p>
+  },
+  {
+    eyebrow: t('Publish · {n} of 4', { n: 2 }), target: 'product-submit', until: onPage('add_offer'), waitLabel: t('Click Save'),
     title: t('Save the product'),
-    body: <p>{rich(t('Click <b>Save Resource → Setup Offer</b>. The product is saved and you go straight to its offer.'))}</p> },
-  { eyebrow: t('Publish · {n} of 4', { n: 3 }), target: 'offer-autofill', action: 'click', waitLabel: t('Click Auto-fill'),
+    body: <p>{rich(t('Click <b>Save Resource → Setup Offer</b>. The product is saved and you go straight to its offer.'))}</p>
+  },
+  {
+    eyebrow: t('Publish · {n} of 4', { n: 3 }), target: 'offer-autofill', action: 'click', waitLabel: t('Click Auto-fill'),
     title: t('Create the offer'),
-    body: <p>{rich(t('The <b>offer</b> is how you sell the product: its price, tax and policies. The product is already linked. Click <b>Auto-fill</b>.'))}</p> },
-  { eyebrow: t('Publish · {n} of 4', { n: 3 }), target: 'offer-price', title: t('The price'),
-    body: <p>{t("The price is before tax; the tax (PPN 12% by default) is set below it. The buyer's total, including tax, is worked out for you.")}</p> },
-  { eyebrow: t('Publish · {n} of 4', { n: 3 }), target: 'offer-policies', title: t('Your policies'),
-    body: <><p>{rich(t('Under <b>Policies & Serviceability</b>, decide whether returns and cancellations are allowed, their windows, the cancellation cutoff and any restocking fee. Also set COD and your delivery area and hours.'))}</p><p className="text-slate-400">{t('These rules decide cancellations and returns automatically later. No approval is needed.')}</p></> },
-  { eyebrow: t('Publish · {n} of 4', { n: 3 }), target: 'offer-submit', until: onPage('catalog_detail'), waitLabel: t('Click Add Offer'),
+    body: <p>{rich(t('The <b>offer</b> is how you sell the product: its price, tax and policies. The product is already linked. Click <b>Auto-fill</b>.'))}</p>
+  },
+  {
+    eyebrow: t('Publish · {n} of 4', { n: 3 }), target: 'offer-price', title: t('The price'),
+    body: <p>{t("The price is before tax; the tax (PPN 12% by default) is set below it. The buyer's total, including tax, is worked out for you.")}</p>
+  },
+  {
+    eyebrow: t('Publish · {n} of 4', { n: 3 }), target: 'offer-policies', title: t('Your policies'),
+    body: <><p>{rich(t('Under <b>Policies & Serviceability</b>, decide whether returns and cancellations are allowed, their windows, the cancellation cutoff and any restocking fee. Also set COD and your delivery area and hours.'))}</p><p className="text-slate-400">{t('These rules decide cancellations and returns automatically later. No approval is needed.')}</p></>
+  },
+  {
+    eyebrow: t('Publish · {n} of 4', { n: 3 }), target: 'offer-submit', until: onPage('catalog_detail'), waitLabel: t('Click Add Offer'),
     title: t('Save the offer'),
-    body: <p>{rich(t('Click <b>Add Offer to Catalog</b>.'))}</p> },
-  { eyebrow: t('Publish · {n} of 4', { n: 4 }), target: 'publish', until: () => !!document.querySelector('[data-tour="published-badge"]'), waitLabel: t('Click Publish'),
+    body: <p>{rich(t('Click <b>Add Offer to Catalog</b>.'))}</p>
+  },
+  {
+    eyebrow: t('Publish · {n} of 4', { n: 4 }), target: 'publish', until: () => !!document.querySelector('[data-tour="published-badge"]'), waitLabel: t('Click Publish'),
     title: t('Publish to Network'),
-    body: <><p>{rich(t('Your catalog now has a product with an offer. Click <b>Publish to Network</b> and confirm.'))}</p><p className="text-slate-400">{t('Buyer apps on the network can then find it and place orders. Once published, the catalog is locked and can no longer be edited.')}</p></> },
-  { eyebrow: t('Published'), target: 'published-badge', title: t("You're live"),
-    body: <><p>{rich(t('Your catalog is <b>Published</b>: buyers can find it now.'))}</p><p className="text-slate-400">{t('A published catalog is locked: its products and offers can no longer be changed. To sell something different, create a new catalog the same way.')}</p></> },
+    body: <><p>{rich(t('Your catalog now has a product with an offer. Click <b>Publish to Network</b> and confirm.'))}</p><p className="text-slate-400">{t('Buyer apps on the network can then find it and place orders. Once published, the catalog is locked and can no longer be edited.')}</p></>
+  },
+  {
+    eyebrow: t('Published'), target: 'published-badge', title: t("You're live"),
+    body: <><p>{rich(t('Your catalog is <b>Published</b>: buyers can find it now.'))}</p><p className="text-slate-400">{t('A published catalog is locked: its products and offers can no longer be changed. To sell something different, create a new catalog the same way.')}</p></>
+  },
 
-  { id: 'orders', eyebrow: t('Orders'), page: 'orders', target: 'nav-orders', title: t('Orders'),
-    body: <><p>{rich(t('Orders arrive here once a buyer confirms. Open one and move it <b>Packed → Shipped</b>; it becomes <b>Delivered</b> automatically.'))}</p><p className="text-slate-400">{t("Cancellations and returns follow your offer's policies. You'll see the outcome here.")}</p></> },
-  { eyebrow: t('Inventory'), page: 'inventory', target: 'nav-inventory', title: t('Inventory'),
-    body: <p>{t('Everything you sell across catalogs: products, offers and live stock. Stock goes down when an order is confirmed and back up when one is cancelled or returned.')}</p> },
-  { eyebrow: t('Reconciliation'), page: 'reconciliation', target: 'nav-reconciliation', title: t('Get paid'),
-    body: <p>{rich(t("After delivery plus your settlement window, an order's payment falls <b>due</b>. Send <b>reconcile</b> to the buyer app; when it agrees, the payment gateway releases the held funds to you."))}</p> },
-  { eyebrow: t('Support'), page: 'support', target: 'nav-support', title: t('Support tickets'),
-    body: <p>{t('Help requests buyers raise about their orders.')}</p> },
-  { eyebrow: t('Ratings'), page: 'ratings', target: 'nav-ratings', title: t('Ratings'),
-    body: <p>{t('How buyers rated their orders.')}</p> },
-  { eyebrow: t('Message Log'), page: 'messages', target: 'nav-messages', title: t('Message Log'),
-    body: <p>{t("Every Beckn message you sent or received, with its full payload. Useful when something doesn't look right.")}</p> },
-  { eyebrow: t('Done'), target: 'tour-button', title: t("You're all set"),
-    body: <p>{t('Start by creating your first catalog. You can run this tour again any time from here.')}</p> },
+  {
+    id: 'orders', eyebrow: t('Orders'), page: 'orders', target: 'nav-orders', title: t('Orders'),
+    body: <><p>{rich(t('Orders arrive here once a buyer confirms. Open one and move it <b>Packed → Shipped</b>; it becomes <b>Delivered</b> automatically.'))}</p><p className="text-slate-400">{t("Cancellations and returns follow your offer's policies. You'll see the outcome here.")}</p></>
+  },
+  {
+    eyebrow: t('Inventory'), page: 'inventory', target: 'nav-inventory', title: t('Inventory'),
+    body: <p>{t('Everything you sell across catalogs: products, offers and live stock. Stock goes down when an order is confirmed and back up when one is cancelled or returned.')}</p>
+  },
+  {
+    eyebrow: t('Reconciliation'), page: 'reconciliation', target: 'nav-reconciliation', title: t('Get paid'),
+    body: <p>{rich(t("After delivery plus your settlement window, an order's payment falls <b>due</b>. Send <b>reconcile</b> to the buyer app; when it agrees, the payment gateway releases the held funds to you."))}</p>
+  },
+  {
+    eyebrow: t('Support'), page: 'support', target: 'nav-support', title: t('Support tickets'),
+    body: <p>{t('Help requests buyers raise about their orders.')}</p>
+  },
+  {
+    eyebrow: t('Ratings'), page: 'ratings', target: 'nav-ratings', title: t('Ratings'),
+    body: <p>{t('How buyers rated their orders.')}</p>
+  },
+  {
+    eyebrow: t('Message Log'), page: 'messages', target: 'nav-messages', title: t('Message Log'),
+    body: <p>{t("Every Beckn message you sent or received, with its full payload. Useful when something doesn't look right.")}</p>
+  },
+  {
+    eyebrow: t('Done'), target: 'tour-button', title: t("You're all set"),
+    body: <p>{t('Start by creating your first catalog. You can run this tour again any time from here.')}</p>
+  },
 ]
 const TOUR_DONE_KEY = 'bpp.tourDone'
 
@@ -578,7 +622,7 @@ function OrderDetailDrawer({ order, onClose }) {
 
   let contractAttrs = data?.contract?.contract_attributes;
   if (typeof contractAttrs === 'string') {
-    try { contractAttrs = JSON.parse(contractAttrs); } catch {}
+    try { contractAttrs = JSON.parse(contractAttrs); } catch { }
   }
   const performances = contractAttrs?.performance || [];
   // Returns are decided by the offer's return policy when the buyer requests
@@ -653,7 +697,7 @@ function OrderDetailDrawer({ order, onClose }) {
                   {data?.contract?.status === 'ACTIVE' && (
                     <section>
                       <SectionTitle>{t('Performance Actions')}</SectionTitle>
-                      
+
                       {returnPerfs.length > 0 ? (
                         <Card className="p-4 space-y-2">
                           <p className="text-sm font-semibold text-purple-400 flex items-center gap-2">
@@ -676,7 +720,7 @@ function OrderDetailDrawer({ order, onClose }) {
                       ) : (
                         <Card className="p-4 flex items-center gap-3">
                           {(!deliveryStatus || (deliveryStatus.toLowerCase() !== 'packed' && deliveryStatus.toLowerCase() !== 'shipped' && deliveryStatus.toLowerCase() !== 'delivered')) && (
-                            <button 
+                            <button
                               disabled={updating}
                               onClick={() => updateStatus('Packed')}
                               className="flex-1 py-2 px-3 bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50"
@@ -685,7 +729,7 @@ function OrderDetailDrawer({ order, onClose }) {
                             </button>
                           )}
                           {deliveryStatus?.toLowerCase() === 'packed' && (
-                            <button 
+                            <button
                               disabled={updating}
                               onClick={() => updateStatus('Shipped')}
                               className="flex-1 py-2 px-3 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50"
@@ -2499,7 +2543,7 @@ function JsonNode({ name, value, depth, last }) {
   if (!isObj) {
     const color = typeof value === 'string' ? 'text-emerald-300'
       : typeof value === 'number' ? 'text-amber-300'
-      : typeof value === 'boolean' ? 'text-violet-300' : 'text-slate-500'
+        : typeof value === 'boolean' ? 'text-violet-300' : 'text-slate-500'
     return <div style={indent}>{label}<span className={color}>{JSON.stringify(value)}</span><span className="text-slate-500">{comma}</span></div>
   }
 
@@ -3350,22 +3394,22 @@ function CatalogDetailPage({ onNav, catalogId }) {
             <Lock size={13} /> {t('Locked')}
           </span>
         ) : (
-        <div className="flex gap-2">
-          <button onClick={() => onNav('add_offer', { catalogId })}
-            className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold border border-slate-500/30 text-slate-400 hover:bg-slate-500/10 transition-colors">
-            <Tag size={14} /> {t('Add Offer')}
-          </button>
-          <button data-tour="add-product" onClick={() => onNav('add_product', { catalogId })}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold border border-blue-500/30 text-blue-400 hover:bg-blue-500/10 transition-colors">
-            <Plus size={14} /> {t('Add Product')}
-          </button>
-          <button data-tour="publish" onClick={handlePublish} disabled={publishing}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white shadow-lg transition-all hover:scale-105 active:scale-95 disabled:opacity-50"
-            style={{ background: BRAND }}>
-            {publishing ? <RefreshCw size={14} className="animate-spin" /> : <Send size={14} />}
-            {publishing ? t('Publishing…') : t('Publish to Network')}
-          </button>
-        </div>
+          <div className="flex gap-2">
+            <button onClick={() => onNav('add_offer', { catalogId })}
+              className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold border border-slate-500/30 text-slate-400 hover:bg-slate-500/10 transition-colors">
+              <Tag size={14} /> {t('Add Offer')}
+            </button>
+            <button data-tour="add-product" onClick={() => onNav('add_product', { catalogId })}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold border border-blue-500/30 text-blue-400 hover:bg-blue-500/10 transition-colors">
+              <Plus size={14} /> {t('Add Product')}
+            </button>
+            <button data-tour="publish" onClick={handlePublish} disabled={publishing}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white shadow-lg transition-all hover:scale-105 active:scale-95 disabled:opacity-50"
+              style={{ background: BRAND }}>
+              {publishing ? <RefreshCw size={14} className="animate-spin" /> : <Send size={14} />}
+              {publishing ? t('Publishing…') : t('Publish to Network')}
+            </button>
+          </div>
         )}
       </div>
 

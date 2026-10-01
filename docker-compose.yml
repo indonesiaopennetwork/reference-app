@@ -538,7 +538,6 @@ services:
       # ADAPTER_URL is the ONIX BAP adapter the BAP actually POSTs to.
       ADAPTER_URL: http://onix-bap:8081/bap/caller
 
-
       # Selects which of the two discover implementations the browser's
       # GET /api/v1/discover actually runs -- exactly one at a time (see
       # internal/config.Config.DiscoverMethod):
