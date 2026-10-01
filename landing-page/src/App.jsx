@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { LogOut } from 'lucide-react'
-import { config } from './config.js'
+import { config, basePath } from './config.js'
 import { startLogin, handleCallback, getValidToken, clearToken, logout } from './oidc.js'
 
 async function bootstrap(token, businessName) {
@@ -23,14 +23,14 @@ export default function App() {
   useEffect(() => {
     async function run() {
       try {
-        if (window.location.pathname === '/logout') {
+        if (window.location.pathname === `${basePath}logout`) {
           logout() // navigates away; nothing after this runs
           return
         }
 
-        if (window.location.pathname === '/callback') {
+        if (window.location.pathname === `${basePath}callback`) {
           await handleCallback()
-          window.history.replaceState({}, '', '/')
+          window.history.replaceState({}, '', basePath)
         }
 
         const validToken = getValidToken()
@@ -74,7 +74,7 @@ export default function App() {
 
   function retry() {
     clearToken()
-    window.location.href = '/'
+    window.location.href = basePath
   }
 
   if (state === 'loading') return <CenteredMessage text="Loading..." />

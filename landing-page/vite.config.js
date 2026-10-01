@@ -4,5 +4,8 @@ import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig({
   envDir: '../',
+  // Relative asset URLs so one build works both at a domain root and behind
+  // ion-landing-page's /tsp/remiges/ proxy -- see basePath in src/config.js.
+  base: './',
   plugins: [react(), tailwindcss()],
 })

@@ -47,7 +47,7 @@ resource "google_cloud_run_v2_service" "bap_frontend" {
       }
       env {
         name  = "LANDING_PAGE_URL"
-        value = "https://${var.landing_page_domain}"
+        value = local.landing_page_url
       }
     }
   }

@@ -25,11 +25,17 @@ resource "google_cloud_run_v2_service" "ion_landing_page" {
       name  = "ion-landing-page"
       image = local.images.ion_landing_page
 
-      # Read by index.html's launchPartnerDemo() via env.sh/env-config.js --
-      # points at the existing, untouched landing-page service.
+      # Read by index.html's launchPartnerDemo() via env.sh/env-config.js.
       env {
         name  = "LANDING_PAGE_URL"
-        value = "https://${var.landing_page_domain}"
+        value = local.landing_page_url
+      }
+
+      # nginx.conf.template proxies /tsp/remiges/ to this host -- see
+      # local.landing_page_url.
+      env {
+        name  = "LANDING_PAGE_UPSTREAM"
+        value = trimprefix(google_cloud_run_v2_service.landing_page.uri, "https://")
       }
 
       # nginx.conf.template proxy_pass's to this bucket's public URL

@@ -1,9 +1,9 @@
 // Minimal OAuth2 Authorization Code + PKCE client for Zitadel. No library --
 // this is ~80 lines of standard, well-documented browser-native crypto
 // (SubtleCrypto) and fetch calls, not worth a dependency for.
-import { config } from './config.js'
+import { config, basePath } from './config.js'
 
-const REDIRECT_URI = `${window.location.origin}/callback`
+const REDIRECT_URI = `${window.location.origin}${basePath}callback`
 const STORAGE_TOKEN_KEY = 'landing.accessToken'
 const STORAGE_EXPIRES_KEY = 'landing.accessTokenExpiresAt'
 const STORAGE_IDTOKEN_KEY = 'landing.idToken'
@@ -110,7 +110,7 @@ export function logout() {
     done = true
     const params = new URLSearchParams({
       client_id: config.zitadelClientId,
-      post_logout_redirect_uri: window.location.origin,
+      post_logout_redirect_uri: `${window.location.origin}${basePath}`,
     })
     if (idToken) params.set('id_token_hint', idToken)
     window.location.href = `${config.zitadelIssuer}/oidc/v1/end_session?${params}`
