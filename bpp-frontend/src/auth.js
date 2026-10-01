@@ -4,6 +4,12 @@
 // the single entry point; a visit with no token, ever, redirects there.
 const TOKEN_KEY = 'bpp.accessToken'
 
+// Path this app is mounted at, with a trailing slash: '/' when served at a
+// domain root, '/tsp/remiges/pn/' behind ion-landing-page's proxy. Derived
+// from where the bundle itself was loaded from (<base>assets/index-*.js in a
+// build, /src/auth.js under `npm run dev`), so no per-mount config needed.
+export const basePath = new URL('..', import.meta.url).pathname
+
 // Reads ?token= from the URL (if present), stores it, and strips it from
 // the URL bar via history.replaceState so it doesn't linger in the
 // address bar or browser history.

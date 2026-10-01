@@ -10,11 +10,11 @@ import {
   BookOpen, FolderOpen, Send, ArrowLeft, ExternalLink, LogOut,
   ChevronDown, Copy, Check, Scale, Pencil, Compass, Lock,
 } from 'lucide-react'
-import { captureTokenFromUrl, getToken, clearToken, redirectToLogin, logout } from './auth.js'
+import { captureTokenFromUrl, getToken, clearToken, redirectToLogin, logout, basePath } from './auth.js'
 import Tour from './Tour.jsx'
 import { useI18n, rich, LanguageToggle, tNow, localeNow } from './i18n.jsx'
 
-const API_BASE = '/api/v1'
+const API_BASE = `${basePath}api/v1`
 const BRAND = 'linear-gradient(135deg,#00b8e6 0%,#1e2fa0 100%)'
 const BRAND2 = 'linear-gradient(135deg,#e6006e 0%,#7c3aed 100%)'
 
@@ -4158,7 +4158,7 @@ export default function App() {
   // here at all -- landing-page is the single entry point (see
   // src/auth.js); a visit with no token, ever, redirects there.
   useEffect(() => {
-    if (window.location.pathname === '/logout') {
+    if (window.location.pathname === `${basePath}logout`) {
       clearToken() // loaded in a hidden iframe from landing-page's logout button
       return
     }

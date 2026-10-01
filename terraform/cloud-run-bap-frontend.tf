@@ -43,7 +43,7 @@ resource "google_cloud_run_v2_service" "bap_frontend" {
       }
       env {
         name  = "BPP_ADMIN_URL"
-        value = "https://${var.bpp_frontend_domain}"
+        value = local.bpp_frontend_url
       }
       env {
         name  = "LANDING_PAGE_URL"

@@ -5,6 +5,12 @@
 const TOKEN_KEY = 'bap.accessToken'
 const PROVIDER_ID_KEY = 'bap.providerId'
 
+// Path this app is mounted at, with a trailing slash: '/' when served at a
+// domain root, '/tsp/remiges/cn/' behind ion-landing-page's proxy. Derived
+// from where the bundle itself was loaded from (<base>assets/index-*.js in a
+// build, /src/auth.js under `npm run dev`), so no per-mount config needed.
+export const basePath = new URL('..', import.meta.url).pathname
+
 // Reads ?token= from the URL (if present), stores it, and strips it from
 // the URL bar via history.replaceState so it doesn't linger in the
 // address bar or browser history.

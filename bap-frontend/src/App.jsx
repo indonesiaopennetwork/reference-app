@@ -12,11 +12,11 @@ import {
 } from 'lucide-react';
 import Tour from './Tour.jsx';
 import { useI18n, rich, LanguageToggle, tNow, localeNow } from './i18n.jsx';
-import { captureTokenFromUrl, getToken, getProviderId, clearToken, redirectToLogin, logout } from './auth.js';
+import { captureTokenFromUrl, getToken, getProviderId, clearToken, redirectToLogin, logout, basePath } from './auth.js';
 
 // BPP target, network ID, and BAP identity are all server-side config (BAP .env).
 // The frontend only needs the API base path.
-const API_BASE = '/api/v1';
+const API_BASE = `${basePath}api/v1`;
 
 // Attaches the buyer's bearer token (if any) to every API call. Auth is a
 // frontend-only gate here (see App()'s authReady check) -- the backend
@@ -1983,7 +1983,7 @@ export default function App() {
   // here at all -- landing-page is the single entry point (see
   // src/auth.js); a visit with no token, ever, redirects there.
   useEffect(() => {
-    if (window.location.pathname === '/logout') {
+    if (window.location.pathname === `${basePath}logout`) {
       clearToken(); // loaded in a hidden iframe from landing-page's logout button
       return;
     }
