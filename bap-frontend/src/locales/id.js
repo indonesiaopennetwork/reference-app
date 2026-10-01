@@ -361,7 +361,12 @@ export default {
   'Message received': 'Pesan diterima',
   'Response received': 'Respons diterima',
   'Response sent': 'Respons dikirim',
-  'Nothing': 'Tidak ada',
   'Message Log': 'Log Pesan',
   'No resources found in this section.': 'Tidak ada produk di bagian ini.',
+  'Collapse': 'Ciutkan',
+  'Expand': 'Bentangkan',
+  '{count} keys': '{count} kunci',
+  'Copy': 'Salin',
+  'Copied': 'Tersalin',
+  'No payload recorded': 'Tidak ada payload yang tercatat',
 }
