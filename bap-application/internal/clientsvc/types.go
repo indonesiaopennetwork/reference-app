@@ -85,6 +85,9 @@ type BecknContext struct {
 type ClientDiscoverRequest struct {
 	TextSearch   string // maps to intent.textSearch in the outbound Beckn request
 	ProviderName string // maps to intent.provider.descriptor.name
+	// BuyerSubject is the logged-in buyer, recorded against the discover's
+	// transactionId for their message log; nil for an anonymous search.
+	BuyerSubject *string
 }
 
 // ClientCancelRequest — frontend initiates Cancel.

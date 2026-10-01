@@ -1764,6 +1764,143 @@ function OrderDetailPanel({ txnId, onBack }) {
   );
 }
 
+/* ─────────────────────────── MessageLogPanel ────────────────────────────── */
+// The buyer's own Beckn messages (GET /messages): their searches (discover /
+// on_discover) and every message of their orders, newest first. Each row
+// opens to the request sent and the response received, like the BPP's log.
+const MESSAGE_KINDS = ['ALL', 'DISCOVER', 'ORDERS'];
+const isDiscover = a => a === 'discover' || a === 'on_discover';
+
+function MessageLogPanel() {
+  const { t, locale } = useI18n();
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [kind, setKind] = useState('ALL');
+  const [dir, setDir] = useState('ALL');
+  const [filter, setFilter] = useState('');
+  const [open, setOpen] = useState(() => new Set());
+
+  const load = useCallback(async () => {
+    setLoading(true); setError(null);
+    try {
+      const r = await apiFetch('/messages?limit=200');
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
+      setItems((await r.json()).items || []);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const toggle = id => setOpen(prev => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
+
+  const shown = items.filter(m =>
+    (kind === 'ALL' || (kind === 'DISCOVER') === isDiscover(m.action)) &&
+    (dir === 'ALL' || m.direction === dir) &&
+    (!filter || m.action.includes(filter.toLowerCase()) || (m.transaction_id || '').includes(filter.trim())));
+  const acks = shown.filter(m => m.ack_status === 'ACK').length;
+  const nacks = shown.filter(m => m.ack_status === 'NACK').length;
+  const when = ts => new Date(ts).toLocaleString(locale, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const pill = (active) => `px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all ${active ? 'text-white' : 'text-slate-400 hover:text-slate-200'}`;
+  const pillStyle = active => (active ? { background: 'linear-gradient(135deg,#00b8e6,#1e2fa0)' } : {});
+
+  return (
+    <div className="flex-1 flex flex-col overflow-hidden" data-tour="message-log">
+      <div className="shrink-0 px-4 pt-3 pb-2 space-y-2 border-b border-white/[0.06]">
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex gap-1 p-0.5 rounded-xl bg-white/[0.04] border border-white/[0.07]">
+            {MESSAGE_KINDS.map(k => (
+              <button key={k} onClick={() => setKind(k)} className={pill(kind === k)} style={pillStyle(kind === k)}>
+                {t({ ALL: 'All', DISCOVER: 'Discover', ORDERS: 'Orders' }[k])}
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-1 p-0.5 rounded-xl bg-white/[0.04] border border-white/[0.07]">
+            {['ALL', 'OUTBOUND', 'INBOUND'].map(d => (
+              <button key={d} onClick={() => setDir(d)} className={pill(dir === d)} style={pillStyle(dir === d)}>
+                {t({ ALL: 'Both', OUTBOUND: 'Sent', INBOUND: 'Received' }[d])}
+              </button>
+            ))}
+          </div>
+          <button onClick={load} title={t('Refresh')}
+            className="ml-auto p-1.5 rounded-lg text-slate-400 hover:text-white border border-white/[0.08]">
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+          </button>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500" />
+            <input value={filter} onChange={e => setFilter(e.target.value)} placeholder={t('Filter by action or txn ID…')}
+              className="w-full bg-slate-900 border border-white/[0.08] rounded-lg pl-8 pr-2 py-1.5 text-xs text-slate-200 placeholder-slate-500 outline-none focus:border-cyan-500/40" />
+          </div>
+          <span className="shrink-0 text-[11px] text-slate-500 tabular-nums">
+            {shown.length} · <span className="text-emerald-400">{acks} ACK</span> · <span className="text-rose-400">{nacks} NACK</span>
+          </span>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
+        {loading && items.length === 0 && (
+          <div className="flex justify-center py-16"><Loader2 className="w-8 h-8 text-cyan-400 animate-spin" /></div>
+        )}
+        {error && <p className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">{error}</p>}
+        {!loading && !error && shown.length === 0 && (
+          <div className="flex flex-col items-center gap-2 py-16 text-slate-500">
+            <MessageSquare className="w-10 h-10 opacity-20" />
+            <p className="text-sm">{t('No messages yet')}</p>
+            <p className="text-xs opacity-60">{t('Your searches and orders send Beckn messages; they appear here.')}</p>
+          </div>
+        )}
+        {shown.map(m => {
+          const isOpen = open.has(m.id);
+          const ack = m.ack_status === 'ACK' ? 'text-emerald-300 bg-emerald-500/10 border-emerald-500/25'
+            : m.ack_status === 'NACK' ? 'text-rose-300 bg-rose-500/10 border-rose-500/25' : 'text-slate-400 bg-white/5 border-white/10';
+          return (
+            <div key={m.id} className="rounded-xl border border-white/[0.07] overflow-hidden" style={{ background: 'rgba(255,255,255,0.025)' }}>
+              <button onClick={() => toggle(m.id)} className="w-full text-left px-3 py-2.5 flex items-center gap-2 hover:bg-white/[0.03]">
+                <ChevronDown className={`w-3.5 h-3.5 shrink-0 text-slate-500 transition-transform ${isOpen ? 'rotate-180 text-cyan-400' : ''}`} />
+                <span className={`shrink-0 text-[10px] font-bold ${m.direction === 'OUTBOUND' ? 'text-cyan-300' : 'text-violet-300'}`}>
+                  {m.direction === 'OUTBOUND' ? '→' : '←'}
+                </span>
+                <span className="font-mono text-xs font-semibold text-white">{m.action}</span>
+                {m.ack_status && <span className={`shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded border ${ack}`}>{m.ack_status}</span>}
+                <span className="font-mono text-[10px] text-slate-500 truncate" title={m.transaction_id}>{(m.transaction_id || '').slice(0, 8)}</span>
+                <span className="ml-auto shrink-0 text-[10px] text-slate-500 tabular-nums">{when(m.created_at)}</span>
+              </button>
+              {isOpen && (
+                <div className="px-3 pb-3 space-y-2">
+                  {m.error_message && <p className="text-[11px] text-rose-300 break-words">{m.error_message}</p>}
+                  <p className="text-[10px] text-slate-500 break-all">
+                    {t('Txn ID')}: <span className="font-mono text-slate-400">{m.transaction_id}</span>
+                    {m.url && <> · <span className="font-mono">{m.url}</span></>}
+                    {m.processing_duration_ms != null && <> · {m.processing_duration_ms} ms</>}
+                  </p>
+                  {[[m.direction === 'OUTBOUND' ? t('Request sent') : t('Message received'), m.request_payload],
+                    [m.direction === 'OUTBOUND' ? t('Response received') : t('Response sent'), m.response_payload]].map(([label, body]) => (
+                    <div key={label} className="rounded-lg border border-white/[0.07] bg-slate-950/60 overflow-hidden">
+                      <p className="px-2.5 py-1.5 text-[10px] font-semibold text-slate-400 border-b border-white/[0.06]">{label}</p>
+                      <pre className="max-h-72 overflow-auto p-2.5 text-[10.5px] leading-relaxed font-mono text-slate-300 whitespace-pre">
+                        {body == null ? t('Nothing') : JSON.stringify(body, null, 2)}
+                      </pre>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function OrderHistoryDrawer({ open, onClose }) {
   const { t, locale } = useI18n();
   const [orders, setOrders] = useState([]);
@@ -1771,6 +1908,7 @@ function OrderHistoryDrawer({ open, onClose }) {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [selectedId, setSelectedId] = useState(null);
+  const [tab, setTab] = useState('orders'); // orders | messages
   const limit = 10;
 
   const load = useCallback(async (p = 1) => {
@@ -1790,7 +1928,7 @@ function OrderHistoryDrawer({ open, onClose }) {
   }, []);
 
   useEffect(() => {
-    if (open) { load(1); setSelectedId(null); }
+    if (open) { load(1); setSelectedId(null); setTab('orders'); }
   }, [open, load]);
 
   const totalPages = Math.ceil(total / limit);
@@ -1805,7 +1943,7 @@ function OrderHistoryDrawer({ open, onClose }) {
           <motion.aside
             initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
             transition={{ type: 'spring', damping: 30, stiffness: 300 }}
-            className="fixed right-0 top-0 h-full w-full max-w-md glass z-50 flex flex-col shadow-2xl overflow-hidden"
+            className={`fixed right-0 top-0 h-full w-full glass z-50 flex flex-col shadow-2xl overflow-hidden transition-[max-width] duration-300 ${tab === 'messages' ? 'max-w-2xl' : 'max-w-md'}`}
           >
             {/* Header */}
             <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.07] shrink-0">
@@ -1817,9 +1955,9 @@ function OrderHistoryDrawer({ open, onClose }) {
                 ) : null}
                 <History className="w-5 h-5 text-cyan-400" />
                 <h2 className="text-lg font-bold text-white">
-                  {selectedId ? t('Order Detail') : t('Order History')}
+                  {selectedId ? t('Order Detail') : tab === 'messages' ? t('Message Log') : t('Order History')}
                 </h2>
-                {!selectedId && total > 0 && (
+                {!selectedId && tab === 'orders' && total > 0 && (
                   <span className="bg-cyan-500/20 text-cyan-400 text-xs font-bold px-2 py-0.5 rounded-full">{total}</span>
                 )}
               </div>
@@ -1828,9 +1966,27 @@ function OrderHistoryDrawer({ open, onClose }) {
               </button>
             </div>
 
+            {/* Orders | Message Log */}
+            {!selectedId && (
+              <div className="shrink-0 flex gap-1 px-4 pt-3" role="tablist">
+                {[['orders', t('Orders'), History], ['messages', t('Message Log'), MessageSquare]].map(([id, label, Icon]) => (
+                  <button key={id} role="tab" aria-selected={tab === id} onClick={() => setTab(id)} data-tour={`tab-${id}`}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${tab === id ? 'text-white' : 'text-slate-400 hover:text-slate-200 bg-white/[0.04]'}`}
+                    style={tab === id ? { background: 'linear-gradient(135deg,#00b8e6,#1e2fa0)' } : {}}>
+                    <Icon className="w-3.5 h-3.5" /> {label}
+                  </button>
+                ))}
+              </div>
+            )}
+
             {/* Detail panel */}
             <AnimatePresence mode="wait">
-              {selectedId ? (
+              {!selectedId && tab === 'messages' ? (
+                <motion.div key="messages" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                  className="flex-1 flex flex-col overflow-hidden">
+                  <MessageLogPanel />
+                </motion.div>
+              ) : selectedId ? (
                 <motion.div key="detail" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}
                   className="flex-1 flex flex-col overflow-hidden">
                   <OrderDetailPanel txnId={selectedId} onBack={() => setSelectedId(null)} />

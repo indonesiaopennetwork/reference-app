@@ -103,5 +103,6 @@ func RegisterRoutes(r *gin.Engine, pool *pgxpool.Pool, cfg *config.Config, lh *l
 		v1.POST("/support", clientH.HandleSupport)
 		v1.GET("/orders", clientH.HandleListOrders)
 		v1.GET("/orders/:id", clientH.HandleGetOrder)
+		v1.GET("/messages", clientH.HandleListMessages)
 	}
 }
