@@ -84,6 +84,35 @@ func (s *Service) Process(ctx context.Context, req *OnUpdateRequest) {
 			json.RawMessage(loggedJSON),
 		)
 	} else {
+		// MarkUpdateReceivedIfPending returned the transaction to CONFIRMED;
+		// now follow the contract's own status on top of that. A partial
+		// cancellation or return leaves it ACTIVE (CONFIRMED), cancelling
+		// the last item makes it CANCELLED, returning every item makes it
+		// COMPLETE. Only done for an accepted callback, so a duplicate or
+		// unsolicited one can never move the order's state.
+		var contractStatus struct {
+			Status struct {
+				Code string `json:"code"`
+			} `json:"status"`
+		}
+		_ = json.Unmarshal(contractJSON, &contractStatus)
+		txnStatus := map[string]dbsqlc.TransactionStatus{
+			"CANCELLED": dbsqlc.TransactionStatusCANCELLED,
+			"COMPLETE":  dbsqlc.TransactionStatusCOMPLETE,
+		}[contractStatus.Status.Code]
+		if txnStatus != "" {
+			if err := q.UpsertTransaction(ctx, dbsqlc.UpsertTransactionParams{
+				TransactionID: txID,
+				BapID:         s.cfg.BapID,
+				NetworkID:     strPtr(req.Context.NetworkID),
+				BppID:         strPtr(req.Context.BppID),
+				BppUri:        strPtr(req.Context.BppURI),
+				Status:        txnStatus,
+			}); err != nil {
+				module.Warn().Error(err).Log("upsert transaction failed")
+			}
+		}
+
 		// Record the seller's decision first, while priorSnapshot is still
 		// the pre-update contract. ResolveUpdateRequest is itself
 		// predicated on the row still being PENDING, so this stays correct

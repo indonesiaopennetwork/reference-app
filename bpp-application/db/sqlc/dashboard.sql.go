@@ -327,7 +327,26 @@ SELECT
     c.status,
     c.bap_id,
     c.created_at,
-    COALESCE(co.offer_descriptor, '{}') AS offer_descriptor
+    COALESCE(co.offer_descriptor, '{}') AS offer_descriptor,
+    -- Delivery progress (PENDING / Packed / Shipped / Delivered): the
+    -- contract's non-RETURN performance, else the dashboard's recorded status.
+    COALESCE(
+        (SELECT p->'status'->>'code'
+           FROM jsonb_array_elements(COALESCE(c.contract_attributes->'performance', '[]'::jsonb)) p
+          WHERE COALESCE(p->'performanceAttributes'->>'type', '') <> 'RETURN'
+          LIMIT 1),
+        (SELECT cp.status_code FROM contract_performances cp WHERE cp.contract_id = c.id LIMIT 1),
+        ''
+    )::TEXT AS fulfillment_status,
+    -- The latest return's outcome (Return_Approved / Return_Rejected), if any.
+    COALESCE(
+        (SELECT p->'status'->>'code'
+           FROM jsonb_array_elements(COALESCE(c.contract_attributes->'performance', '[]'::jsonb)) WITH ORDINALITY AS e(p, n)
+          WHERE p->'performanceAttributes'->>'type' = 'RETURN'
+          ORDER BY n DESC
+          LIMIT 1),
+        ''
+    )::TEXT AS return_status
 FROM contracts c
 LEFT JOIN LATERAL (
     SELECT co2.offer_descriptor
@@ -352,12 +371,14 @@ type ListContractsParams struct {
 }
 
 type ListContractsRow struct {
-	ID              uuid.UUID          `json:"id"`
-	TransactionID   uuid.UUID          `json:"transaction_id"`
-	Status          ContractStatus     `json:"status"`
-	BapID           string             `json:"bap_id"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
-	OfferDescriptor json.RawMessage    `json:"offer_descriptor"`
+	ID                uuid.UUID          `json:"id"`
+	TransactionID     uuid.UUID          `json:"transaction_id"`
+	Status            ContractStatus     `json:"status"`
+	BapID             string             `json:"bap_id"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	OfferDescriptor   json.RawMessage    `json:"offer_descriptor"`
+	FulfillmentStatus string             `json:"fulfillment_status"`
+	ReturnStatus      string             `json:"return_status"`
 }
 
 // ============================================================
@@ -387,6 +408,8 @@ func (q *Queries) ListContracts(ctx context.Context, arg ListContractsParams) ([
 			&i.BapID,
 			&i.CreatedAt,
 			&i.OfferDescriptor,
+			&i.FulfillmentStatus,
+			&i.ReturnStatus,
 		); err != nil {
 			return nil, err
 		}

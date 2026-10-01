@@ -726,6 +726,68 @@ func (h *Handler) HandleListRatings(c *gin.Context) {
 // PUT /api/v1/orders/:id/fulfillment-status
 // ---------------------------------------------------------------------------
 
+// autoDeliverAfter is how long an order stays Shipped before it is marked
+// Delivered (a stand-in for a real logistics partner's delivery event).
+const autoDeliverAfter = time.Minute
+
+// RunAutoDelivery marks orders Delivered once they have been Shipped for
+// autoDeliverAfter, every interval until ctx is done. It works from the
+// database (contract_performances), so orders shipped before a restart are
+// still delivered after it.
+func (h *Handler) RunAutoDelivery(ctx context.Context, interval time.Duration) {
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		h.deliverShipped(ctx)
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+func (h *Handler) deliverShipped(ctx context.Context) {
+	rows, err := h.pool.Query(ctx, `
+		SELECT DISTINCT cp.contract_id FROM contract_performances cp
+		  JOIN contracts c ON c.id = cp.contract_id
+		 WHERE cp.status_code = 'Shipped' AND cp.updated_at <= NOW() - $1::interval
+		   AND c.bpp_id = $2 AND c.status = 'ACTIVE' AND c.deleted_at IS NULL`,
+		fmt.Sprintf("%d seconds", int(autoDeliverAfter.Seconds())), h.cfg.BppID)
+	if err != nil {
+		h.lh.WithModule("dashboardsvc").Warn().Error(err).Log("auto-delivery sweep failed")
+		return
+	}
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
+		}
+	}
+	rows.Close()
+
+	q := sqlc.New(h.pool)
+	delivered := "Delivered"
+	for _, id := range ids {
+		if err := q.UpdatePerformanceStatus(ctx, sqlc.UpdatePerformanceStatusParams{StatusCode: &delivered, ContractID: id}); err != nil {
+			h.lh.WithModule("dashboardsvc").Warn().Error(err).Log("auto-delivery failed for " + id.String())
+			continue
+		}
+		h.markDelivered(ctx, id)
+		h.triggerUnsolicitedOnStatus(id, delivered)
+	}
+}
+
+// markDelivered stamps when the order was delivered -- the start of its return
+// window (offer policies.returns.window). The first delivery time is kept.
+func (h *Handler) markDelivered(ctx context.Context, contractID uuid.UUID) {
+	if _, err := h.pool.Exec(ctx,
+		`UPDATE contracts SET delivered_at = COALESCE(delivered_at, NOW()) WHERE id = $1`, contractID); err != nil {
+		h.lh.WithModule("dashboardsvc").Warn().Error(err).Log("failed to record delivered_at")
+	}
+}
+
 // HandleUpdateFulfillmentStatus updates the contract performance status
 func (h *Handler) HandleUpdateFulfillmentStatus(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
@@ -739,6 +801,12 @@ func (h *Handler) HandleUpdateFulfillmentStatus(c *gin.Context) {
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	// Returns are decided by the offer's return policy when the buyer requests
+	// them (updatesvc), not approved by hand.
+	if strings.HasPrefix(req.Status, "Return") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "return status is set by the return policy, not manually"})
 		return
 	}
 
@@ -764,24 +832,15 @@ func (h *Handler) HandleUpdateFulfillmentStatus(c *gin.Context) {
 		return
 	}
 
+	if req.Status == "Delivered" {
+		h.markDelivered(ctx, id)
+	}
+
 	// Trigger unsolicited on_status
 	h.triggerUnsolicitedOnStatus(id, req.Status)
 
-	// If Shipped, schedule Delivered after 10 mins
-	if req.Status == "Shipped" {
-		go func(cid uuid.UUID) {
-			time.Sleep(1 * time.Minute)
-			bgCtx := context.Background()
-			newStatus := "Delivered"
-			err := q.UpdatePerformanceStatus(bgCtx, sqlc.UpdatePerformanceStatusParams{
-				StatusCode: &newStatus,
-				ContractID: cid,
-			})
-			if err == nil {
-				h.triggerUnsolicitedOnStatus(cid, newStatus)
-			}
-		}(id)
-	}
+	// Shipped orders become Delivered after autoDeliverAfter -- done by
+	// RunAutoDelivery's sweep, not an in-memory timer, so a restart can't lose it.
 
 	c.JSON(http.StatusOK, gin.H{"status": "updated"})
 }
@@ -800,7 +859,7 @@ func (h *Handler) triggerUnsolicitedOnStatus(contractID uuid.UUID, status string
 	}
 
 	var contractMap map[string]interface{}
-	
+
 	// If contract_attributes is present, use it. Otherwise, fall back to beckn_message_log
 	if len(row.ContractAttributes) > 0 && string(row.ContractAttributes) != "null" {
 		if err := json.Unmarshal(row.ContractAttributes, &contractMap); err != nil {
@@ -840,7 +899,7 @@ func (h *Handler) triggerUnsolicitedOnStatus(contractID uuid.UUID, status string
 
 	contractMap["id"] = row.ID.String()
 	contractMap["status"] = map[string]string{"code": string(row.Status)}
-	
+
 	isReturnStatus := status == "Return_Received" || status == "Return_Rejected" || status == "Return_Approved"
 
 	if perfs, ok := contractMap["performance"].([]interface{}); ok && len(perfs) > 0 {

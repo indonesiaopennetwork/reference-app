@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -20,6 +21,7 @@ import (
 	dbsqlc "github.com/ion/winroom/bpp/db/sqlc"
 	"github.com/ion/winroom/bpp/internal/config"
 	"github.com/ion/winroom/bpp/internal/httpclient"
+	"github.com/ion/winroom/bpp/internal/stock"
 )
 
 // ConfirmService handles the full /beckn/confirm flow:
@@ -55,6 +57,12 @@ func (s *ConfirmService) ProcessConfirm(ctx context.Context, req *ConfirmRequest
 	reqJSON, _ := json.Marshal(req)
 
 	prettyLog(fmt.Sprintf("← IN   CONFIRM   | txn=%.8s… | bap=%s", req.Context.TransactionID, req.Context.BapID), req)
+
+	// The seller's payout terms go on every settlement before it is stored and echoed.
+	for i := range req.Message.Contract.Settlements {
+		st := &req.Message.Contract.Settlements[i]
+		st.SettlementAttributes = withSettlementTerms(st.SettlementAttributes, s.cfg.SettlementBasis, s.cfg.SettlementWindow)
+	}
 
 	// Transition DRAFT → ACTIVE, record settlements, and retrieve the contract UUID.
 	contractID, err := s.confirmContract(ctx, req)
@@ -97,6 +105,13 @@ func (s *ConfirmService) ProcessConfirm(ctx context.Context, req *ConfirmRequest
 	confirmedContract := req.Message.Contract
 	confirmedContract.ID = contractID.String()
 	confirmedContract.Status = &ContractStatus{Code: "ACTIVE"}
+	// Commitments go live with the contract: DRAFT → ACTIVE.
+	for i := range confirmedContract.Commitments {
+		cm := &confirmedContract.Commitments[i]
+		if cm.Status == nil || cm.Status.Descriptor == nil || cm.Status.Descriptor.Code == "DRAFT" {
+			cm.Status = &CommitmentStatus{Descriptor: &StatusDescriptor{Code: "ACTIVE"}}
+		}
+	}
 	confirmedContract.Settlements = completedSettlements(confirmedContract.Settlements)
 
 	onConfirmReq := OnConfirmRequest{
@@ -120,40 +135,40 @@ func (s *ConfirmService) ProcessConfirm(ctx context.Context, req *ConfirmRequest
 	s.callOnConfirm(ctx, txID, outboundMsgID, onConfirmReq)
 }
 
-// decrementStock reduces the on-hand stock by 1 for every resource referenced
-// in the confirmed order's commitments. Both direct resource lists and offer
-// resource-ID lists are handled. Errors are logged but never fatal — a stock
-// bookkeeping failure must not block the order confirmation.
+// decrementStock moves each committed resource's ordered quantity from on-hand
+// to sold (cancellations return it via internal/cancellation). Errors are
+// logged but never fatal — a stock bookkeeping failure must not block the
+// order confirmation.
 func (s *ConfirmService) decrementStock(ctx context.Context, req *ConfirmRequest) {
-	q := dbsqlc.New(s.pool)
 	bppID := s.cfg.BppID
 
-	seen := map[string]struct{}{}
+	units := map[string]float64{}
 	for _, c := range req.Message.Contract.Commitments {
 		for _, r := range c.Resources {
-			seen[r.ID] = struct{}{}
+			qty := 1.0
+			if r.Quantity != nil && r.Quantity.UnitQuantity > 0 {
+				qty = r.Quantity.UnitQuantity
+			}
+			units[r.ID] += qty
 		}
-		if c.Offer != nil {
+		if len(c.Resources) == 0 && c.Offer != nil {
 			for _, rid := range c.Offer.ResourceIDs {
-				seen[rid] = struct{}{}
+				units[rid]++
 			}
 		}
 	}
 
-	for resourceID := range seen {
-		if err := q.DecrementResourceStock(ctx, dbsqlc.DecrementResourceStockParams{
-			ResourceID: resourceID,
-			BppID:      bppID,
-		}); err != nil {
+	for resourceID, qty := range units {
+		if err := stock.Adjust(ctx, s.pool, bppID, resourceID, -int(math.Round(qty))); err != nil {
 			s.lh.WithModule("confirmsvc").Warn().Error(err).Log("stock decrement failed for resource " + resourceID)
 		} else {
-			log.Printf("[stock] decremented stock for resource=%s bpp=%s", resourceID, bppID)
+			log.Printf("[stock] sold %v of resource=%s bpp=%s", qty, resourceID, bppID)
 		}
 	}
 }
 
-// confirmContract transitions the DRAFT contract to ACTIVE and records the
-// BAP's settlements as COMPLETE, in one transaction: a contract is only
+// confirmContract transitions the DRAFT contract and its commitments to ACTIVE
+// and records the BAP's settlements as COMPLETE, in one transaction: a contract is only
 // activated together with its payment proof.
 // Returns the UUID of the confirmed contract.
 func (s *ConfirmService) confirmContract(ctx context.Context, req *ConfirmRequest) (uuid.UUID, error) {
@@ -181,6 +196,13 @@ func (s *ConfirmService) confirmContract(ctx context.Context, req *ConfirmReques
 			return uuid.UUID{}, fmt.Errorf("no DRAFT contract found for transactionId %q: confirm requires a prior init", req.Context.TransactionID)
 		}
 		return uuid.UUID{}, fmt.Errorf("confirm contract DB update: %w", err)
+	}
+
+	// The contract's commitments become ACTIVE with it.
+	if _, err := tx.Exec(ctx,
+		`UPDATE commitments SET status = 'ACTIVE'::commitment_status, updated_at = NOW()
+		  WHERE contract_id = $1 AND status = 'DRAFT'::commitment_status`, contractID); err != nil {
+		return uuid.UUID{}, fmt.Errorf("activate commitments: %w", err)
 	}
 
 	for _, st := range req.Message.Contract.Settlements {
@@ -223,6 +245,27 @@ func validateSettlements(c ConfirmContract) error {
 		}
 	}
 	return nil
+}
+
+// withSettlementTerms adds settlementBasis / settlementWindow (the seller's
+// payout terms, ONDC-style -- not yet in the ION TradeSettlement schema, which
+// allows extra properties) to a settlementAttributes object.
+func withSettlementTerms(raw json.RawMessage, basis, window string) json.RawMessage {
+	var attrs map[string]any
+	if json.Unmarshal(raw, &attrs) != nil || attrs == nil {
+		return raw
+	}
+	if basis != "" {
+		attrs["settlementBasis"] = basis
+	}
+	if window != "" {
+		attrs["settlementWindow"] = window
+	}
+	out, err := json.Marshal(attrs)
+	if err != nil {
+		return raw
+	}
+	return out
 }
 
 // completedSettlements returns a copy of settlements marked COMPLETE — with no

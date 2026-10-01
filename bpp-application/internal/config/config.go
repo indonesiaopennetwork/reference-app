@@ -33,6 +33,14 @@ type Config struct {
 	// If empty, the service derives it from BppURI by replacing /bpp/receiver with /bpp/caller.
 	BppCallerURL string
 
+	// SettlementBasis / SettlementWindow are this seller's payout terms,
+	// written into every settlement's settlementAttributes (ONDC-style,
+	// pending their addition to the ION schema): the event that starts the
+	// payout (DELIVERY | SHIPMENT | RETURN_WINDOW_EXPIRY) and the ISO 8601
+	// duration after it within which settlement happens.
+	SettlementBasis  string
+	SettlementWindow string
+
 	// CDSPublishURL is the catalog discovery service endpoint that receives catalog/publish requests.
 	CDSPublishURL string
 
@@ -98,6 +106,9 @@ func Load() (*Config, error) {
 		BppURI:       os.Getenv("BPP_URI"),
 		NetworkID:    os.Getenv("NETWORK_ID"),
 		BppCallerURL: os.Getenv("BPP_CALLER_URL"),
+
+		SettlementBasis:  getEnv("SETTLEMENT_BASIS", "DELIVERY"),
+		SettlementWindow: getEnv("SETTLEMENT_WINDOW", "P1D"),
 
 		CDSPublishURL:  os.Getenv("CDS_PUBLISH_URL"),
 		CatalogBaseURL: os.Getenv("CATALOG_BASE_URL"),

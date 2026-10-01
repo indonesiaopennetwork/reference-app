@@ -159,6 +159,18 @@ services:
       context: ./otel-collector
     container_name: otel-collector-bap
     restart: unless-stopped
+    environment:
+      # Defaults to ion-monitor's staging deployment. Override in .env to
+      # point at a local ion-monitor instead (e.g.
+      # http://host.docker.internal:4320) — see extra_hosts below and
+      # otel-collector/config.yaml's comment.
+      NETWORK_COLLECTOR_ENDPOINT: ${NETWORK_COLLECTOR_ENDPOINT:-https://netcol.iontest.in}
+    extra_hosts:
+      # Lets NETWORK_COLLECTOR_ENDPOINT point at a collector running on the
+      # host (e.g. a local ion-monitor stack) without joining any extra
+      # Docker network. Inert when NETWORK_COLLECTOR_ENDPOINT doesn't
+      # reference host.docker.internal, so safe to leave on unconditionally.
+      - "host.docker.internal:host-gateway"
     networks:
       - beckn
 
@@ -167,6 +179,12 @@ services:
       context: ./otel-collector
     container_name: otel-collector-bpp
     restart: unless-stopped
+    environment:
+      # See otel-collector-bap's identical NETWORK_COLLECTOR_ENDPOINT comment.
+      NETWORK_COLLECTOR_ENDPOINT: ${NETWORK_COLLECTOR_ENDPOINT:-https://netcol.iontest.in}
+    extra_hosts:
+      # See otel-collector-bap's identical extra_hosts comment.
+      - "host.docker.internal:host-gateway"
     networks:
       - beckn
 
@@ -203,6 +221,8 @@ services:
     volumes:
       - ./config:/app/config
       - ./schemas:/app/schemas
+      # Beckn extension specs loaded by schemav2validator (auxiliaryLocations).
+      - ./docs/specs/reconcile.yaml:/app/specs/reconcile.yaml:ro
     command: [ "./server", "--config=/app/config/local-simple-bap.yaml" ]
 
   onix-bpp:
@@ -232,6 +252,8 @@ services:
     volumes:
       - ./config:/app/config
       - ./schemas:/app/schemas
+      # Beckn extension specs loaded by schemav2validator (auxiliaryLocations).
+      - ./docs/specs/reconcile.yaml:/app/specs/reconcile.yaml:ro
     command: [ "./server", "--config=/app/config/local-simple-bpp.yaml" ]
 
   # ─── Catalog Publish (standalone) ─────────────────────────────────────────
@@ -449,6 +471,10 @@ services:
       BPP_CALLER_URL: http://onix-bpp:8082/bpp/caller
       CDS_PUBLISH_URL: http://onix-catalog-publish:8085/catalog/publish
 
+      # Seller payout terms written into every settlement (see .env.example).
+      SETTLEMENT_BASIS: ${SETTLEMENT_BASIS:-DELIVERY}
+      SETTLEMENT_WINDOW: ${SETTLEMENT_WINDOW:-P1D}
+
       # Same keypair as config/local-simple-bpp.yaml's keyManager — one registered identity.
       BPP_PRIVATE_KEY: ${BPP_PRIVATE_KEY}
       BPP_KEY_ID: ${BPP_KEY_ID}
@@ -605,6 +631,23 @@ services:
       ZITADEL_CLIENT_ID: ${ZITADEL_CLIENT_ID}
     ports:
       - "3002:80"
+    networks:
+      - beckn
+
+  # ─── ION Experience Demos ───────────────────────────────────────────────
+  # Standalone front page for the whole app -- pure static HTML/CSS/JS, no
+  # build step. Fully independent from landing-page above: it never touches
+  # login/tokens itself, it just links out ("Launch partner demo") to
+  # landing-page's own URL, which handles the real Zitadel flow unchanged.
+  ion-landing-page:
+    build:
+      context: ./ion-landing-page
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      LANDING_PAGE_URL: http://localhost:3002
+    ports:
+      - "3003:80"
     networks:
       - beckn
 

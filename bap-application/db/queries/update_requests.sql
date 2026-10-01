@@ -1,6 +1,6 @@
 -- Buyer-side tracking of outbound /update requests and the seller decision
 -- recovered from the matching on_update. See migration
--- 012_update_requests.sql for why the decision has to be inferred rather
+-- 013_update_requests.sql for why the decision has to be inferred rather
 -- than read off a field.
 
 -- name: InsertUpdateRequest :one

@@ -94,6 +94,10 @@ modules:
             extendedSchema_maxCacheSize: "1000"
             extendedSchema_downloadTimeout: "90"
             extendedSchema_allowedDomains: "raw.githubusercontent.com,schema.ion.id,schema.beckn.io"
+            # Beckn extension specs merged into the action index (/reconcile,
+            # /on_reconcile) -- see docs/specs/reconcile.yaml.
+            auxiliaryTypes: "file"
+            auxiliaryLocations: "/app/config/reconcile.yaml"
         cache:
           id: cache
           config:
@@ -182,6 +186,10 @@ modules:
             extendedSchema_maxCacheSize: "1000"
             extendedSchema_downloadTimeout: "90"
             extendedSchema_allowedDomains: "raw.githubusercontent.com,schema.ion.id,schema.beckn.io"
+            # Beckn extension specs merged into the action index (/reconcile,
+            # /on_reconcile) -- see docs/specs/reconcile.yaml.
+            auxiliaryTypes: "file"
+            auxiliaryLocations: "/app/config/reconcile.yaml"
         cache:
           id: cache
           config:

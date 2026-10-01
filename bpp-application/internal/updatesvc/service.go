@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -18,6 +19,7 @@ import (
 	"github.com/remiges-tech/logharbour/logharbour"
 
 	dbsqlc "github.com/ion/winroom/bpp/db/sqlc"
+	"github.com/ion/winroom/bpp/internal/cancellation"
 	"github.com/ion/winroom/bpp/internal/config"
 	"github.com/ion/winroom/bpp/internal/httpclient"
 	"github.com/ion/winroom/bpp/internal/orderchange"
@@ -34,17 +36,24 @@ func NewService(pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.Logger) *
 	return &Service{pool: pool, cfg: cfg, lh: lh, httpClient: httpclient.New(30 * time.Second)}
 }
 
-// Process validates the incoming /update request and, if valid, queues it
-// as a PENDING contract_update_request for seller review -- it does NOT
-// mutate the contract or send on_update itself. That happens later, when a
-// seller calls ApproveRequest/RejectRequest via the dashboard (see
-// server.go's /dashboard/update-requests routes).
+// Process handles an inbound /update. There are two kinds:
 //
-// This is a deliberate departure from confirmsvc/cancelsvc's fully-automatic
-// pattern: an update changes committed order terms after the fact, which
-// this app treats as something a seller must actually decide on, not
-// something any caller can force through unattended. See the "Update
-// approval model" decision.
+//   - A return request (adds a RETURN performance) or a partial cancellation
+//     (lowers an active commitment's quantity or marks it CLOSED; full
+//     cancellations use /cancel). These are decided by the offer's own
+//     policies (see internal/cancellation), not by a seller, so they are
+//     applied immediately and on_update is sent straight back.
+//   - Anything else is a change to committed order terms, which is queued
+//     as a PENDING contract_update_request for seller review -- it does NOT
+//     mutate the contract or send on_update itself. That happens later,
+//     when a seller calls ApproveRequest/RejectRequest via the dashboard
+//     (see server.go's /dashboard/update-requests routes).
+//
+// The queueing is a deliberate departure from confirmsvc/cancelsvc's
+// fully-automatic pattern: an update changes committed order terms after
+// the fact, which this app treats as something a seller must actually
+// decide on, not something any caller can force through unattended. See
+// the "Update approval model" decision.
 //
 // Every inbound update is still audited to beckn_message_log (ACK or NACK)
 // regardless of outcome, same as confirmsvc, with PII redacted from the
@@ -59,19 +68,24 @@ func (s *Service) Process(ctx context.Context, req *UpdateRequest) {
 
 	prettyLog(fmt.Sprintf("← IN   UPDATE   | txn=%.8s… | bap=%s", req.Context.TransactionID, req.Context.BapID), redactedLogView(req))
 
-	requestID, err := s.queueUpdateRequest(ctx, req)
+	updatedContract, handled, err := s.applyPolicyUpdate(ctx, req)
+	if err == nil && !handled {
+		var requestID uuid.UUID
+		requestID, err = s.queueUpdateRequest(ctx, req)
+		if err == nil {
+			s.lh.WithModule("updatesvc").LogActivity(
+				fmt.Sprintf("update request %.8s… queued for seller review, txn=%.8s…", requestID, req.Context.TransactionID),
+				nil,
+			)
+		}
+	}
 
 	ackStatusInbound := dbsqlc.NullAckStatus{AckStatus: dbsqlc.AckStatusACK, Valid: true}
 	var errMsg *string
 	if err != nil {
 		ackStatusInbound = dbsqlc.NullAckStatus{AckStatus: dbsqlc.AckStatusNACK, Valid: true}
 		errMsg = errStrPtr(err)
-		s.lh.WithModule("updatesvc").Err().Error(err).Log("failed to queue update request")
-	} else {
-		s.lh.WithModule("updatesvc").LogActivity(
-			fmt.Sprintf("update request %.8s… queued for seller review, txn=%.8s…", requestID, req.Context.TransactionID),
-			nil,
-		)
+		s.lh.WithModule("updatesvc").Err().Error(err).Log("update failed")
 	}
 
 	s.writeMessageLog(ctx, dbsqlc.InsertMessageLogParams{
@@ -91,10 +105,101 @@ func (s *Service) Process(ctx context.Context, req *UpdateRequest) {
 		ProcessingDurationMs: durationMs(start),
 	})
 
-	// No on_update is sent here either way: a validation failure has
-	// nothing valid to report, and a successfully-queued request has no
-	// decision yet to report -- on_update is only ever sent from
-	// ApproveRequest/RejectRequest once a seller actually decides.
+	// A policy-decided update (return / partial cancellation) is answered
+	// now. A queued change request is not: it has no decision yet to
+	// report -- on_update for it is only ever sent from
+	// ApproveRequest/RejectRequest once a seller actually decides. A
+	// failure has nothing valid to report either way.
+	if err != nil || !handled {
+		return
+	}
+	txID := parseTxnID(req.Context.TransactionID)
+	outMsgID := uuid.New()
+	s.callOnUpdate(ctx, txID, outMsgID, OnUpdateRequest{
+		Context: BecknContext{
+			Version:       "2.0.0",
+			Action:        "on_update",
+			Timestamp:     time.Now().UTC().Format(time.RFC3339),
+			MessageID:     outMsgID.String(),
+			TransactionID: req.Context.TransactionID,
+			BapID:         req.Context.BapID,
+			BapURI:        req.Context.BapURI,
+			BppID:         s.cfg.BppID,
+			BppURI:        s.cfg.BppURI,
+			NetworkID:     s.cfg.NetworkID,
+		},
+		Message: OnUpdateMessage{Contract: updatedContract},
+	})
+}
+
+// applyPolicyUpdate applies an update the offer's own policies decide --
+// a return request or a partial cancellation -- and returns the contract to
+// send in on_update. handled is false when the update is neither, meaning
+// it is a change request for the seller (see queueUpdateRequest).
+func (s *Service) applyPolicyUpdate(ctx context.Context, req *UpdateRequest) (json.RawMessage, bool, error) {
+	txID, err := uuid.Parse(req.Context.TransactionID)
+	if err != nil {
+		return nil, false, fmt.Errorf("invalid transactionId %q: %w", req.Context.TransactionID, err)
+	}
+	var requested map[string]any
+	if err := json.Unmarshal(req.Message.Contract, &requested); err != nil || requested == nil {
+		// Not an object: can't be a return or cancellation; queueUpdateRequest
+		// decides what to make of it.
+		return nil, false, nil
+	}
+	row, err := dbsqlc.New(s.pool).GetActiveContractByTxnID(ctx, dbsqlc.GetActiveContractByTxnIDParams{
+		TransactionID: txID,
+		BppID:         s.cfg.BppID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Leave the descriptive "no ACTIVE contract" refusal to queueUpdateRequest.
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("contract lookup: %w", err)
+	}
+	stored, err := cancellation.LatestContract(ctx, s.pool, txID, row.ContractAttributes)
+	if err != nil {
+		return nil, false, err
+	}
+	terms := cancellation.SettlementTerms(s.cfg.SettlementBasis, s.cfg.SettlementWindow)
+
+	// A return request: accepted or rejected by the offer's return policy
+	// alone -- a rejection is still answered (Return_Rejected + reason).
+	if perf, items := cancellation.ReturnRequest(stored, requested); perf != nil {
+		var res *cancellation.Result
+		err := errors.New("the return request lists no items to return")
+		if len(items) > 0 {
+			res, err = cancellation.Execute(ctx, s.pool, s.cfg.BppID, txID, items, cancellation.Request{
+				Return: true, ReturnPerformance: perf, SettlementTerms: terms,
+			})
+		}
+		if err != nil {
+			if res == nil && (len(items) == 0 || errors.Is(err, cancellation.ErrReturnRejected)) {
+				rejected, rerr := cancellation.StoreRejectedReturn(ctx, s.pool, s.cfg.BppID, txID, perf, err.Error())
+				if rerr != nil {
+					return nil, true, rerr
+				}
+				out, merr := json.Marshal(rejected)
+				return out, true, merr
+			}
+			return nil, true, fmt.Errorf("return failed: %w", err)
+		}
+		out, err := json.Marshal(res.Contract)
+		return out, true, err
+	}
+
+	if items := cancellation.ItemsFromUpdate(stored, requested); len(items) > 0 {
+		creq := cancellation.RequestFrom(requested)
+		creq.SettlementTerms = terms
+		res, err := cancellation.Execute(ctx, s.pool, s.cfg.BppID, txID, items, creq)
+		if err != nil {
+			return nil, true, fmt.Errorf("partial cancellation failed: %w", err)
+		}
+		out, err := json.Marshal(res.Contract)
+		return out, true, err
+	}
+	return nil, false, nil
 }
 
 // queueUpdateRequest validates the request and, if valid, inserts a

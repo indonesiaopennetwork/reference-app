@@ -451,14 +451,14 @@ implemented. Don't partially apply a subset of the fields.
 
 ## 6. Data model
 
-**BAP** (`bap-application/db/migrations/012_update_requests.sql`)
+**BAP** (`bap-application/db/migrations/013_update_requests.sql`)
 
 `update_requests` — the buyer's own record of what it asked for and what
 came back. Never authoritative for contract state; `contract_snapshots`
 is. Holds `proposed_contract`, `outcome` (`update_outcome` enum), and the
 outbound `message_id` for audit correlation.
 
-**BPP** (`bpp-application/db/migrations/029_contract_update_requests.sql`)
+**BPP** (`bpp-application/db/migrations/031_contract_update_requests.sql`)
 
 `contract_update_requests` — the queue of buyer proposals awaiting seller
 decision. Holds `requested_attributes`, `status` (`update_request_status`

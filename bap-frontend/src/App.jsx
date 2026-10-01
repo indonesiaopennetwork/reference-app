@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ShoppingCart, Search, X, Package, CheckCircle2, Loader2,
@@ -8,8 +8,10 @@ import {
   User, Phone, Home, ChevronLeft, Banknote,
   Ban, MessageSquare, RefreshCw, ThumbsUp,
   History, Wand2, ExternalLink, ChevronDown, ChevronUp, LogOut,
-  PencilLine, AlertTriangle,
+  PencilLine, AlertTriangle, Compass,
 } from 'lucide-react';
+import Tour from './Tour.jsx';
+import { useI18n, rich, LanguageToggle, tNow, localeNow } from './i18n.jsx';
 import { captureTokenFromUrl, getToken, clearToken, redirectToLogin, logout } from './auth.js';
 
 // BPP target, network ID, and BAP identity are all server-side config (BAP .env).
@@ -74,11 +76,11 @@ function parseCatalogs(data) {
       // Price breakup: prefer considerations.breakup, build from price.components if needed
       let breakup = cons.breakup || [];
       if (!breakup.length && pa.value) {
-        breakup = [{ title: res.descriptor?.name || 'Item price', amount: pa.value, type: 'BASE_PRICE' }];
+        breakup = [{ title: res.descriptor?.name || tNow('Item price'), amount: pa.value, type: 'BASE_PRICE' }];
         if (pa.components?.length) {
           pa.components.forEach(c => {
             if (c.type === 'DISCOUNT') {
-              breakup.push({ title: `Discount (${c.value}%)`, amount: -(pa.value * c.value / 100), type: 'DISCOUNT' });
+              breakup.push({ title: tNow('Discount ({pct}%)', { pct: c.value }), amount: -(pa.value * c.value / 100), type: 'DISCOUNT' });
             }
           });
           const discountAmt = pa.components.filter(c => c.type === 'DISCOUNT').reduce((s, c) => s + (pa.value * c.value / 100), 0);
@@ -105,12 +107,12 @@ function parseCatalogs(data) {
 
       seen.set(dedupKey, {
         id: res.id,
-        name: res.descriptor?.name || 'Unknown Product',
+        name: res.descriptor?.name || tNow('Unknown Product'),
         shortDesc: res.descriptor?.shortDesc || '',
         longDesc: res.descriptor?.longDesc || '',
         productHighlights: res.resourceAttributes?.productHighlights || '',
         specifications: res.resourceAttributes?.specifications || '',
-        category: cat.descriptor?.name || 'Retail',
+        category: cat.descriptor?.name || tNow('Retail'),
         price,
         currency,
         image: res.descriptor?.mediaFile?.[0]?.uri ||
@@ -123,6 +125,8 @@ function parseCatalogs(data) {
         bppUri,
         offerAttr: oa,
         offerConsiderations: offer.considerations || [],
+        // The resource as discover returned it, sent on in select.
+        resourceDetail: { descriptor: res.descriptor, resourceAttributes: res.resourceAttributes },
         breakup,
         sellerAddress,
         returnPolicy: policies.returns,
@@ -131,7 +135,8 @@ function parseCatalogs(data) {
         deliveryRange: distance.maxDistance ? `${distance.maxDistance} ${distance.unit || 'KM'}` : '',
         deliveryDays: timing.daysOfWeek || [],
         deliveryHours: timing.timeRange ? `${timing.timeRange.start}–${timing.timeRange.end}` : '',
-        offerValidity: offer.validity?.endDate ? new Date(offer.validity.endDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '',
+        // ISO date; shown with fmtDay() in the current language.
+        offerValidity: offer.validity?.endDate || '',
       });
     });
   });
@@ -162,8 +167,17 @@ function parseOnSelectContract(contract) {
 const fmt = (amount, currency = 'IDR') => {
   if (!amount && amount !== 0) return '—';
   const sym = currency === 'IDR' ? 'Rp' : '₹';
-  return `${sym}${Number(amount).toLocaleString()}`;
+  return `${sym}${Number(amount).toLocaleString(localeNow())}`;
 };
+
+// An offer's end date ("12 Oct 2026" / "12 Okt 2026").
+const fmtDay = iso => (iso ? new Date(iso).toLocaleDateString(localeNow(), { day: 'numeric', month: 'short', year: 'numeric' }) : '');
+
+// "1 item" / "3 items".
+const itemCount = (t, n) => (n === 1 ? t('1 item') : t('{count} items', { count: n }));
+
+// "P7D" → "7" for day-based ISO-8601 windows; anything else as given.
+const isoDays = w => (w || '').replace(/^P(\d+)D$/, '$1');
 
 const FALLBACK_IMG = 'https://images.unsplash.com/photo-1542838132-92c53300491e?w=600&auto=format&fit=crop&q=70';
 
@@ -191,6 +205,7 @@ function OfferInfoPanel({ product }) {
   const { breakup, currency, price, sellerName, sellerAddress,
     returnPolicy, cancelPolicy, codAvailable,
     deliveryRange, deliveryHours, deliveryDays, offerName, offerValidity } = product;
+  const { t } = useI18n();
 
   const shortAddr = sellerAddress
     ? [sellerAddress.streetAddress, sellerAddress.addressLocality, sellerAddress.addressRegion].filter(Boolean).join(', ')
@@ -203,11 +218,11 @@ function OfferInfoPanel({ product }) {
         <div className="px-4 py-2.5 bg-white/[0.04] border-b border-white/[0.07] flex items-center gap-2">
           <Receipt className="w-3.5 h-3.5 text-emerald-400" />
           <span className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
-            {offerName || 'Pricing'}
+            {offerName || t('Pricing')}
           </span>
           {offerValidity && (
             <span className="ml-auto text-[10px] text-slate-500 flex items-center gap-1">
-              <Calendar className="w-3 h-3" /> Valid till {offerValidity}
+              <Calendar className="w-3 h-3" /> {t('Valid till {date}', { date: fmtDay(offerValidity) })}
             </span>
           )}
         </div>
@@ -226,13 +241,13 @@ function OfferInfoPanel({ product }) {
                 </div>
               ))}
               <div className="border-t border-white/10 pt-2 mt-1 flex justify-between items-center">
-                <span className="text-sm font-semibold text-slate-300">Total</span>
+                <span className="text-sm font-semibold text-slate-300">{t('Total')}</span>
                 <span className="text-xl font-bold text-emerald-300">{fmt(price, currency)}</span>
               </div>
             </>
           ) : (
             <div className="flex justify-between items-center">
-              <span className="text-sm text-slate-400">Price</span>
+              <span className="text-sm text-slate-400">{t('Price')}</span>
               <span className="text-xl font-bold text-emerald-300">{fmt(price, currency)}</span>
             </div>
           )}
@@ -254,7 +269,7 @@ function OfferInfoPanel({ product }) {
       <div className="flex flex-wrap gap-2">
         {deliveryRange && (
           <span className="flex items-center gap-1 text-[10px] font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2.5 py-1 rounded-full">
-            <MapPin className="w-3 h-3" /> Delivers within {deliveryRange}
+            <MapPin className="w-3 h-3" /> {t('Delivers within {range}', { range: deliveryRange })}
           </span>
         )}
         {deliveryHours && (
@@ -264,17 +279,17 @@ function OfferInfoPanel({ product }) {
         )}
         {codAvailable && (
           <span className="flex items-center gap-1 text-[10px] font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2.5 py-1 rounded-full">
-            <CreditCard className="w-3 h-3" /> Cash on Delivery
+            <CreditCard className="w-3 h-3" /> {t('Cash on Delivery')}
           </span>
         )}
         {returnPolicy?.allowed && (
           <span className="flex items-center gap-1 text-[10px] font-semibold bg-purple-500/10 text-purple-400 border border-purple-500/20 px-2.5 py-1 rounded-full">
-            <RotateCcw className="w-3 h-3" /> {returnPolicy.window?.replace('P', '').replace('D', ' day')} returns
+            <RotateCcw className="w-3 h-3" /> {t('{days}-day returns', { days: isoDays(returnPolicy.window) })}
           </span>
         )}
         {cancelPolicy?.allowed && (
           <span className="flex items-center gap-1 text-[10px] font-semibold bg-rose-500/10 text-rose-400 border border-rose-500/20 px-2.5 py-1 rounded-full">
-            <X className="w-3 h-3" /> Free cancellation
+            <X className="w-3 h-3" /> {t('Free cancellation')}
           </span>
         )}
       </div>
@@ -285,6 +300,7 @@ function OfferInfoPanel({ product }) {
 /* ─────────────────────────── ConfirmedQuotePanel ────────────────────────── */
 // Shows the BPP-confirmed quote from on_select (may differ from catalog price)
 function ConfirmedQuotePanel({ quote, onInit, isLoading }) {
+  const { t } = useI18n();
   if (!quote) return null;
   const { total, currency, breakup, paymentMethods, codAvailable,
     seller, returnPolicy, cancelPolicy } = quote;
@@ -295,7 +311,7 @@ function ConfirmedQuotePanel({ quote, onInit, isLoading }) {
     >
       <div className="flex items-center gap-2 px-4 py-2.5 bg-emerald-500/10 border-b border-emerald-500/15">
         <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-        <span className="text-xs font-semibold text-emerald-300 uppercase tracking-wider">Confirmed Quote</span>
+        <span className="text-xs font-semibold text-emerald-300 uppercase tracking-wider">{t('Confirmed Quote')}</span>
         {seller && <span className="ml-auto text-[10px] text-slate-400 flex items-center gap-1"><Store className="w-3 h-3" />{seller}</span>}
       </div>
       <div className="px-4 py-3 space-y-2">
@@ -310,21 +326,21 @@ function ConfirmedQuotePanel({ quote, onInit, isLoading }) {
               </div>
             ))}
             <div className="border-t border-white/10 pt-2 flex justify-between font-bold">
-              <span className="text-slate-200">Total</span>
+              <span className="text-slate-200">{t('Total')}</span>
               <span className="text-emerald-300 text-lg">{fmt(total, currency)}</span>
             </div>
           </div>
         )}
         <div className="flex flex-wrap gap-1.5 pt-1">
-          {codAvailable && <span className="text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded-full">COD</span>}
+          {codAvailable && <span className="text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded-full">{t('COD')}</span>}
           {paymentMethods?.map(m => <span key={m} className="text-[10px] bg-white/5 text-slate-400 border border-white/10 px-2 py-0.5 rounded-full">{m}</span>)}
-          {returnPolicy?.allowed && <span className="text-[10px] bg-purple-500/10 text-purple-400 border border-purple-500/20 px-2 py-0.5 rounded-full">↩ {returnPolicy.window} returns</span>}
+          {returnPolicy?.allowed && <span className="text-[10px] bg-purple-500/10 text-purple-400 border border-purple-500/20 px-2 py-0.5 rounded-full">↩ {t('{days}-day returns', { days: isoDays(returnPolicy.window) })}</span>}
         </div>
         <button
           onClick={onInit} disabled={isLoading}
           className="w-full mt-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all active:scale-[0.98] shadow-lg shadow-emerald-600/30"
         >
-          {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <><span>Initialize Order</span><ArrowRight className="w-4 h-4" /></>}
+          {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <><span>{t('Initialize Order')}</span><ArrowRight className="w-4 h-4" /></>}
         </button>
       </div>
     </motion.div>
@@ -333,6 +349,7 @@ function ConfirmedQuotePanel({ quote, onInit, isLoading }) {
 
 /* ─────────────────────────── ProductModal ───────────────────────────────── */
 function ProductModal({ product, transaction, onClose, onSelect, onInit, onConfirm, isLoading }) {
+  const { t } = useI18n();
   const isThisProduct = transaction?.product?.id === product.id;
   const status = isThisProduct ? transaction.status : null;
 
@@ -349,9 +366,9 @@ function ProductModal({ product, transaction, onClose, onSelect, onInit, onConfi
   const isPending = pendingStatuses.includes(status);
 
   const pendingLabel = {
-    SELECT_SENT: 'Requesting quote from BPP…',
-    INIT_SENT: 'Initializing order…',
-    CONFIRM_SENT: 'Confirming your order…',
+    SELECT_SENT: t('Requesting a quote from the seller…'),
+    INIT_SENT: t('Initializing order…'),
+    CONFIRM_SENT: t('Confirming your order…'),
   }[status];
 
   return (
@@ -399,13 +416,13 @@ function ProductModal({ product, transaction, onClose, onSelect, onInit, onConfi
             )}
             {product.productHighlights && (
               <div className="mt-4">
-                <h3 className="text-sm font-bold text-slate-200 mb-1.5">Keunggulan Produk (Product Highlights)</h3>
+                <h3 className="text-sm font-bold text-slate-200 mb-1.5">{t('Product Highlights')}</h3>
                 <div className="text-xs text-slate-400 leading-relaxed whitespace-pre-wrap">{product.productHighlights}</div>
               </div>
             )}
             {product.specifications && (
               <div className="mt-4">
-                <h3 className="text-sm font-bold text-slate-200 mb-1.5">Spesifikasi (Specifications)</h3>
+                <h3 className="text-sm font-bold text-slate-200 mb-1.5">{t('Specifications')}</h3>
                 <div className="text-xs text-slate-400 leading-relaxed whitespace-pre-wrap">{product.specifications}</div>
               </div>
             )}
@@ -421,8 +438,8 @@ function ProductModal({ product, transaction, onClose, onSelect, onInit, onConfi
             <button onClick={() => onSelect(product)} disabled={isLoading}
               className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white py-3.5 rounded-2xl font-bold text-sm transition-all active:scale-[0.98] shadow-lg shadow-emerald-600/30">
               {isLoading
-                ? <><Loader2 className="w-4 h-4 animate-spin" /> Sending select…</>
-                : <><Zap className="w-4 h-4" /> Select &amp; Confirm Quote</>}
+                ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('Getting a quote…')}</>
+                : <><Zap className="w-4 h-4" /> {t('Get a Quote')}</>}
             </button>
           )}
 
@@ -432,7 +449,7 @@ function ProductModal({ product, transaction, onClose, onSelect, onInit, onConfi
               <Loader2 className="w-5 h-5 text-emerald-400 animate-spin shrink-0" />
               <div>
                 <p className="text-sm text-slate-300">{pendingLabel}</p>
-                <p className="text-xs text-slate-500 mt-0.5">Txn {transaction.id.slice(0, 8)}…</p>
+                <p className="text-xs text-slate-500 mt-0.5">{t('Txn {id}…', { id: transaction.id.slice(0, 8) })}</p>
               </div>
             </div>
           )}
@@ -447,11 +464,11 @@ function ProductModal({ product, transaction, onClose, onSelect, onInit, onConfi
             <div className="space-y-3">
               <div className="flex items-center gap-2 text-sm text-slate-300 bg-emerald-500/5 border border-emerald-500/20 rounded-xl px-4 py-3">
                 <Info className="w-4 h-4 text-emerald-400 shrink-0" />
-                Order initialized. Click below to place &amp; pay.
+                {t('Order initialized. Click below to place and pay.')}
               </div>
               <button onClick={onConfirm} disabled={isLoading}
                 className="w-full flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-white py-3.5 rounded-2xl font-bold text-sm transition-all active:scale-[0.98] shadow-lg shadow-amber-500/30">
-                {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <><ShieldCheck className="w-4 h-4" />Pay &amp; Confirm Order</>}
+                {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <><ShieldCheck className="w-4 h-4" />{t('Pay & Confirm Order')}</>}
               </button>
             </div>
           )}
@@ -463,10 +480,11 @@ function ProductModal({ product, transaction, onClose, onSelect, onInit, onConfi
               <div className="w-16 h-16 rounded-full bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center">
                 <CheckCircle2 className="w-8 h-8 text-emerald-400" />
               </div>
-              <p className="font-bold text-emerald-300 text-lg">Order Confirmed!</p>
-              <p className="text-sm text-slate-400 text-center">Your order has been placed on the ION network.</p>
+              <p className="font-bold text-emerald-300 text-lg">{t('Order Confirmed!')}</p>
+              <p className="text-sm text-slate-400 text-center">{t('Your order has been placed on the ION network.')}</p>
+              <div className="w-full mt-2 text-left"><LiveOrderItems txnId={transaction.id} /></div>
               <button onClick={onClose} className="mt-1 text-sm text-slate-400 hover:text-white transition-colors underline underline-offset-4">
-                Continue Shopping
+                {t('Continue Shopping')}
               </button>
             </motion.div>
           )}
@@ -496,7 +514,8 @@ function StarRating({ value, onChange }) {
   );
 }
 
-function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoading, onInit, onConfirm, onDone, onCancel, onRate, onSupport, onRequestStatus, onRequestUpdate }) {
+function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoading, onInit, onConfirm, onDone, onStatusChange, onRate, onSupport, onRequestStatus, onRequestUpdate }) {
+  const { t } = useI18n();
   const [ratingValue, setRatingValue] = useState(0);
   const [ratingFeedback, setRatingFeedback] = useState('');
   const [showRatingForm, setShowRatingForm] = useState(false);
@@ -535,7 +554,7 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
   const currency = confirmedQuote?.currency || 'IDR';
 
   /* ── Stepper ───────────────────────────────────────────────────────── */
-  const STEPS = ['Quote', 'Billing', 'Confirm', 'Done'];
+  const STEPS = [t('Quote'), t('Billing'), t('Confirm'), t('Done')];
   const stepIndex = {
     SELECT_SENT: 0,
     QUOTE_RECEIVED: 1,
@@ -555,7 +574,7 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
     <div className="flex flex-col flex-grow overflow-hidden">
 
       {/* Stepper */}
-      <div className="px-5 pt-4 pb-3 shrink-0">
+      <div className="px-5 pt-4 pb-3 shrink-0" data-tour="checkout-stepper">
         <div className="relative flex items-center justify-between">
           <div className="absolute inset-x-0 top-3 h-px bg-white/10" />
           <div className="absolute left-0 top-3 h-px bg-emerald-400 transition-all duration-700"
@@ -579,8 +598,8 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
         {/* Cart items summary (always shown, compact) */}
         <div className="rounded-xl border border-white/10 bg-white/[0.03] overflow-hidden">
           <div className="px-4 py-2.5 bg-white/[0.04] border-b border-white/[0.07] flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Order Summary</span>
-            <span className="text-xs text-slate-400">{cart.reduce((s, i) => s + i.qty, 0)} items</span>
+            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{t('Order Summary')}</span>
+            <span className="text-xs text-slate-400">{itemCount(t, cart.reduce((s, i) => s + i.qty, 0))}</span>
           </div>
           <div className="px-4 py-2 space-y-1.5">
             {cart.map(item => (
@@ -595,7 +614,7 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
               </div>
             ))}
             <div className="border-t border-white/10 pt-2 flex justify-between items-center">
-              <span className="text-xs text-slate-400">Estimated Total</span>
+              <span className="text-xs text-slate-400">{t('Estimated Total')}</span>
               <span className="text-base font-bold text-emerald-300">{fmt(cartTotal, 'IDR')}</span>
             </div>
           </div>
@@ -608,8 +627,8 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
               <div className="absolute inset-0 rounded-full border-2 border-emerald-500/20 border-t-emerald-400 animate-spin" />
               <Sparkles className="absolute inset-0 m-auto w-5 h-5 text-emerald-400" />
             </div>
-            <p className="text-sm text-slate-300">Getting quote from network…</p>
-            <p className="text-xs text-slate-500">Txn {transaction.id.slice(0, 8)}…</p>
+            <p className="text-sm text-slate-300">{t('Getting a quote from the network…')}</p>
+            <p className="text-xs text-slate-500">{t('Txn {id}…', { id: transaction.id.slice(0, 8) })}</p>
           </div>
         )}
 
@@ -622,7 +641,7 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
                 className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 overflow-hidden">
                 <div className="px-4 py-2.5 bg-emerald-500/10 border-b border-emerald-500/15 flex items-center gap-2">
                   <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                  <span className="text-xs font-semibold text-emerald-300 uppercase tracking-wider">Quote Confirmed by Seller</span>
+                  <span className="text-xs font-semibold text-emerald-300 uppercase tracking-wider">{t('Quote Confirmed by Seller')}</span>
                   {confirmedQuote.seller && (
                     <span className="ml-auto text-[10px] text-slate-400 flex items-center gap-1">
                       <Store className="w-3 h-3" />{confirmedQuote.seller}
@@ -640,19 +659,19 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
                   ))}
                   {confirmedQuote.total && (
                     <div className="border-t border-white/10 pt-2 flex justify-between font-bold">
-                      <span className="text-slate-200">Total</span>
+                      <span className="text-slate-200">{t('Total')}</span>
                       <span className="text-emerald-300 text-lg">{fmt(confirmedQuote.total, currency)}</span>
                     </div>
                   )}
                   <div className="flex flex-wrap gap-1.5 pt-1">
                     {confirmedQuote.codAvailable && (
                       <span className="text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded-full flex items-center gap-1">
-                        <Banknote className="w-2.5 h-2.5" /> COD Available
+                        <Banknote className="w-2.5 h-2.5" /> {t('COD available')}
                       </span>
                     )}
                     {confirmedQuote.returnPolicy?.allowed && (
                       <span className="text-[10px] bg-purple-500/10 text-purple-400 border border-purple-500/20 px-2 py-0.5 rounded-full">
-                        ↩ {confirmedQuote.returnPolicy.window} returns
+                        ↩ {t('{days}-day returns', { days: isoDays(confirmedQuote.returnPolicy.window) })}
                       </span>
                     )}
                   </div>
@@ -665,9 +684,9 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
               className="rounded-xl border border-white/10 bg-white/[0.03] overflow-hidden">
               <div className="px-4 py-2.5 bg-white/[0.04] border-b border-white/[0.07] flex items-center gap-2">
                 <User className="w-3.5 h-3.5 text-slate-400" />
-                <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex-1">Billing Details</span>
+                <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex-1">{t('Billing Details')}</span>
                 <button
-                  type="button"
+                  type="button" data-tour="billing-autofill"
                   onClick={() => {
                     const profile = BILLING_PROFILES[_billingIdx % BILLING_PROFILES.length];
                     _billingIdx++;
@@ -675,14 +694,14 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
                   }}
                   className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold border border-purple-500/30 text-purple-400 hover:bg-purple-500/10 transition-colors"
                 >
-                  <Wand2 className="w-3 h-3" /> Auto-fill
+                  <Wand2 className="w-3 h-3" /> {t('Auto-fill')}
                 </button>
               </div>
               <div className="px-4 py-3 space-y-3">
                 <div className="relative">
                   <User className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500" />
                   <input
-                    type="text" placeholder="Full name"
+                    type="text" placeholder={t('Full name')}
                     value={billing.name}
                     onChange={e => setBilling(p => ({ ...p, name: e.target.value }))}
                     className="w-full bg-slate-900 border border-white/10 rounded-lg pl-9 pr-3 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-emerald-500/40 transition-colors"
@@ -691,7 +710,7 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
                 <div className="relative">
                   <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500" />
                   <input
-                    type="tel" placeholder="Phone number"
+                    type="tel" placeholder={t('Phone number')}
                     value={billing.phone}
                     onChange={e => setBilling(p => ({ ...p, phone: e.target.value }))}
                     className="w-full bg-slate-900 border border-white/10 rounded-lg pl-9 pr-3 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-emerald-500/40 transition-colors"
@@ -700,7 +719,7 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
                 <div className="relative">
                   <User className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500" />
                   <input
-                    type="email" placeholder="Email address"
+                    type="email" placeholder={t('Email address')}
                     value={billing.email}
                     onChange={e => setBilling(p => ({ ...p, email: e.target.value }))}
                     className="w-full bg-slate-900 border border-white/10 rounded-lg pl-9 pr-3 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-emerald-500/40 transition-colors"
@@ -709,7 +728,7 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
                 <div className="relative">
                   <Home className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500" />
                   <input
-                    type="text" placeholder="Street address"
+                    type="text" placeholder={t('Street address')}
                     value={billing.streetAddress}
                     onChange={e => setBilling(p => ({ ...p, streetAddress: e.target.value }))}
                     className="w-full bg-slate-900 border border-white/10 rounded-lg pl-9 pr-3 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-emerald-500/40 transition-colors"
@@ -717,13 +736,13 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <input
-                    type="text" placeholder="City"
+                    type="text" placeholder={t('City')}
                     value={billing.addressLocality}
                     onChange={e => setBilling(p => ({ ...p, addressLocality: e.target.value }))}
                     className="w-full bg-slate-900 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-emerald-500/40 transition-colors"
                   />
                   <input
-                    type="text" placeholder="State"
+                    type="text" placeholder={t('State')}
                     value={billing.addressRegion}
                     onChange={e => setBilling(p => ({ ...p, addressRegion: e.target.value }))}
                     className="w-full bg-slate-900 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-emerald-500/40 transition-colors"
@@ -731,13 +750,13 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <input
-                    type="text" placeholder="Pincode"
+                    type="text" placeholder={t('Pincode')}
                     value={billing.postalCode}
                     onChange={e => setBilling(p => ({ ...p, postalCode: e.target.value }))}
                     className="w-full bg-slate-900 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-emerald-500/40 transition-colors"
                   />
                   <input
-                    type="text" placeholder="Country (e.g. IN)"
+                    type="text" placeholder={t('Country (e.g. IN)')}
                     value={billing.addressCountry}
                     onChange={e => setBilling(p => ({ ...p, addressCountry: e.target.value }))}
                     className="w-full bg-slate-900 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-emerald-500/40 transition-colors"
@@ -755,7 +774,7 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
               <div className="absolute inset-0 rounded-full border-2 border-emerald-500/20 border-t-emerald-400 animate-spin" />
               <ShieldCheck className="absolute inset-0 m-auto w-5 h-5 text-emerald-400" />
             </div>
-            <p className="text-sm text-slate-300">Initializing your order…</p>
+            <p className="text-sm text-slate-300">{t('Initializing your order…')}</p>
           </div>
         )}
 
@@ -765,16 +784,16 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
             className="rounded-xl border border-blue-500/20 bg-blue-500/5 px-4 py-3 space-y-2">
             <div className="flex items-center gap-2">
               <ShieldCheck className="w-4 h-4 text-blue-400 shrink-0" />
-              <p className="text-sm font-medium text-blue-300">Order Initialized</p>
+              <p className="text-sm font-medium text-blue-300">{t('Order Initialized')}</p>
             </div>
             <p className="text-xs text-slate-400 leading-relaxed">
-              Your order is ready. Review the details above and confirm to place your order on the ION network.
+              {t('Your order is ready. Review the details above and confirm to place your order on the ION network.')}
             </p>
             <div className="pt-1 text-xs text-slate-500 space-y-1">
-              <p><span className="text-slate-400">Name:</span> {billing.name || 'Customer'}</p>
-              <p><span className="text-slate-400">Phone:</span> {billing.phone || '—'}</p>
-              {billing.email && <p><span className="text-slate-400">Email:</span> {billing.email}</p>}
-              <p><span className="text-slate-400">Address:</span> {[billing.streetAddress, billing.addressLocality, billing.addressRegion, billing.postalCode].filter(Boolean).join(', ') || '—'}</p>
+              <p><span className="text-slate-400">{t('Name:')}</span> {billing.name || t('Customer')}</p>
+              <p><span className="text-slate-400">{t('Phone:')}</span> {billing.phone || '—'}</p>
+              {billing.email && <p><span className="text-slate-400">{t('Email:')}</span> {billing.email}</p>}
+              <p><span className="text-slate-400">{t('Address:')}</span> {[billing.streetAddress, billing.addressLocality, billing.addressRegion, billing.postalCode].filter(Boolean).join(', ') || '—'}</p>
             </div>
           </motion.div>
         )}
@@ -786,7 +805,7 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
               <div className="absolute inset-0 rounded-full border-2 border-emerald-500/20 border-t-emerald-400 animate-spin" />
               <Banknote className="absolute inset-0 m-auto w-5 h-5 text-emerald-400" />
             </div>
-            <p className="text-sm text-slate-300">Placing your order…</p>
+            <p className="text-sm text-slate-300">{t('Placing your order…')}</p>
           </div>
         )}
 
@@ -797,7 +816,7 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
               <div className="absolute inset-0 rounded-full border-2 border-blue-500/20 border-t-blue-400 animate-spin" />
               <RefreshCw className="absolute inset-0 m-auto w-5 h-5 text-blue-400" />
             </div>
-            <p className="text-sm text-slate-300">Fetching latest order status…</p>
+            <p className="text-sm text-slate-300">{t('Fetching the latest order status…')}</p>
           </div>
         )}
 
@@ -806,42 +825,41 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
           <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
             className="space-y-4">
             {/* Success banner */}
-            <div className="flex flex-col items-center gap-2 py-4 text-center">
+            <div className="flex flex-col items-center gap-2 py-4 text-center" data-tour="order-placed">
               <div className="w-16 h-16 rounded-full bg-emerald-500/15 border-2 border-emerald-500/40 flex items-center justify-center">
                 <CheckCircle2 className="w-9 h-9 text-emerald-400" />
               </div>
-              <p className="font-bold text-emerald-300 text-xl">Order Placed!</p>
-              <p className="text-xs text-slate-400">Confirmed on the ION network</p>
+              <p className="font-bold text-emerald-300 text-xl">{t('Order Placed!')}</p>
+              <p className="text-xs text-slate-400">{t('Confirmed on the ION network')}</p>
             </div>
 
             {/* Order info */}
             <div className="text-xs text-slate-500 bg-white/[0.03] border border-white/[0.06] rounded-lg px-4 py-2.5 space-y-1">
-              <p><span className="text-slate-400">Order ID:</span> <span className="font-mono text-slate-300 break-all">{transaction.id}</span></p>
-              {billing.name && <p><span className="text-slate-400">Ordered by:</span> {billing.name}</p>}
-              {billing.phone && <p><span className="text-slate-400">Phone:</span> {billing.phone}</p>}
+              <p><span className="text-slate-400">{t('Order ID:')}</span> <span className="font-mono text-slate-300 break-all">{transaction.id}</span></p>
+              {billing.name && <p><span className="text-slate-400">{t('Ordered by:')}</span> {billing.name}</p>}
+              {billing.phone && <p><span className="text-slate-400">{t('Phone:')}</span> {billing.phone}</p>}
             </div>
+
+            {/* Items — cancel one item, some quantity, or the whole order */}
+            <LiveOrderItems txnId={transaction.id} onStatus={onStatusChange} />
 
             {/* Action buttons */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div className="space-y-4" data-tour="order-actions">
               <button onClick={onRequestStatus}
-                className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-semibold bg-blue-500/10 text-blue-300 border border-blue-500/20 hover:bg-blue-500/20 transition-all">
-                <RefreshCw className="w-3.5 h-3.5" /> Refresh Status
+                className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-semibold bg-blue-500/10 text-blue-300 border border-blue-500/20 hover:bg-blue-500/20 transition-all">
+                <RefreshCw className="w-3.5 h-3.5" /> {t('Refresh Status')}
               </button>
-              <button onClick={onCancel} disabled={isLoading}
-                className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-semibold bg-rose-500/10 text-rose-300 border border-rose-500/20 hover:bg-rose-500/20 transition-all disabled:opacity-50">
-                <Ban className="w-3.5 h-3.5" /> Cancel Order
-              </button>
-            </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <button onClick={() => { setShowRatingForm(v => !v); setShowSupportForm(false); }}
-                className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-semibold bg-amber-500/10 text-amber-300 border border-amber-500/20 hover:bg-amber-500/20 transition-all">
-                <Star className="w-3.5 h-3.5" /> Rate Order
-              </button>
-              <button onClick={() => { setShowSupportForm(v => !v); setShowRatingForm(false); }}
-                className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-semibold bg-purple-500/10 text-purple-300 border border-purple-500/20 hover:bg-purple-500/20 transition-all">
-                <MessageSquare className="w-3.5 h-3.5" /> Get Support
-              </button>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <button onClick={() => { setShowRatingForm(v => !v); setShowSupportForm(false); }}
+                  className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-semibold bg-amber-500/10 text-amber-300 border border-amber-500/20 hover:bg-amber-500/20 transition-all">
+                  <Star className="w-3.5 h-3.5" /> {t('Rate Order')}
+                </button>
+                <button onClick={() => { setShowSupportForm(v => !v); setShowRatingForm(false); }}
+                  className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-semibold bg-purple-500/10 text-purple-300 border border-purple-500/20 hover:bg-purple-500/20 transition-all">
+                  <MessageSquare className="w-3.5 h-3.5" /> {t('Get Support')}
+                </button>
+              </div>
             </div>
 
             {/* The seller's verdict on the buyer's last change request.
@@ -936,11 +954,11 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
               {showRatingForm && !transaction.rated && (
                 <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
                   className="rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3 space-y-3">
-                  <p className="text-xs font-semibold text-amber-300">How was your experience?</p>
+                  <p className="text-xs font-semibold text-amber-300">{t('How was your experience?')}</p>
                   <StarRating value={ratingValue} onChange={setRatingValue} />
                   <textarea
                     value={ratingFeedback} onChange={e => setRatingFeedback(e.target.value)}
-                    placeholder="Optional feedback…"
+                    placeholder={t('Optional feedback…')}
                     rows={2}
                     className="w-full bg-slate-900 border border-white/10 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 outline-none resize-none"
                   />
@@ -948,13 +966,13 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
                     disabled={!ratingValue || isLoading}
                     onClick={() => { onRate(ratingValue, ratingFeedback); setShowRatingForm(false); }}
                     className="w-full py-2 rounded-lg text-xs font-bold bg-amber-500 hover:bg-amber-400 text-white disabled:opacity-50 flex items-center justify-center gap-2 transition-all">
-                    {isLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <><ThumbsUp className="w-3.5 h-3.5" /> Submit Rating</>}
+                    {isLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <><ThumbsUp className="w-3.5 h-3.5" /> {t('Submit Rating')}</>}
                   </button>
                 </motion.div>
               )}
               {transaction.rated && (
                 <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-2.5 text-xs text-emerald-300 flex items-center gap-2">
-                  <CheckCircle2 className="w-3.5 h-3.5" /> Rated {transaction.rated}/5 — thank you!
+                  <CheckCircle2 className="w-3.5 h-3.5" /> {t('Rated {n}/5 — thank you!', { n: transaction.rated })}
                 </div>
               )}
             </AnimatePresence>
@@ -964,10 +982,10 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
               {showSupportForm && (
                 <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
                   className="rounded-xl border border-purple-500/20 bg-purple-500/5 px-4 py-3 space-y-3">
-                  <p className="text-xs font-semibold text-purple-300">Describe your issue</p>
+                  <p className="text-xs font-semibold text-purple-300">{t('Describe your issue')}</p>
                   <textarea
                     value={supportDesc} onChange={e => setSupportDesc(e.target.value)}
-                    placeholder="What do you need help with?"
+                    placeholder={t('What do you need help with?')}
                     rows={3}
                     className="w-full bg-slate-900 border border-white/10 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 outline-none resize-none"
                   />
@@ -975,15 +993,15 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
                     disabled={!supportDesc.trim() || isLoading}
                     onClick={() => { onSupport(supportDesc); setSupportDesc(''); setShowSupportForm(false); }}
                     className="w-full py-2 rounded-lg text-xs font-bold bg-purple-600 hover:bg-purple-500 text-white disabled:opacity-50 flex items-center justify-center gap-2 transition-all">
-                    {isLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <><MessageSquare className="w-3.5 h-3.5" /> Submit Request</>}
+                    {isLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <><MessageSquare className="w-3.5 h-3.5" /> {t('Submit Request')}</>}
                   </button>
                 </motion.div>
               )}
             </AnimatePresence>
 
-            <button onClick={onDone}
+            <button onClick={onDone} data-tour="continue"
               className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-600/30">
-              <Sparkles className="w-4 h-4" /> Continue Shopping
+              <Sparkles className="w-4 h-4" /> {t('Continue Shopping')}
             </button>
           </motion.div>
         )}
@@ -998,15 +1016,15 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
                 : <Ban className="w-9 h-9 text-rose-400" />}
             </div>
             <p className="font-bold text-rose-300 text-lg">
-              {status === 'CANCEL_SENT' ? 'Cancelling…' : 'Order Cancelled'}
+              {status === 'CANCEL_SENT' ? t('Cancelling…') : t('Order Cancelled')}
             </p>
             <p className="text-xs text-slate-400">
-              {status === 'CANCEL_SENT' ? 'Waiting for the seller to confirm cancellation.' : 'Your order has been cancelled.'}
+              {status === 'CANCEL_SENT' ? t('Waiting for the seller to confirm the cancellation.') : t('Your order has been cancelled.')}
             </p>
             {status === 'CANCELLED' && (
               <button onClick={onDone}
                 className="w-full mt-2 bg-slate-700 hover:bg-slate-600 text-white py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all">
-                <Sparkles className="w-4 h-4" /> Back to Shopping
+                <Sparkles className="w-4 h-4" /> {t('Back to Shopping')}
               </button>
             )}
           </motion.div>
@@ -1042,19 +1060,19 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
       {(status === 'QUOTE_RECEIVED' || status === 'INIT_RECEIVED') && (
         <div className="px-5 py-4 border-t border-white/[0.07] shrink-0">
           {status === 'QUOTE_RECEIVED' && (
-            <button onClick={onInit} disabled={isLoading}
+            <button onClick={onInit} disabled={isLoading} data-tour="init"
               className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white py-3.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all active:scale-[0.98] shadow-lg shadow-emerald-600/30">
               {isLoading
-                ? <><Loader2 className="w-4 h-4 animate-spin" /> Initializing…</>
-                : <><ArrowRight className="w-4 h-4" /> Initialize Order</>}
+                ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('Initializing…')}</>
+                : <><ArrowRight className="w-4 h-4" /> {t('Initialize Order')}</>}
             </button>
           )}
           {status === 'INIT_RECEIVED' && (
-            <button onClick={onConfirm} disabled={isLoading}
+            <button onClick={onConfirm} disabled={isLoading} data-tour="confirm"
               className="w-full bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-white py-3.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all active:scale-[0.98] shadow-lg shadow-amber-500/30">
               {isLoading
-                ? <><Loader2 className="w-4 h-4 animate-spin" /> Confirming…</>
-                : <><ShieldCheck className="w-4 h-4" /> Pay &amp; Confirm Order</>}
+                ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('Confirming…')}</>
+                : <><ShieldCheck className="w-4 h-4" /> {t('Pay & Confirm Order')}</>}
             </button>
           )}
         </div>
@@ -1106,6 +1124,7 @@ const STATUS_COLORS = {
   CANCELLED: { bg: 'bg-rose-500/10', text: 'text-rose-400', border: 'border-rose-500/20' },
   INIT_SENT: { bg: 'bg-blue-500/10', text: 'text-blue-400', border: 'border-blue-500/20' },
   CONFIRM_SENT: { bg: 'bg-amber-500/10', text: 'text-amber-400', border: 'border-amber-500/20' },
+  INIT_RECEIVED: { bg: 'bg-emerald-500/10', text: 'text-emerald-300', border: 'border-emerald-500/20' },
   CANCEL_SENT: { bg: 'bg-rose-500/10', text: 'text-rose-400', border: 'border-rose-500/20' },
   UPDATE_SENT: { bg: 'bg-purple-500/10', text: 'text-purple-400', border: 'border-purple-500/20' },
   Return_Initiated: { bg: 'bg-yellow-500/10', text: 'text-yellow-400', border: 'border-yellow-500/20' },
@@ -1113,10 +1132,20 @@ const STATUS_COLORS = {
   Return_Rejected: { bg: 'bg-red-500/10', text: 'text-red-400', border: 'border-red-500/20' },
 };
 
+// A transaction's status as shown to the buyer (codes from the BAP's
+// transactions table); unknown codes are shown as they are.
+const TXN_STATUS_LABELS = {
+  SELECT_SENT: 'Getting quote', QUOTE_RECEIVED: 'Quote received', INIT_SENT: 'Processing', INIT_RECEIVED: 'Awaiting payment',
+  CONFIRM_SENT: 'Confirming', CONFIRMED: 'Confirmed', STATUS_SENT: 'Checking status', CANCEL_SENT: 'Cancelling',
+  CANCELLED: 'Cancelled', UPDATE_SENT: 'Updating', COMPLETE: 'Completed', RATE_SENT: 'Rating sent', SUPPORT_SENT: 'Support requested',
+  Return_Initiated: 'Return requested', Return_Approved: 'Return approved', Return_Rejected: 'Return rejected',
+};
+const txnStatusLabel = (t, s) => (TXN_STATUS_LABELS[s] ? t(TXN_STATUS_LABELS[s]) : String(s || '').replace(/_/g, ' '));
+
 function fmtOrderDate(iso) {
   if (!iso) return '—';
   try {
-    return new Date(iso).toLocaleString('en-IN', {
+    return new Date(iso).toLocaleString(localeNow(), {
       day: 'numeric', month: 'short', year: 'numeric',
       hour: '2-digit', minute: '2-digit',
     });
@@ -1125,6 +1154,124 @@ function fmtOrderDate(iso) {
 
 /* ── helpers to parse contract data ─────────────────────────────────────── */
 
+const fmtIDR = (amount, cur) => {
+  if (amount == null) return '—';
+  try { return new Intl.NumberFormat('id-ID', { style: 'currency', currency: cur || 'IDR', maximumFractionDigits: 0 }).format(amount); }
+  catch { return `${cur || 'IDR'} ${amount}`; }
+};
+
+// ION cancellation reasons a buyer can give (TradeOffer
+// policies.cancellation.allowedReasons; BUYER_FRAUD_SUSPECTED is seller-side).
+const CANCEL_REASONS = [
+  ['CHANGE_OF_MIND', 'Change of mind'],
+  ['WRONG_ITEM_ORDERED', 'Wrong item ordered'],
+  ['ORDERED_WRONG_VARIANT', 'Ordered wrong variant'],
+  ['FOUND_BETTER_PRICE', 'Found a better price'],
+  ['DELIVERY_TOO_LONG', 'Delivery takes too long'],
+  ['INCORRECT_ADDRESS', 'Incorrect address'],
+  ['DUPLICATE_ORDER', 'Duplicate order'],
+  ['PAYMENT_METHOD_CHANGE', 'Payment method change'],
+  ['ITEM_NO_LONGER_NEEDED', 'Item no longer needed'],
+  ['SELLER_UNRESPONSIVE', 'Seller unresponsive'],
+  ['QUALITY_ISSUE_AT_PREVIEW', 'Quality issue at preview'],
+];
+
+// Fulfillment stage of a performance status code (PENDING → Packed → Shipped
+// → Delivered; returns only follow delivery).
+const stageRank = code => {
+  const c = String(code || '').toUpperCase();
+  if (c === 'PACKED') return 1;
+  if (['DISPATCHED', 'SHIPPED', 'IN_TRANSIT', 'OUT_FOR_DELIVERY'].includes(c)) return 2;
+  if (c === 'DELIVERED' || c.startsWith('RETURN')) return 3;
+  return 0;
+};
+
+// Why an item can't be cancelled any more under its offer's cancellation
+// policy (allowed=false, or the cutoffEvent has passed), or null if it can.
+// The BAP and BPP enforce the same rule.
+// Fulfillment status codes as shown to the buyer.
+const STAGE_LABELS = {
+  PENDING: 'Pending', CONFIRMED: 'Confirmed', PACKED: 'Packed', DISPATCHED: 'Dispatched', SHIPPED: 'Shipped',
+  IN_TRANSIT: 'In transit', OUT_FOR_DELIVERY: 'Out for delivery', DELIVERED: 'Delivered',
+  Return_Initiated: 'Return requested', Return_Approved: 'Return approved', Return_Rejected: 'Return rejected',
+};
+// Codes arrive as PACKED or Packed, depending on the seller.
+const stageLabel = code => {
+  const label = STAGE_LABELS[code] || STAGE_LABELS[String(code || '').toUpperCase()];
+  return label ? tNow(label) : code;
+};
+
+// Cancellation cutoffs (policies.cancellation.cutoffEvent), as a phrase.
+const CUTOFF_LABELS = {
+  BEFORE_CONFIRMATION: 'before confirmation', BEFORE_PACKING: 'before packing',
+  BEFORE_DISPATCH: 'before dispatch', BEFORE_SHIPMENT: 'before shipment',
+};
+
+function cancelBlockedReason(policy, fulfillmentStatus) {
+  if (policy?.allowed === false) return tNow('This item cannot be cancelled');
+  const stage = stageRank(fulfillmentStatus);
+  const passed = {
+    BEFORE_CONFIRMATION: true,
+    BEFORE_PACKING: stage >= 1,
+    BEFORE_DISPATCH: stage >= 2,
+    BEFORE_SHIPMENT: stage >= 2,
+  }[policy?.cutoffEvent];
+  if (!passed) return null;
+  const when = tNow(CUTOFF_LABELS[policy.cutoffEvent]);
+  return tNow('Cancellation closed — only allowed {when}; the order is {status}', {
+    when, status: fulfillmentStatus ? stageLabel(fulfillmentStatus) : tNow('Confirmed'),
+  });
+}
+
+// ISO 8601 duration (P7D, PT2H, P1W2DT3H) in milliseconds; null if invalid.
+function isoDurationMs(s) {
+  const m = /^P(?:(\d+(?:\.\d+)?)Y)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)W)?(?:(\d+(?:\.\d+)?)D)?(?:T(?:(\d+(?:\.\d+)?)H)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)S)?)?$/.exec(s || '');
+  if (!m || s === 'P' || s === 'PT') return null;
+  const [y, mo, w, d, h, mi, se] = m.slice(1).map(v => Number(v || 0));
+  return ((((y * 365 + mo * 30 + w * 7 + d) * 24 + h) * 60 + mi) * 60 + se) * 1000;
+}
+
+// Return eligibility under an item's offer policies.returns -- the BAP and
+// BPP enforce the same rule. { blocked } explains a refusal; otherwise
+// { until, fee } describe the open window and the restocking fee.
+function returnEligibility(policy, fulfillmentStatus, deliveredAt) {
+  if (!policy?.allowed) return { blocked: tNow('This item is not returnable') };
+  if (stageRank(fulfillmentStatus) < 3) return { blocked: tNow('Returns open once the order is delivered') };
+  const f = policy.restockingFee;
+  const fee = f?.type === 'PERCENTAGE' ? tNow('{pct}% restocking fee', { pct: f.value })
+    : f?.type === 'FIXED' ? tNow('{amount} restocking fee', { amount: `Rp ${Number(f.value).toLocaleString(localeNow())}` })
+      : tNow('No restocking fee');
+  const ms = isoDurationMs(policy.window);
+  if (!policy.window || ms == null || !deliveredAt) return { fee };
+  const until = new Date(new Date(deliveredAt).getTime() + ms);
+  if (Date.now() > until.getTime()) {
+    return { blocked: tNow('The return window ({window}) closed on {date}', { window: policy.window, date: fmtOrderDate(until) }) };
+  }
+  return { until, fee };
+}
+
+// A refund settlement's status (settlementAttributes.refund.status) for display.
+const REFUND_STATUS = { PENDING: 'pending', INITIATED: 'initiated', PROCESSING: 'processing', COMPLETED: 'completed', COMPLETE: 'completed', FAILED: 'failed' };
+const refundStatus = (t, s) => {
+  const k = String(s || '').toUpperCase();
+  return REFUND_STATUS[k] ? t(REFUND_STATUS[k]) : String(s || '').toLowerCase();
+};
+
+// Reason picker limited to what every offer involved allows (all reasons when
+// no offer declares allowedReasons).
+function CancelReasonSelect({ value, onChange, allowedLists = [] }) {
+  const lists = allowedLists.filter(l => Array.isArray(l) && l.length);
+  const options = CANCEL_REASONS.filter(([code]) => lists.every(l => l.includes(code)));
+  const { t } = useI18n();
+  return (
+    <select value={value} onChange={e => onChange(e.target.value)}
+      className="bg-slate-900 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-rose-500/40">
+      <option value="">{t('Reason for cancelling…')}</option>
+      {options.map(([code, label]) => <option key={code} value={code}>{t(label)}</option>)}
+    </select>
+  );
+}
+
 function parseContractDetail(contract) {
   if (!contract || typeof contract !== 'object') return null;
 
@@ -1132,14 +1279,40 @@ function parseContractDetail(contract) {
   const commitments = contract.commitments || [];
   const items = commitments.map(c => ({
     id: c.id || '',
-    name: c.descriptor?.name || c.offer?.descriptor?.name || c.id || 'Item',
-    qty: c.quantity?.count ?? 1,
+    // The product (resource) name; the offer name only for orders placed before
+    // commitments carried resource descriptors.
+    name: c.resources?.[0]?.descriptor?.name || c.offer?.descriptor?.name || c.id || tNow('Item'),
+    qty: c.resources?.[0]?.quantity?.unitQuantity ?? c.commitmentAttributes?.quantity?.unitQuantity ?? 1,
     offerId: c.offer?.id || '',
-    resourceId: c.offer?.resourceIds?.[0] || '',
+    resourceId: c.resources?.[0]?.id || c.offer?.resourceIds?.[0] || '',
+    // A cancelled commitment is CLOSED (its ACTIVE replacement carries what remains).
+    cancelled: c.status?.descriptor?.code === 'CLOSED',
+    closedAs: c.status?.descriptor?.name,
+    allowedReasons: c.offer?.offerAttributes?.policies?.cancellation?.allowedReasons,
+    cancelPolicy: c.offer?.offerAttributes?.policies?.cancellation,
+    returnPolicy: c.offer?.offerAttributes?.policies?.returns,
+    // Per-unit price incl. tax (the offer consideration's totalAmount), falling
+    // back to the commitment's pre-tax unit price for older orders.
+    unitPrice: c.offer?.considerations?.[0]?.considerationAttributes?.totalAmount
+      ?? c.commitmentAttributes?.price?.value ?? null,
   }));
 
-  // Consideration → price
-  const consideration = (contract.consideration || [])[0];
+  // Consideration → price. After a cancellation the old price is CANCELLED and
+  // the ACTIVE one (if any) is what the buyer still pays; cancellation fees are
+  // separate "cancellation-…" considerations.
+  const considerations = contract.consideration || [];
+  const isFee = c => /^(cancellation|restocking)-/.test(c.id || '');
+  const consideration = considerations.find(c => !isFee(c) && c.status?.code !== 'CANCELLED')
+    || considerations.find(c => !isFee(c)) || considerations[0];
+  const fees = considerations.filter(isFee).map(c => ({
+    id: c.id,
+    amount: c.considerationAttributes?.totalAmount ?? 0,
+    title: c.considerationAttributes?.breakup?.[0]?.title || tNow('Cancellation fee'),
+  }));
+  const refunds = (contract.settlements || [])
+    .filter(st => st.settlementAttributes?.refund)
+    .map(st => ({ id: st.id, ...st.settlementAttributes.refund }));
+  const fullyCancelled = contract.status?.code === 'CANCELLED';
   const consAttr = consideration?.considerationAttributes || {};
   const price = consAttr.totalAmount ?? null;
   const currency = consAttr.currency || 'IDR';
@@ -1157,11 +1330,21 @@ function parseContractDetail(contract) {
   const performances = contract.performance || [];
   let fulfillmentStatus = performances[0]?.status?.code || '';
   const returnPerformance = performances.find(p => p.performanceAttributes?.type === 'RETURN');
+  // Every return request and its policy outcome (Return_Approved / Return_Rejected + reason).
+  const returns = performances.filter(p => p.performanceAttributes?.type === 'RETURN').map(p => ({
+    id: p.id, code: p.status?.code || '', reason: p.status?.shortDesc || '',
+    items: (p.commitmentIds || []).map(id => commitments.find(c => c.id === id)?.resources?.[0]?.descriptor?.name
+      || commitments.find(c => c.id === id)?.offer?.descriptor?.name || id),
+  }));
   if (returnPerformance && returnPerformance.status?.code) {
     fulfillmentStatus = returnPerformance.status.code;
   }
 
-  return { items, price, currency, breakup, buyer, seller, statusCode, fulfillmentStatus, id: contract.id };
+  return {
+    items, price: fullyCancelled && consideration?.status?.code === 'CANCELLED' ? 0 : price,
+    currency, breakup: fullyCancelled ? [] : breakup, fees, refunds, returns,
+    buyer, seller, statusCode, fulfillmentStatus, id: contract.id,
+  };
 }
 
 const ACTION_LABELS = {
@@ -1183,7 +1366,7 @@ const ACTION_LABELS = {
   rate: { icon: '⭐', label: 'Rated', color: 'text-amber-400' },
   on_rate: { icon: '⭐', label: 'Rating Confirmed', color: 'text-amber-400' },
   on_status: { icon: '📊', label: 'Status Update', color: 'text-slate-400' },
-  on_update: { icon: '🔄', label: 'Order Updated', color: 'text-sky-400' },
+  reconcile: { icon: '🏦', label: 'Seller Settlement', color: 'text-emerald-400' },
 };
 
 /* Copy for each outcome the server can report for a buyer's change request.
@@ -1462,12 +1645,237 @@ function OrderDetailRequestChange({ txnId, contract, onDone }) {
   );
 }
 
+// Items of a confirmed order with per-item cancellation: pick a quantity and
+// cancel it, or cancel the whole order. Cancelling everything still active
+// goes out as Beckn cancel, anything less as a partial-cancellation update --
+// the BAP decides (/cancel-items). onChanged is called once a request is sent.
+function OrderItemsCard({ txnId, order, txnStatus, deliveredAt, onChanged }) {
+  const { t } = useI18n();
+  const [cancelQty, setCancelQty] = useState({});   // commitmentId → units to cancel / return
+  const [cancelling, setCancelling] = useState(null); // commitmentId | 'ALL' | null
+  const [cancelReason, setCancelReason] = useState('');
+  // Delivered orders switch from cancellation to returns (offer return policy).
+  const delivered = stageRank(order.fulfillmentStatus) >= 3;
+
+  const activeItems = order.items.filter(it => !it.cancelled);
+  const blockedReason = it => cancelBlockedReason(it.cancelPolicy, order.fulfillmentStatus)
+    || (stageRank(order.fulfillmentStatus) >= 3 ? t('Already delivered — use Return instead') : null);
+  const cancellable = activeItems.filter(it => !blockedReason(it));
+  // Cancellation is offered on a confirmed order, per item, until its offer's cutoff.
+  const canCancel = !delivered && txnStatus === 'CONFIRMED' && cancellable.length > 0;
+  const returnable = activeItems.filter(it => !returnEligibility(it.returnPolicy, order.fulfillmentStatus, deliveredAt).blocked);
+  const canReturn = delivered && txnStatus === 'CONFIRMED' && returnable.length > 0;
+
+  const returnItems = async (items, key) => {
+    if (!window.confirm(key === 'ALL' ? t('Return all items?') : t('Return the selected quantity of this item?'))) return;
+    setCancelling(key);
+    try {
+      const r = await apiFetch('/return-items', { method: 'POST', body: JSON.stringify({ transaction_id: txnId, items }) });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
+      setCancelQty({});
+      onChanged?.();
+    } catch (e) {
+      alert(t('Return failed: {error}', { error: e.message }));
+    } finally {
+      setCancelling(null);
+    }
+  };
+
+  const cancelItems = async (items, key) => {
+    if (!cancelReason) { alert(t('Please choose a reason for cancelling.')); return; }
+    const whole = key === 'ALL';
+    if (!window.confirm(whole ? t('Cancel the entire order?') : t('Cancel the selected quantity of this item?'))) return;
+    setCancelling(key);
+    try {
+      const r = await apiFetch('/cancel-items', {
+        method: 'POST',
+        body: JSON.stringify({ transaction_id: txnId, items, reason_code: cancelReason }),
+      });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
+      setCancelQty({});
+      onChanged?.();
+    } catch (e) {
+      alert(t('Cancel failed: {error}', { error: e.message }));
+    } finally {
+      setCancelling(null);
+    }
+  };
+
+  return (
+    <div className="rounded-xl border border-white/[0.07] overflow-hidden" style={{ background: 'rgba(255,255,255,0.02)' }}>
+      <div className="px-4 py-2.5 border-b border-white/[0.06] flex items-center gap-2">
+        <ShoppingCart className="w-3.5 h-3.5 text-slate-500" />
+        <p className="text-[11px] font-bold uppercase tracking-widest text-slate-500">{t('Items Ordered')}</p>
+        {['CANCEL_SENT', 'UPDATE_SENT'].includes(txnStatus) && (
+          <span className="ml-auto flex items-center gap-1 text-[10px] text-amber-400"><Loader2 className="w-3 h-3 animate-spin" /> {t('Updating…')}</span>
+        )}
+      </div>
+      <div className="divide-y divide-white/[0.04]">
+        {order.items.map((item, i) => {
+          const q = Math.min(cancelQty[item.id] ?? 1, item.qty);
+          return (
+            <div key={i} className={`px-4 py-2.5 ${item.cancelled ? 'opacity-60' : ''}`}>
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-slate-800 flex items-center justify-center shrink-0">
+                  {item.cancelled ? <Ban className="w-3.5 h-3.5 text-rose-400" /> : <Package className="w-3.5 h-3.5 text-slate-500" />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className={`text-sm font-medium truncate ${item.cancelled ? 'text-slate-400 line-through' : 'text-white'}`}>{item.name}</p>
+                  {item.resourceId && <p className="text-[10px] font-mono text-slate-600 truncate">{item.resourceId}</p>}
+                </div>
+                <div className="text-right shrink-0 flex items-center gap-2">
+                  {item.cancelled && <span className="text-[10px] font-bold text-rose-400 bg-rose-500/10 border border-rose-500/20 px-1.5 py-0.5 rounded">{item.closedAs === 'Returned' ? t('Returned') : t('Cancelled')}</span>}
+                  <div>
+                    {item.unitPrice != null && (
+                      <p className={`text-sm font-semibold tabular-nums ${item.cancelled ? 'text-slate-500 line-through' : 'text-slate-200'}`}>
+                        {fmtIDR(item.unitPrice * item.qty, order.currency)}
+                      </p>
+                    )}
+                    <p className="text-[11px] text-slate-500 tabular-nums">
+                      ×{item.qty}{item.unitPrice != null && item.qty > 1 ? ` · ${t('{price} each', { price: fmtIDR(item.unitPrice, order.currency) })}` : ''}
+                    </p>
+                  </div>
+                </div>
+              </div>
+              {!delivered && txnStatus === 'CONFIRMED' && !item.cancelled && blockedReason(item) && (
+                <p className="mt-1.5 text-right text-[10px] text-slate-500">{blockedReason(item)}</p>
+              )}
+              {delivered && txnStatus === 'CONFIRMED' && !item.cancelled && (() => {
+                const el = returnEligibility(item.returnPolicy, order.fulfillmentStatus, deliveredAt);
+                if (el.blocked) return <p className="mt-1.5 text-right text-[10px] text-slate-500">{el.blocked}</p>;
+                return (
+                  <div className="mt-2 flex flex-wrap items-center justify-end gap-2">
+                    <span className="text-[10px] text-slate-500 mr-auto">
+                      {el.until ? `${t('Returnable until {date}', { date: fmtOrderDate(el.until) })} · ` : ''}{el.fee}
+                    </span>
+                    {item.qty > 1 && (
+                      <div className="flex items-center rounded-lg border border-white/10 overflow-hidden text-xs">
+                        <button className="px-2 py-1 text-slate-400 hover:text-white disabled:opacity-30" disabled={q <= 1}
+                          onClick={() => setCancelQty(m => ({ ...m, [item.id]: q - 1 }))}><Minus className="w-3 h-3" /></button>
+                        <span className="px-2 text-slate-200 tabular-nums">{q}</span>
+                        <button className="px-2 py-1 text-slate-400 hover:text-white disabled:opacity-30" disabled={q >= item.qty}
+                          onClick={() => setCancelQty(m => ({ ...m, [item.id]: q + 1 }))}><Plus className="w-3 h-3" /></button>
+                      </div>
+                    )}
+                    <button disabled={!!cancelling}
+                      onClick={() => returnItems([{ commitment_id: item.id, quantity: q }], item.id)}
+                      className="px-2.5 py-1 rounded-lg text-[11px] font-semibold text-purple-300 border border-purple-500/30 hover:bg-purple-500/10 disabled:opacity-50">
+                      {cancelling === item.id ? t('Requesting…') : item.qty > 1 ? t('Return {n}', { n: q }) : t('Return item')}
+                    </button>
+                  </div>
+                );
+              })()}
+              {canCancel && !item.cancelled && !blockedReason(item) && (
+                <div className="mt-2 flex items-center justify-end gap-2">
+                  {item.qty > 1 && (
+                    <div className="flex items-center rounded-lg border border-white/10 overflow-hidden text-xs">
+                      <button className="px-2 py-1 text-slate-400 hover:text-white disabled:opacity-30" disabled={q <= 1}
+                        onClick={() => setCancelQty(m => ({ ...m, [item.id]: q - 1 }))}><Minus className="w-3 h-3" /></button>
+                      <span className="px-2 text-slate-200 tabular-nums">{q}</span>
+                      <button className="px-2 py-1 text-slate-400 hover:text-white disabled:opacity-30" disabled={q >= item.qty}
+                        onClick={() => setCancelQty(m => ({ ...m, [item.id]: q + 1 }))}><Plus className="w-3 h-3" /></button>
+                    </div>
+                  )}
+                  <button disabled={!!cancelling}
+                    onClick={() => cancelItems([{ commitment_id: item.id, quantity: q }], item.id)}
+                    className="px-2.5 py-1 rounded-lg text-[11px] font-semibold text-rose-300 border border-rose-500/30 hover:bg-rose-500/10 disabled:opacity-50">
+                    {cancelling === item.id ? t('Cancelling…') : item.qty > 1 ? t('Cancel {n}', { n: q }) : t('Cancel item')}
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {canCancel && (
+        <div className="px-4 py-2.5 border-t border-white/[0.06] flex flex-wrap items-center justify-end gap-2">
+          <CancelReasonSelect value={cancelReason} onChange={setCancelReason} allowedLists={cancellable.map(it => it.allowedReasons)} />
+          {cancellable.length === activeItems.length && <button disabled={!!cancelling}
+            onClick={() => cancelItems(activeItems.map(it => ({ commitment_id: it.id, quantity: it.qty })), 'ALL')}
+            className="px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-rose-600 hover:bg-rose-500 disabled:opacity-50">
+            {cancelling === 'ALL' ? t('Cancelling…') : t('Cancel entire order')}
+          </button>}
+        </div>
+      )}
+      {canReturn && returnable.length === activeItems.length && activeItems.length > 1 && (
+        <div className="px-4 py-2.5 border-t border-white/[0.06] flex justify-end">
+          <button disabled={!!cancelling}
+            onClick={() => returnItems(activeItems.map(it => ({ commitment_id: it.id, quantity: it.qty })), 'ALL')}
+            className="px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-purple-600 hover:bg-purple-500 disabled:opacity-50">
+            {cancelling === 'ALL' ? t('Requesting…') : t('Return all items')}
+          </button>
+        </div>
+      )}
+      {order.returns?.length > 0 && (
+        <div className="px-4 py-2.5 border-t border-white/[0.06] space-y-1">
+          {order.returns.map(r => (
+            <div key={r.id} className="text-xs flex items-start justify-between gap-3">
+              <span className="text-slate-400">{t('Return')} · {r.items.join(', ') || r.id}</span>
+              <span className={r.code === 'Return_Approved' ? 'text-emerald-400' : r.code === 'Return_Rejected' ? 'text-rose-400 text-right' : 'text-amber-400'}>
+                {r.code === 'Return_Approved' ? t('Approved') : r.code === 'Return_Rejected' ? `${t('Rejected')}${r.reason ? ` — ${r.reason}` : ''}` : t('Requested…')}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+      {(order.fees.length > 0 || order.refunds.length > 0) && (
+        <div className="px-4 py-2.5 border-t border-white/[0.06] space-y-1">
+          {order.fees.map(f => (
+            <div key={f.id} className="flex justify-between text-xs">
+              <span className="text-slate-400">{f.title}</span>
+              <span className="text-amber-400">{fmtIDR(f.amount, order.currency)}</span>
+            </div>
+          ))}
+          {order.refunds.map(r => (
+            <div key={r.id} className="flex justify-between text-xs">
+              <span className="text-slate-400">
+                {t('Refund')} <span className="text-slate-600">· {refundStatus(t, r.status)}{r.timelineDays ? ` · ${t('within {n} days', { n: r.timelineDays })}` : ''}</span>
+              </span>
+              <span className="text-emerald-400">{fmtIDR(r.amount, order.currency)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// OrderItemsCard for a just-confirmed order: loads the latest contract itself
+// and re-fetches until a cancel/update callback lands. onStatus is told only
+// when the order ends up fully CANCELLED -- in-flight states stay in the card.
+function LiveOrderItems({ txnId, onStatus }) {
+  const [data, setData] = useState(null);
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    apiFetch(`/status/${txnId}`).then(r => r.json()).then(d => {
+      setData(d);
+      if (d.status === 'CANCELLED') onStatus?.(d.status);
+    }).catch(() => { });
+  }, [txnId, tick]); // eslint-disable-line react-hooks/exhaustive-deps
+  // A seller-reviewed change request (UPDATE_SENT with a PENDING
+  // update_request) waits on a human, so it is not polled -- only the
+  // cancellations and returns the seller's system answers in seconds are.
+  useEffect(() => {
+    if (!data) return;
+    const inFlight = data.status === 'CANCEL_SENT' ||
+      (data.status === 'UPDATE_SENT' && data.update_request?.outcome !== 'PENDING');
+    if (!inFlight) return;
+    const timer = setTimeout(() => setTick(k => k + 1), 2000);
+    return () => clearTimeout(timer);
+  }, [data]);
+  const contract = typeof data?.contract === 'string' ? JSON.parse(data.contract) : data?.contract;
+  const order = parseContractDetail(contract?.message?.contract || contract);
+  if (!order?.items?.length) return null;
+  return <OrderItemsCard txnId={txnId} order={order} txnStatus={data.status} onChanged={() => setTick(k => k + 1)} />;
+}
+
 function OrderDetailPanel({ txnId, onBack }) {
+  const { t, locale } = useI18n();
   const [detail, setDetail] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
-  const [returning, setReturning] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [lastLoaded, setLastLoaded] = useState(null);
 
   // background=true keeps the existing content on screen while re-reading,
@@ -1488,6 +1896,20 @@ function OrderDetailPanel({ txnId, onBack }) {
     return () => clearInterval(id);
   }, [load]);
 
+  // While a confirm, cancellation or return is in flight, re-read every 2s
+  // until the BPP's callback lands -- those are answered by the seller's
+  // system in seconds. A change request (UPDATE_SENT with a PENDING
+  // update_request) is NOT polled: it waits on a human, so the hourly
+  // refresh above and the Refresh button cover it.
+  const awaitingCallback = !!detail && (
+    ['CONFIRM_SENT', 'CANCEL_SENT'].includes(detail.status) ||
+    (detail.status === 'UPDATE_SENT' && detail.update_request?.outcome !== 'PENDING'));
+  useEffect(() => {
+    if (!awaitingCallback) return;
+    const timer = setTimeout(() => load(true), 2000);
+    return () => clearTimeout(timer);
+  }, [awaitingCallback, detail, load]);
+
   // One handler per action, each named for the single thing it does.
   // `acting` tracks which one is in flight so only that button spins.
   const [acting, setActing] = useState(null);
@@ -1506,7 +1928,7 @@ function OrderDetailPanel({ txnId, onBack }) {
       if (okMessage) alert(okMessage);
       await load(true);
     } catch (e) {
-      alert(`${label === 'cancel' ? 'Cancel' : 'Check status'} failed: ${e.message}`);
+      alert(`Check status failed: ${e.message}`);
     } finally {
       setActing(null);
     }
@@ -1518,11 +1940,6 @@ function OrderDetailPanel({ txnId, onBack }) {
   // every later action on it.
   const onCheckStatus = () => post('status', '/request-status', { transaction_id: txnId },
     'Status requested — this view will update when the seller responds.');
-
-  const onCancelOrder = () => {
-    if (!window.confirm('Cancel this order? This cannot be undone.')) return;
-    return post('cancel', '/cancel', { transaction_id: txnId });
-  };
 
   if (loading) return (
     <div className="flex-1 flex items-center justify-center">
@@ -1571,48 +1988,27 @@ function OrderDetailPanel({ txnId, onBack }) {
     catch { return `${cur || 'IDR'} ${amount}`; }
   };
 
-  const handleReturn = async () => {
-    setReturning(true);
+  // Pay & Confirm an order left at INIT_RECEIVED (the seller's on_init terms
+  // were received but checkout was never completed) -- same /confirm call as
+  // the checkout; the detail re-fetches until on_confirm lands.
+  const handleConfirm = async () => {
+    setConfirming(true);
     try {
-      let rawContract = {};
-      const snaps = detail.snapshots || [];
-      if (snaps.length > 0) {
-        const lastSnap = snaps[snaps.length - 1].contract;
-        rawContract = lastSnap.message?.contract || lastSnap;
-      } else {
-        rawContract = detail.contract;
-      }
-
-      const retContract = {
-        ...rawContract,
-        id: bestContract.id,
-        performance: [
-          ...(rawContract.performance || []),
-          { 
-            id: "return-1",
-            performanceAttributes: {
-              "@context": "https://schema.ion.id/release1/schema/extension/trade/TradePerformance/v1/context.jsonld",
-              "@type": "ion:IONTradePerformance",
-              "type": "RETURN",
-              "supportedPerformanceModes": ["DELIVERY"]
-            },
-            status: { code: "Return_Initiated" } 
-          }
-        ]
-      };
-      await apiFetch('/update', {
-        method: 'POST',
-        body: JSON.stringify({ transaction_id: txnId, contract: retContract })
-      });
-      alert('Return initiated! The BPP has been notified.');
+      const r = await apiFetch('/confirm', { method: 'POST', body: JSON.stringify({ transaction_id: txnId }) });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
+      await load(true);
     } catch (e) {
-      alert('Return failed: ' + e.message);
+      alert(t('Confirm failed: {error}', { error: e.message }));
     } finally {
-      setReturning(false);
+      setConfirming(false);
     }
   };
 
-  const canReturn = bestContract?.fulfillmentStatus === 'Delivered';
+  // When the order was first seen Delivered -- the start of the return window.
+  const deliveredAt = (detail.snapshots || [])
+    .filter(sn => (parseContractDetail(sn.contract?.message?.contract || sn.contract)?.fulfillmentStatus === 'Delivered')
+      || (sn.contract?.performance || []).some(p => p.status?.code === 'Delivered'))
+    .map(sn => sn.created_at).sort()[0] || null;
 
   return (
     <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
@@ -1628,26 +2024,31 @@ function OrderDetailPanel({ txnId, onBack }) {
           }
         </div>
         <div>
-          <p className={`text-sm font-bold ${sc.text}`}>{detail.status.replace(/_/g, ' ')}</p>
+          <p className={`text-sm font-bold ${sc.text}`}>{txnStatusLabel(t, detail.status)}</p>
           <p className="text-[10px] text-slate-500">{fmtOrderDate(detail.updated_at)}</p>
         </div>
       </div>
 
-      {canReturn && (
-        <div className="rounded-xl border border-white/[0.07] px-4 py-3 bg-purple-500/10 flex items-center justify-between">
+      {detail.status === 'INIT_RECEIVED' && (
+        <div className="rounded-xl border border-emerald-500/20 px-4 py-3 bg-emerald-500/5 flex items-center justify-between gap-3">
           <div>
-            <p className="text-xs font-bold text-purple-400">Order Delivered</p>
-            <p className="text-[10px] text-purple-400/70 mt-0.5">You can now initiate a return.</p>
+            <p className="text-xs font-bold text-emerald-300">{t('Awaiting payment')}</p>
+            <p className="text-[10px] text-emerald-400/70 mt-0.5">{t('The seller has accepted your order. Pay to confirm it.')}</p>
           </div>
-          <button 
-            disabled={returning}
-            onClick={handleReturn}
-            className="px-3 py-1.5 bg-purple-500 text-white rounded-lg text-xs font-bold hover:bg-purple-600 transition-colors disabled:opacity-50"
-          >
-            {returning ? 'Initiating...' : 'Return Order'}
+          <button disabled={confirming} onClick={handleConfirm}
+            className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition-colors disabled:opacity-50">
+            {confirming ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ShieldCheck className="w-3.5 h-3.5" />}
+            {confirming ? t('Confirming…') : t('Pay & Confirm')}
           </button>
         </div>
       )}
+      {detail.status === 'CONFIRM_SENT' && (
+        <div className="rounded-xl border border-amber-500/20 px-4 py-3 bg-amber-500/5 flex items-center gap-2 text-xs text-amber-300">
+          <Loader2 className="w-3.5 h-3.5 animate-spin" /> {t('Confirming your order with the seller…')}
+        </div>
+      )}
+
+
 
       {/* Change-request outcome */}
       <UpdateOutcomeBanner request={detail.update_request} />
@@ -1688,16 +2089,12 @@ function OrderDetailPanel({ txnId, onBack }) {
         <div className="rounded-xl border border-white/[0.07] px-4 py-3 space-y-2.5" style={{ background: 'rgba(255,255,255,0.02)' }}>
           <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Actions</p>
 
-          <div className="grid grid-cols-2 gap-2">
-            <button onClick={onCheckStatus} disabled={acting === 'status'}
-              className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-semibold bg-blue-500/10 text-blue-300 border border-blue-500/20 hover:bg-blue-500/20 disabled:opacity-50 transition-all">
-              {acting === 'status' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />} Check status
-            </button>
-            <button onClick={onCancelOrder} disabled={acting === 'cancel'}
-              className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-semibold bg-rose-500/10 text-rose-300 border border-rose-500/20 hover:bg-rose-500/20 disabled:opacity-50 transition-all">
-              {acting === 'cancel' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Ban className="w-3.5 h-3.5" />} Cancel order
-            </button>
-          </div>
+          {/* Cancelling (whole order or single items, with a reason) and
+            * returns live in the Items card below. */}
+          <button onClick={onCheckStatus} disabled={acting === 'status'}
+            className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-semibold bg-blue-500/10 text-blue-300 border border-blue-500/20 hover:bg-blue-500/20 disabled:opacity-50 transition-all">
+            {acting === 'status' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />} Check status
+          </button>
 
           {quotaLeft > 0 ? (
             <OrderDetailRequestChange txnId={detail.transaction_id} contract={bestContractRaw} onDone={() => load(true)} />
@@ -1713,7 +2110,9 @@ function OrderDetailPanel({ txnId, onBack }) {
       ) : (
         <p className="text-[11px] text-slate-500 rounded-xl border border-white/[0.07] px-4 py-2.5">
           {detail.status === 'UPDATE_SENT'
-            ? 'A change request is already with the seller. You can raise another once they decide.'
+            ? (detail.update_request?.outcome === 'PENDING'
+              ? 'A change request is already with the seller. You can raise another once they decide.'
+              : 'An item cancellation or return is being processed for this order.')
             : detail.status === 'CANCEL_SENT'
               ? 'A cancellation is being processed for this order.'
               : `No actions available while this order is ${detail.status.replace(/_/g, ' ').toLowerCase()}.`}
@@ -1739,43 +2138,23 @@ function OrderDetailPanel({ txnId, onBack }) {
 
       {/* IDs */}
       <div className="rounded-xl border border-white/[0.07] px-4 py-3 space-y-2" style={{ background: 'rgba(255,255,255,0.02)' }}>
-        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-2">Transaction</p>
+        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-2">{t('Transaction')}</p>
         <div className="flex items-start justify-between gap-2">
-          <span className="text-[11px] text-slate-500 shrink-0">Txn ID</span>
+          <span className="text-[11px] text-slate-500 shrink-0">{t('Txn ID')}</span>
           <span className="text-[11px] font-mono text-slate-300 break-all text-right">{detail.transaction_id}</span>
         </div>
         {bestContract?.id && (
           <div className="flex items-start justify-between gap-2">
-            <span className="text-[11px] text-slate-500 shrink-0">Contract ID</span>
+            <span className="text-[11px] text-slate-500 shrink-0">{t('Contract ID')}</span>
             <span className="text-[11px] font-mono text-slate-300 break-all text-right">{bestContract.id}</span>
           </div>
         )}
       </div>
 
-      {/* Items */}
+      {/* Items + cancellation */}
       {bestContract?.items?.length > 0 && (
-        <div className="rounded-xl border border-white/[0.07] overflow-hidden" style={{ background: 'rgba(255,255,255,0.02)' }}>
-          <div className="px-4 py-2.5 border-b border-white/[0.06] flex items-center gap-2">
-            <ShoppingCart className="w-3.5 h-3.5 text-slate-500" />
-            <p className="text-[11px] font-bold uppercase tracking-widest text-slate-500">Items Ordered</p>
-          </div>
-          <div className="divide-y divide-white/[0.04]">
-            {bestContract.items.map((item, i) => (
-              <div key={i} className="px-4 py-2.5 flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-slate-800 flex items-center justify-center shrink-0">
-                  <Package className="w-3.5 h-3.5 text-slate-500" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-white font-medium truncate">{item.name}</p>
-                  {item.resourceId && <p className="text-[10px] font-mono text-slate-600 truncate">{item.resourceId}</p>}
-                </div>
-                <div className="text-right shrink-0">
-                  <p className="text-xs text-slate-400">×{item.qty}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+        <OrderItemsCard txnId={txnId} order={bestContract} txnStatus={detail.status} deliveredAt={deliveredAt}
+          onChanged={() => load(true)} />
       )}
 
       {/* Price / Breakup */}
@@ -1783,7 +2162,7 @@ function OrderDetailPanel({ txnId, onBack }) {
         <div className="rounded-xl border border-white/[0.07] overflow-hidden" style={{ background: 'rgba(255,255,255,0.02)' }}>
           <div className="px-4 py-2.5 border-b border-white/[0.06] flex items-center gap-2">
             <CreditCard className="w-3.5 h-3.5 text-slate-500" />
-            <p className="text-[11px] font-bold uppercase tracking-widest text-slate-500">Payment</p>
+            <p className="text-[11px] font-bold uppercase tracking-widest text-slate-500">{t('Payment')}</p>
           </div>
           <div className="px-4 py-3 space-y-1.5">
             {bestContract.breakup.map((b, i) => (
@@ -1793,7 +2172,7 @@ function OrderDetailPanel({ txnId, onBack }) {
               </div>
             ))}
             <div className="flex justify-between pt-2 border-t border-white/[0.06]">
-              <span className="text-sm font-bold text-white">Total</span>
+              <span className="text-sm font-bold text-white">{t('Total')}</span>
               <span className="text-sm font-bold text-emerald-300">{fmt(bestContract.price, bestContract.currency)}</span>
             </div>
           </div>
@@ -1805,10 +2184,10 @@ function OrderDetailPanel({ txnId, onBack }) {
         <div className="rounded-xl border border-white/[0.07] overflow-hidden" style={{ background: 'rgba(255,255,255,0.02)' }}>
           <div className="px-4 py-2.5 border-b border-white/[0.06] flex items-center gap-2">
             <User className="w-3.5 h-3.5 text-slate-500" />
-            <p className="text-[11px] font-bold uppercase tracking-widest text-slate-500">Participants</p>
+            <p className="text-[11px] font-bold uppercase tracking-widest text-slate-500">{t('Participants')}</p>
           </div>
           <div className="divide-y divide-white/[0.04]">
-            {[bestContract.buyer && { role: 'Buyer', p: bestContract.buyer }, bestContract.seller && { role: 'Seller', p: bestContract.seller }].filter(Boolean).map(({ role, p }) => (
+            {[bestContract.buyer && { role: t('Buyer'), p: bestContract.buyer }, bestContract.seller && { role: t('Seller'), p: bestContract.seller }].filter(Boolean).map(({ role, p }) => (
               <div key={role} className="px-4 py-2.5">
                 <p className="text-[10px] text-slate-500 mb-1 uppercase tracking-wider">{role}</p>
                 <p className="text-sm text-white font-medium">{p.descriptor?.name || p.contact?.name || '—'}</p>
@@ -1826,12 +2205,12 @@ function OrderDetailPanel({ txnId, onBack }) {
         <div className="rounded-xl border border-white/[0.07] overflow-hidden" style={{ background: 'rgba(255,255,255,0.02)' }}>
           <div className="px-4 py-2.5 border-b border-white/[0.06] flex items-center gap-2">
             <Clock className="w-3.5 h-3.5 text-slate-500" />
-            <p className="text-[11px] font-bold uppercase tracking-widest text-slate-500">Order Timeline</p>
+            <p className="text-[11px] font-bold uppercase tracking-widest text-slate-500">{t('Order Timeline')}</p>
           </div>
           <div className="px-4 py-3 space-y-3">
             {snaps.map((s, i) => {
               const al = ACTION_LABELS[s.action] || { icon: '•', label: s.action, color: 'text-slate-500' };
-              let displayLabel = al.label;
+              let displayLabel = ACTION_LABELS[s.action] ? t(al.label) : al.label;
               let displayIcon = al.icon;
               let displayColor = al.color;
               
@@ -1840,27 +2219,27 @@ function OrderDetailPanel({ txnId, onBack }) {
                 const fs = parsedSn.fulfillmentStatus?.toLowerCase() || '';
                 
                 if (fs === 'packed') {
-                  displayLabel = 'Order Packed';
+                  displayLabel = t('Order Packed');
                   displayIcon = '📦';
                   displayColor = 'text-orange-400';
                 } else if (fs === 'shipped') {
-                  displayLabel = 'Order Shipped';
+                  displayLabel = t('Order Shipped');
                   displayIcon = '🚚';
                   displayColor = 'text-blue-400';
                 } else if (fs === 'delivered') {
-                  displayLabel = 'Order Delivered';
+                  displayLabel = t('Order Delivered');
                   displayIcon = '📬';
                   displayColor = 'text-emerald-400';
                 } else if (fs === 'return_initiated') {
-                  displayLabel = 'Return Requested';
+                  displayLabel = t('Return Requested');
                   displayIcon = '🔄';
                   displayColor = 'text-purple-400';
                 } else if (fs === 'return_approved') {
-                  displayLabel = 'Return Approved';
+                  displayLabel = t('Return Approved');
                   displayIcon = '✅';
                   displayColor = 'text-emerald-400';
                 } else if (fs === 'return_rejected') {
-                  displayLabel = 'Return Rejected';
+                  displayLabel = t('Return Rejected');
                   displayIcon = '❌';
                   displayColor = 'text-rose-400';
                 }
@@ -1889,6 +2268,7 @@ function OrderDetailPanel({ txnId, onBack }) {
 }
 
 function OrderHistoryDrawer({ open, onClose }) {
+  const { t, locale } = useI18n();
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(false);
   const [total, setTotal] = useState(0);
@@ -1940,7 +2320,7 @@ function OrderHistoryDrawer({ open, onClose }) {
                 ) : null}
                 <History className="w-5 h-5 text-cyan-400" />
                 <h2 className="text-lg font-bold text-white">
-                  {selectedId ? 'Order Detail' : 'Order History'}
+                  {selectedId ? t('Order Detail') : t('Order History')}
                 </h2>
                 {!selectedId && total > 0 && (
                   <span className="bg-cyan-500/20 text-cyan-400 text-xs font-bold px-2 py-0.5 rounded-full">{total}</span>
@@ -1960,7 +2340,7 @@ function OrderHistoryDrawer({ open, onClose }) {
                 </motion.div>
               ) : (
                 <motion.div key="list" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                  className="flex-1 flex flex-col overflow-hidden">
+                  className="flex-1 flex flex-col overflow-hidden" data-tour="orders-list">
 
                   {/* Order list */}
                   <div className="flex-1 overflow-y-auto px-4 py-4 space-y-2">
@@ -1973,8 +2353,8 @@ function OrderHistoryDrawer({ open, onClose }) {
                     {!loading && orders.length === 0 && (
                       <div className="flex flex-col items-center gap-3 py-20 text-slate-500">
                         <Package className="w-12 h-12 opacity-20" />
-                        <p className="text-sm">No orders yet</p>
-                        <p className="text-xs opacity-60">Your placed orders will appear here</p>
+                        <p className="text-sm">{t('No orders yet')}</p>
+                        <p className="text-xs opacity-60">{t('Your orders will appear here')}</p>
                       </div>
                     )}
 
@@ -1991,16 +2371,16 @@ function OrderHistoryDrawer({ open, onClose }) {
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
                               <p className="text-sm font-semibold text-white truncate">
-                                {order.item_name || 'Order #' + order.transaction_id.slice(0, 8)}
+                                {order.item_name || t('Order #{id}', { id: order.transaction_id.slice(0, 8) })}
                               </p>
                               <span className={`shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full border ${sc.bg} ${sc.text} ${sc.border}`}>
-                                {order.status.replace(/_/g, ' ')}
+                                {txnStatusLabel(t, order.status)}
                               </span>
                             </div>
                             <div className="flex items-center gap-3 mt-0.5 flex-wrap">
                               {order.item_price > 0 && (
                                 <span className="text-xs font-semibold text-emerald-300">
-                                  {order.currency} {order.item_price.toLocaleString()}
+                                  {order.currency} {order.item_price.toLocaleString(locale)}
                                 </span>
                               )}
                               <span className="text-[10px] text-slate-600">
@@ -2019,12 +2399,12 @@ function OrderHistoryDrawer({ open, onClose }) {
                     <div className="shrink-0 flex items-center justify-between px-5 py-3 border-t border-white/[0.06]">
                       <button onClick={() => load(page - 1)} disabled={page <= 1}
                         className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-400 border border-white/[0.08] hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors">
-                        ← Prev
+                        ← {t('Prev')}
                       </button>
-                      <span className="text-xs text-slate-500">Page {page} / {totalPages}</span>
+                      <span className="text-xs text-slate-500">{t('Page {page} of {total}', { page, total: totalPages })}</span>
                       <button onClick={() => load(page + 1)} disabled={page >= totalPages}
                         className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-400 border border-white/[0.08] hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors">
-                        Next →
+                        {t('Next')} →
                       </button>
                     </div>
                   )}
@@ -2039,7 +2419,61 @@ function OrderHistoryDrawer({ open, onClose }) {
 }
 
 /* ─────────────────────────── App ────────────────────────────────────────── */
+/* ── Guided tour ────────────────────────────────────────────────────────── */
+// The ordering part is hands-on: the buyer clicks the real buttons (Auto-fill
+// does the typing) and ends up with a sample order placed with a seller.
+const TOUR_DONE_KEY = 'bap.tourDone';
+const statusIn = (...list) => ({ status }) => list.includes(status);
+const PLACED = ['CONFIRMED', 'STATUS_SENT', 'CANCEL_SENT', 'CANCELLED', 'RATE_SENT', 'SUPPORT_SENT'];
+const tourSteps = t => [
+  { eyebrow: t('Welcome'), title: t('Shop the ION network'),
+    body: <p>{t("This buyer app shows products from every seller on the ION network in one place. This tour shows how it works, and you'll place a sample order along the way. It takes about two minutes.")}</p> },
+  { eyebrow: t('Search'), target: 'search', title: t('Search'),
+    body: <p>{t('Search by product name. The search runs across every seller on the network.')}</p> },
+  { eyebrow: t('Browse'), target: 'filters', title: t('Categories and sorting'),
+    body: <p>{t('Narrow the list by category, or sort by price or name. Tap any product card to see its details, offer, and return and cancellation policies.')}</p> },
+
+  { eyebrow: t('Order · {n} of 4', { n: 1 }), target: 'add-first', action: 'click', waitLabel: t('Click ADD'),
+    skip: { label: t('Skip this part'), to: 'orders' }, title: t("Let's place an order"),
+    body: <><p>{rich(t('Click <b>ADD</b> on the first product to put it in your cart.'))}</p><p className="text-slate-400">{t('No products? A seller has to publish a catalog first, from the BPP app.')}</p></> },
+  { eyebrow: t('Order · {n} of 4', { n: 1 }), target: 'view-cart', until: s => s.isCartOpen, waitLabel: t('Click View Cart'),
+    title: t('Open your cart'),
+    body: <p>{rich(t('Your cart can hold products from different sellers. Click <b>View Cart</b>.'))}</p> },
+  { eyebrow: t('Order · {n} of 4', { n: 2 }), target: 'checkout', until: s => s.cartCheckout, waitLabel: t('Click Checkout'),
+    title: t('Check out'),
+    body: <p>{rich(t('Click <b>Proceed to Checkout</b>. The app asks the seller for a <b>quote</b>: live price, stock, tax and delivery.'))}</p> },
+  { eyebrow: t('Order · {n} of 4', { n: 2 }), target: 'checkout-stepper', until: statusIn('QUOTE_RECEIVED', 'INIT_SENT', 'INIT_RECEIVED', 'CONFIRM_SENT', ...PLACED),
+    waitLabel: t('Waiting for the seller…'), title: t('Getting a quote'),
+    body: <p>{t('The seller is working out your quote. This usually takes a second or two.')}</p> },
+  { eyebrow: t('Order · {n} of 4', { n: 3 }), target: 'billing-autofill', action: 'click', waitLabel: t('Click Auto-fill'),
+    title: t('Your details'),
+    body: <p>{rich(t("The quote shows the seller's price, tax and delivery. Below it, enter who the order is for and where to deliver it. Click <b>Auto-fill</b> for a sample address."))}</p> },
+  { eyebrow: t('Order · {n} of 4', { n: 3 }), target: 'init', until: statusIn('INIT_RECEIVED', 'CONFIRM_SENT', ...PLACED), waitLabel: t('Click Initialize'),
+    title: t('Initialize the order'),
+    body: <p>{rich(t("Click <b>Initialize Order</b>. The seller confirms the final terms and how you'll pay."))}</p> },
+  { eyebrow: t('Order · {n} of 4', { n: 4 }), target: 'confirm', until: statusIn(...PLACED), waitLabel: t('Click Pay & Confirm'),
+    title: t('Pay and confirm'),
+    body: <><p>{rich(t('Click <b>Pay & Confirm Order</b> to place it.'))}</p><p className="text-slate-400">{t('The payment gateway holds your payment until the order is settled with the seller.')}</p></> },
+  { eyebrow: t('Order placed'), target: 'order-placed', title: t('Order placed!'),
+    body: <p>{t("The seller has your order. Its items are listed below. You can cancel the whole order, or just some items, if the seller's policy allows it.")}</p> },
+  { eyebrow: t('Order placed'), target: 'order-actions', title: t('After you order'),
+    body: <p>{rich(t('<b>Refresh Status</b> checks for updates, <b>Rate Order</b> tells the seller how it went, and <b>Get Support</b> raises a ticket with them.'))}</p> },
+  { eyebrow: t('Order placed'), target: 'continue', action: 'click', waitLabel: t('Click Continue Shopping'),
+    title: t('Back to the shop'),
+    body: <p>{rich(t('Click <b>Continue Shopping</b>. Your order is saved in your order history.'))}</p> },
+
+  { id: 'orders', eyebrow: t('Orders'), target: 'orders-button', closeDrawers: true, until: s => s.isOrdersOpen, waitLabel: t('Click Orders'),
+    title: t('Your orders'),
+    body: <p>{rich(t('Every order you place is kept here. Click <b>Orders</b>.'))}</p> },
+  { eyebrow: t('Orders'), target: 'orders-list', title: t('Order history'),
+    body: <p>{t("Tap an order to see its status, delivery progress and items. From there you can cancel, or return items once they're delivered, within the seller's return window.")}</p> },
+  { eyebrow: t('Done'), target: 'tour-button', closeDrawers: true, title: t("You're all set"),
+    body: <p>{t('Happy shopping! You can run this tour again any time from here, and switch between English and Bahasa Indonesia with EN | ID next to it.')}</p> },
+];
+
 export default function App() {
+  const { t, locale, chosen: langChosen } = useI18n();
+  const steps = useMemo(() => tourSteps(t), [t]);
   const [catalog, setCatalog] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -2059,6 +2493,7 @@ export default function App() {
   });
   const debounceRef = useRef(null);
   const [authReady, setAuthReady] = useState(false);
+  const [tourOpen, setTourOpen] = useState(false);
 
   // Gate on a token before rendering anything real. There's no login UI
   // here at all -- landing-page is the single entry point (see
@@ -2115,6 +2550,23 @@ export default function App() {
   }, []);
 
   useEffect(() => { if (authReady) discover(); }, [authReady, discover]);
+
+  /* ── Guided tour ──────────────────────────────────────────────────────── */
+  // Opens by itself on a buyer's first visit; "Tour" in the header reruns it.
+  // First visit: the tour starts once a language has been picked.
+  useEffect(() => {
+    if (!authReady || !langChosen) return;
+    let done = false;
+    try { done = localStorage.getItem(TOUR_DONE_KEY) === '1'; } catch { /* storage blocked */ }
+    if (!done) setTourOpen(true);
+  }, [authReady, langChosen]);
+  const closeTour = useCallback(() => {
+    setTourOpen(false);
+    try { localStorage.setItem(TOUR_DONE_KEY, '1'); } catch { /* storage blocked */ }
+  }, []);
+  const onTourStep = useCallback(step => {
+    if (step.closeDrawers) { setIsOrdersOpen(false); setIsCartOpen(false); setSelectedProduct(null); }
+  }, []);
 
   const handleSearchChange = e => {
     const v = e.target.value;
@@ -2196,6 +2648,7 @@ export default function App() {
             provider_name: product.sellerName,
             offer_attributes: product.offerAttr || {},
             offer_considerations: product.offerConsiderations || [],
+            resource: product.resourceDetail,
             bpp_id: product.bppId || '',
             bpp_uri: product.bppUri || '',
           }],
@@ -2204,7 +2657,7 @@ export default function App() {
       if (!r.ok) throw new Error(await r.text());
       const d = await r.json();
       setTransaction({ id: d.transaction_id, status: 'SELECT_SENT', product });
-    } catch (e) { alert('Select failed: ' + e.message); }
+    } catch (e) { alert(t('Select failed: {error}', { error: e.message })); }
     finally { setIsLoading(false); }
   };
 
@@ -2224,6 +2677,7 @@ export default function App() {
             provider_name: i.sellerName || '',
             offer_attributes: i.offerAttr || {},
             offer_considerations: i.offerConsiderations || [],
+            resource: i.resourceDetail,
             bpp_id: i.bppId || '',
             bpp_uri: i.bppUri || '',
           })),
@@ -2234,7 +2688,7 @@ export default function App() {
       setTransaction({ id: d.transaction_id, status: 'SELECT_SENT' });
       setCartCheckout(true);
       setIsCartOpen(true);
-    } catch (e) { alert('Select failed: ' + e.message); }
+    } catch (e) { alert(t('Select failed: {error}', { error: e.message })); }
     finally { setIsLoading(false); }
   };
 
@@ -2260,7 +2714,7 @@ export default function App() {
         }),
       });
       setTransaction(p => ({ ...p, status: 'INIT_SENT' }));
-    } catch (e) { alert('Init failed: ' + e.message); }
+    } catch (e) { alert(t('Init failed: {error}', { error: e.message })); }
     finally { setIsLoading(false); }
   };
 
@@ -2274,7 +2728,7 @@ export default function App() {
         body: JSON.stringify({ transaction_id: transaction.id }),
       });
       setTransaction(p => ({ ...p, status: 'CONFIRM_SENT' }));
-    } catch (e) { alert('Confirm failed: ' + e.message); }
+    } catch (e) { alert(t('Confirm failed: {error}', { error: e.message })); }
     finally { setIsLoading(false); }
   };
 
@@ -2287,27 +2741,15 @@ export default function App() {
         body: JSON.stringify({ transaction_id: transaction.id }),
       });
       setTransaction(p => ({ ...p, status: 'STATUS_SENT' }));
-    } catch (e) { alert('Status request failed: ' + e.message); }
+    } catch (e) { alert(t('Status request failed: {error}', { error: e.message })); }
   };
 
   /* ── Beckn: Cancel ───────────────────────────────────────────────────── */
-  const handleCancel = async () => {
-    if (!transaction) return;
-    if (!window.confirm('Cancel this order?')) return;
-    setIsLoading(true);
-    try {
-      const r = await apiFetch(`/cancel`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transaction_id: transaction.id }),
-      });
-      if (!r.ok) {
-        const err = await r.json().catch(() => ({ error: r.statusText }));
-        throw new Error(err.error || 'Cancel request failed');
-      }
-      setTransaction(p => ({ ...p, status: 'CANCEL_SENT' }));
-    } catch (e) { alert('Cancel failed: ' + e.message); }
-    finally { setIsLoading(false); }
-  };
+  // Cancellations run from the order's items card (LiveOrderItems); keep the
+  // top-level transaction status in step with what it reports.
+  const handleStatusChange = useCallback(status => {
+    setTransaction(p => (p && p.status !== status ? { ...p, status } : p));
+  }, []);
 
   /* ── Beckn: Rate ─────────────────────────────────────────────────────── */
   const handleRate = async (rating, feedback) => {
@@ -2331,10 +2773,10 @@ export default function App() {
       });
       if (!r.ok) {
         const err = await r.json().catch(() => ({ error: r.statusText }));
-        throw new Error(err.error || 'Rating submission failed');
+        throw new Error(err.error || t('Rating submission failed'));
       }
       setTransaction(p => ({ ...p, rated: rating }));
-    } catch (e) { alert('Rating failed: ' + e.message); }
+    } catch (e) { alert(t('Rating failed: {error}', { error: e.message })); }
     finally { setIsLoading(false); }
   };
 
@@ -2353,8 +2795,8 @@ export default function App() {
       });
       const d = await r.json();
       setTransaction(p => ({ ...p, supportTicketStatus: d.status || 'SUPPORT_SENT' }));
-      alert('Support ticket created! The seller will get back to you.');
-    } catch (e) { alert('Support request failed: ' + e.message); }
+      alert(t('Support ticket created! The seller will get back to you.'));
+    } catch (e) { alert(t('Support request failed: {error}', { error: e.message })); }
     finally { setIsLoading(false); }
   };
 
@@ -2402,7 +2844,7 @@ export default function App() {
   if (!authReady) {
     return (
       <div className="flex min-h-screen items-center justify-center">
-        <p className="text-slate-400 text-sm">Redirecting to login…</p>
+        <p className="text-slate-400 text-sm">{t('Redirecting to login…')}</p>
       </div>
     );
   }
@@ -2412,14 +2854,18 @@ export default function App() {
 
       {/* ── Nav ──────────────────────────────────────────────────────────── */}
       <header className="sticky top-0 z-30 glass border-b border-white/[0.06]">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center gap-4">
+        {/* Phones: the search box gets its own row under the logo and buttons.
+            Button labels show from xl up; below that the buttons are icons. */}
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-2.5 sm:py-0 sm:h-16 flex flex-wrap sm:flex-nowrap items-center gap-2 sm:gap-4">
           <a href="https://ion.id" target="_blank" rel="noopener noreferrer" className="shrink-0">
             <span className="text-xl font-bold text-white tracking-tight">
-              ION <span className="font-normal text-slate-400">Reference App</span>
+              ION <span className="hidden xl:inline font-normal text-slate-400">{t('Reference App')}</span>
             </span>
           </a>
 
-          <form onSubmit={e => { e.preventDefault(); clearTimeout(debounceRef.current); discover(searchQuery); }} className="flex-1 max-w-2xl mx-auto">
+          {/* Phones: the language switch sits beside the search box. */}
+          <div className="order-last sm:order-none basis-full sm:basis-auto flex-1 max-w-2xl mx-auto flex items-center gap-2">
+          <form data-tour="search" onSubmit={e => { e.preventDefault(); clearTimeout(debounceRef.current); discover(searchQuery); }} className="flex-1 min-w-0">
             <div className="search-glow relative flex items-center bg-white/[0.06] border border-white/10 rounded-xl transition-all duration-300">
               {isSearching
                 ? <Loader2 className="absolute left-3 w-4 h-4 text-emerald-400 animate-spin" />
@@ -2427,7 +2873,7 @@ export default function App() {
               }
               <input
                 type="text" value={searchQuery} onChange={handleSearchChange}
-                placeholder="Search products on the ION network…"
+                placeholder={t('Search products on the ION network…')}
                 className="w-full bg-transparent pl-9 pr-4 py-2.5 text-sm text-white placeholder-slate-500 outline-none"
               />
               {searchQuery && (
@@ -2438,40 +2884,52 @@ export default function App() {
               )}
             </div>
           </form>
+          <span className="sm:hidden"><LanguageToggle /></span>
+          </div>
 
           <a
-            href={window.__env__?.BPP_ADMIN_URL || import.meta.env.VITE_BPP_ADMIN_URL || "#"}
+            href={`${window.__env__?.BPP_ADMIN_URL || import.meta.env.VITE_BPP_ADMIN_URL || "#"}?token=${encodeURIComponent(getToken() || '')}`}
             target="_blank"
-            rel="noopener noreferrer"
-            className="shrink-0 flex items-center gap-2 px-3 py-2 rounded-xl transition-all text-sm font-medium text-emerald-400 hover:text-emerald-300 border border-emerald-500/20 hover:border-emerald-500/40 bg-emerald-500/10"
+            rel="noopener noreferrer" title={t('BPP APP')}
+            className="shrink-0 ml-auto sm:ml-0 flex items-center gap-2 px-3 py-2 rounded-xl transition-all text-sm font-medium text-emerald-400 hover:text-emerald-300 border border-emerald-500/20 hover:border-emerald-500/40 bg-emerald-500/10"
           >
             <ExternalLink className="w-4 h-4" />
-            <span className="hidden sm:block">BPP APP</span>
+            <span className="hidden xl:block">{t('BPP APP')}</span>
           </a>
 
           <button
-            onClick={logout}
+            onClick={() => setTourOpen(true)} data-tour="tour-button" title={t('Take the tour')}
+            className="shrink-0 flex items-center gap-2 px-3 py-2 rounded-xl transition-all text-sm font-medium text-cyan-300 hover:text-cyan-200 border border-cyan-500/20 hover:border-cyan-500/40 bg-cyan-500/10"
+          >
+            <Compass className="w-4 h-4" />
+            <span className="hidden xl:block">{t('Tour')}</span>
+          </button>
+
+          <span className="hidden sm:inline-flex"><LanguageToggle /></span>
+
+          <button
+            onClick={logout} title={t('Log out')}
             className="shrink-0 flex items-center gap-2 px-3 py-2 rounded-xl transition-all text-sm font-medium text-rose-400 hover:text-rose-300 border border-rose-500/20 hover:border-rose-500/40 bg-rose-500/10"
           >
             <LogOut className="w-4 h-4" />
-            <span className="hidden sm:block">Log out</span>
+            <span className="hidden xl:block">{t('Log out')}</span>
           </button>
 
           <button
-            onClick={() => setIsOrdersOpen(true)}
+            onClick={() => setIsOrdersOpen(true)} data-tour="orders-button" title={t('Orders')}
             className="shrink-0 flex items-center gap-2 px-3 py-2 rounded-xl transition-all text-sm font-medium text-slate-400 hover:text-white border border-white/[0.08] hover:border-white/[0.15]"
           >
             <History className="w-4 h-4" />
-            <span className="hidden sm:block">Orders</span>
+            <span className="hidden xl:block">{t('Orders')}</span>
           </button>
 
           <button
-            onClick={() => setIsCartOpen(true)}
+            onClick={() => setIsCartOpen(true)} title={t('Cart')}
             className="relative shrink-0 flex items-center gap-2 px-4 py-2 rounded-xl transition-all text-sm font-medium text-white"
             style={{ background: 'rgba(0,184,230,0.15)', border: '1px solid rgba(0,184,230,0.3)' }}
           >
             <ShoppingCart className="w-4 h-4" />
-            <span className="hidden sm:block">Cart</span>
+            <span className="hidden xl:block">{t('Cart')}</span>
             {cartCount > 0 && (
               <span className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-rose-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
                 {cartCount}
@@ -2482,12 +2940,12 @@ export default function App() {
       </header>
 
       <div className="bg-orange-500 text-white text-xs sm:text-sm text-center py-1.5 px-4">
-        [FOR DEMO PURPOSE ONLY] - This is a sample application for reference and testing
+        {t('[FOR DEMO PURPOSE ONLY] - This is a sample application for reference and testing')}
       </div>
 
       {/* ── Category chips + sort ─────────────────────────────────────────── */}
       {catalog.length > 0 && (
-        <div className="sticky top-16 z-20 bg-[#080d1e]/90 backdrop-blur border-b border-white/[0.05]">
+        <div className="sticky top-[6.75rem] sm:top-16 z-20 bg-[#080d1e]/90 backdrop-blur border-b border-white/[0.05]" data-tour="filters">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex items-center gap-3">
             {/* Scrollable category chips */}
             <div className="flex gap-2 overflow-x-auto flex-1 scrollbar-none pb-0.5">
@@ -2502,7 +2960,7 @@ export default function App() {
                     }`}
                   style={activeCategory === cat ? { background: 'linear-gradient(135deg,#00b8e6,#1e2fa0)', border: 'none' } : {}}
                 >
-                  {cat}
+                  {cat === 'All' ? t('All') : cat}
                 </button>
               ))}
             </div>
@@ -2512,10 +2970,10 @@ export default function App() {
               onChange={e => setSortBy(e.target.value)}
               className="shrink-0 bg-slate-900 border border-white/[0.08] text-slate-300 text-xs rounded-xl px-3 py-1.5 outline-none focus:border-white/20 cursor-pointer"
             >
-              <option value="default">Relevance</option>
-              <option value="price_asc">Price: Low → High</option>
-              <option value="price_desc">Price: High → Low</option>
-              <option value="name">Name A–Z</option>
+              <option value="default">{t('Relevance')}</option>
+              <option value="price_asc">{t('Price: Low → High')}</option>
+              <option value="price_desc">{t('Price: High → Low')}</option>
+              <option value="name">{t('Name A–Z')}</option>
             </select>
           </div>
         </div>
@@ -2526,14 +2984,14 @@ export default function App() {
         <div className="flex items-end justify-between gap-4 flex-wrap">
           <div>
             <p className="text-xs uppercase tracking-widest font-semibold mb-1" style={{ color: '#00b8e6' }}>
-              Remiges Retail · ION Network
+              {t('Remiges Retail · ION Network')}
             </p>
             <h1 className="text-3xl sm:text-4xl gradient-text">
-              {searchQuery ? `Results for "${searchQuery}"` : activeCategory !== 'All' ? activeCategory : 'Discover Products'}
+              {searchQuery ? t('Results for "{q}"', { q: searchQuery }) : activeCategory !== 'All' ? activeCategory : t('Discover Products')}
             </h1>
           </div>
           {visibleCatalog.length > 0 && (
-            <span className="text-sm text-slate-500">{visibleCatalog.length} product{visibleCatalog.length !== 1 ? 's' : ''}</span>
+            <span className="text-sm text-slate-500">{visibleCatalog.length === 1 ? t('1 product') : t('{count} products', { count: visibleCatalog.length })}</span>
           )}
         </div>
       </div>
@@ -2550,12 +3008,12 @@ export default function App() {
         {error && !isSearching && (
           <div className="flex flex-col items-center justify-center py-28 gap-4 text-slate-400">
             <Package className="w-14 h-14 opacity-20" />
-            <p className="font-medium">Could not reach the network.</p>
-            <p className="text-sm opacity-60">Check your connection and try again.</p>
+            <p className="font-medium">{t('Could not reach the network.')}</p>
+            <p className="text-sm opacity-60">{t('Check your connection and try again.')}</p>
             <button onClick={() => discover(searchQuery)}
               className="mt-1 px-5 py-2 rounded-xl text-sm font-semibold text-white transition-all"
               style={{ background: 'linear-gradient(135deg,#00b8e6,#1e2fa0)' }}>
-              Retry
+              {t('Retry')}
             </button>
           </div>
         )}
@@ -2565,12 +3023,12 @@ export default function App() {
             <div className="w-20 h-20 rounded-full bg-white/[0.04] flex items-center justify-center mb-2">
               <Search className="w-9 h-9 opacity-30" />
             </div>
-            <p className="font-semibold text-slate-300">No products found</p>
-            <p className="text-sm opacity-60">{searchQuery ? `No results for "${searchQuery}"` : 'Try selecting a different category.'}</p>
+            <p className="font-semibold text-slate-300">{t('No products found')}</p>
+            <p className="text-sm opacity-60">{searchQuery ? t('No results for "{q}"', { q: searchQuery }) : t('Try selecting a different category.')}</p>
             {activeCategory !== 'All' && (
               <button onClick={() => setActiveCategory('All')}
                 className="mt-2 text-sm font-semibold px-4 py-1.5 rounded-full border border-white/10 text-slate-300 hover:border-white/20 transition-all">
-                Clear filter
+                {t('Clear filter')}
               </button>
             )}
           </div>
@@ -2606,13 +3064,13 @@ export default function App() {
                       {/* COD badge */}
                       {product.codAvailable && (
                         <span className="absolute top-2.5 right-2.5 bg-amber-500/90 text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full text-white">
-                          COD
+                          {t('COD')}
                         </span>
                       )}
                       {/* Offer validity */}
                       {product.offerValidity && (
                         <span className="absolute bottom-2.5 left-2.5 text-[10px] text-slate-300 bg-black/50 backdrop-blur px-2 py-0.5 rounded-full flex items-center gap-1">
-                          <Calendar className="w-2.5 h-2.5" /> Till {product.offerValidity}
+                          <Calendar className="w-2.5 h-2.5" /> {t('Till {date}', { date: fmtDay(product.offerValidity) })}
                         </span>
                       )}
                     </div>
@@ -2668,12 +3126,12 @@ export default function App() {
                             </button>
                           </div>
                         ) : (
-                          <button
+                          <button data-tour={i === 0 ? 'add-first' : undefined}
                             onClick={e => { e.stopPropagation(); addToCart(product); }}
                             className="flex items-center gap-1 px-3.5 py-1.5 rounded-xl text-xs font-bold text-white transition-all active:scale-95 shadow"
                             style={{ background: 'linear-gradient(135deg,#00b8e6,#1e2fa0)' }}
                           >
-                            <Plus className="w-3.5 h-3.5" /> ADD
+                            <Plus className="w-3.5 h-3.5" /> {t('ADD')}
                           </button>
                         )}
                       </div>
@@ -2696,7 +3154,7 @@ export default function App() {
             transition={{ type: 'spring', damping: 28, stiffness: 300 }}
             className="fixed bottom-0 inset-x-0 z-30 px-4 pb-4 sm:px-6"
           >
-            <button
+            <button data-tour="view-cart"
               onClick={() => { setIsCartOpen(true); setCartCheckout(false); }}
               className="w-full max-w-lg mx-auto flex items-center justify-between px-5 py-4 rounded-2xl text-white shadow-2xl transition-all active:scale-[0.99]"
               style={{ background: 'linear-gradient(135deg,#00b8e6 0%,#1e2fa0 100%)' }}
@@ -2706,13 +3164,13 @@ export default function App() {
                   {cartCount}
                 </div>
                 <div className="text-left">
-                  <p className="text-xs font-medium opacity-80">{cartCount} item{cartCount !== 1 ? 's' : ''} added</p>
+                  <p className="text-xs font-medium opacity-80">{cartCount === 1 ? t('1 item added') : t('{count} items added', { count: cartCount })}</p>
                 </div>
               </div>
               <div className="flex items-center gap-2 font-bold">
                 <span>{fmt(cartTotal, 'IDR')}</span>
                 <div className="flex items-center gap-1 bg-white/15 px-3 py-1.5 rounded-xl text-sm">
-                  View Cart <ChevronRight className="w-4 h-4" />
+                  {t('View Cart')} <ChevronRight className="w-4 h-4" />
                 </div>
               </div>
             </button>
@@ -2760,8 +3218,8 @@ export default function App() {
                     </button>
                   )}
                   {cartCheckout
-                    ? <><Receipt className="w-5 h-5 text-emerald-400" /><h2 className="text-lg">Checkout</h2></>
-                    : <><ShoppingCart className="w-5 h-5 text-emerald-400" /><h2 className="text-lg">Your Cart</h2>
+                    ? <><Receipt className="w-5 h-5 text-emerald-400" /><h2 className="text-lg">{t('Checkout')}</h2></>
+                    : <><ShoppingCart className="w-5 h-5 text-emerald-400" /><h2 className="text-lg">{t('Your Cart')}</h2>
                       {cartCount > 0 && <span className="bg-emerald-500/20 text-emerald-400 text-xs font-bold px-2 py-0.5 rounded-full">{cartCount}</span>}</>
                   }
                 </div>
@@ -2779,8 +3237,8 @@ export default function App() {
                     {cart.length === 0 ? (
                       <div className="h-full flex flex-col items-center justify-center text-slate-500 gap-3 py-16">
                         <ShoppingCart className="w-12 h-12 opacity-20" />
-                        <p className="text-sm">Your cart is empty</p>
-                        <p className="text-xs opacity-60">Click any product card to add items</p>
+                        <p className="text-sm">{t('Your cart is empty')}</p>
+                        <p className="text-xs opacity-60">{t('Add products from the shop to see them here')}</p>
                       </div>
                     ) : cart.map(item => {
                       const shortAddr = item.sellerAddress
@@ -2811,7 +3269,7 @@ export default function App() {
                                 )}
                                 {item.offerValidity && (
                                   <span className="text-slate-500 flex items-center gap-1 ml-auto">
-                                    <Calendar className="w-3 h-3" /> Valid till {item.offerValidity}
+                                    <Calendar className="w-3 h-3" /> {t('Valid till {date}', { date: fmtDay(item.offerValidity) })}
                                   </span>
                                 )}
                               </div>
@@ -2843,7 +3301,7 @@ export default function App() {
                               <div className="flex flex-wrap gap-1.5">
                                 {item.deliveryRange && (
                                   <span className="flex items-center gap-1 text-[10px] font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded-full">
-                                    <MapPin className="w-2.5 h-2.5" /> Delivers within {item.deliveryRange}
+                                    <MapPin className="w-2.5 h-2.5" /> {t('Delivers within {range}', { range: item.deliveryRange })}
                                   </span>
                                 )}
                                 {item.deliveryHours && (
@@ -2853,17 +3311,17 @@ export default function App() {
                                 )}
                                 {item.codAvailable && (
                                   <span className="flex items-center gap-1 text-[10px] font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded-full">
-                                    <CreditCard className="w-2.5 h-2.5" /> Cash on Delivery
+                                    <CreditCard className="w-2.5 h-2.5" /> {t('Cash on Delivery')}
                                   </span>
                                 )}
                                 {item.returnPolicy?.allowed && (
                                   <span className="flex items-center gap-1 text-[10px] font-semibold bg-purple-500/10 text-purple-400 border border-purple-500/20 px-2 py-0.5 rounded-full">
-                                    <RotateCcw className="w-2.5 h-2.5" /> {item.returnPolicy.window?.replace('P', '').replace('D', ' day')} returns
+                                    <RotateCcw className="w-2.5 h-2.5" /> {t('{days}-day returns', { days: isoDays(item.returnPolicy.window) })}
                                   </span>
                                 )}
                                 {item.cancelPolicy?.allowed && (
                                   <span className="flex items-center gap-1 text-[10px] font-semibold bg-rose-500/10 text-rose-400 border border-rose-500/20 px-2 py-0.5 rounded-full">
-                                    <X className="w-2.5 h-2.5" /> Free cancellation
+                                    <X className="w-2.5 h-2.5" /> {t('Free cancellation')}
                                   </span>
                                 )}
                               </div>
@@ -2877,12 +3335,12 @@ export default function App() {
                   {cart.length > 0 && (
                     <div className="px-5 py-4 border-t border-white/[0.07] space-y-3 shrink-0">
                       <div className="flex items-center justify-between">
-                        <span className="text-slate-400 text-sm">{cartCount} item{cartCount !== 1 ? 's' : ''}</span>
+                        <span className="text-slate-400 text-sm">{itemCount(t, cartCount)}</span>
                         <span className="text-xl font-bold">{fmt(cartTotal, 'IDR')}</span>
                       </div>
-                      <button onClick={handleSelectCart} disabled={isLoading}
+                      <button onClick={handleSelectCart} disabled={isLoading} data-tour="checkout"
                         className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white py-3.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all active:scale-[0.98] shadow-lg shadow-emerald-600/30">
-                        {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <><span>Proceed to Checkout</span><ChevronRight className="w-4 h-4" /></>}
+                        {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <><span>{t('Proceed to Checkout')}</span><ChevronRight className="w-4 h-4" /></>}
                       </button>
                     </div>
                   )}
@@ -2899,7 +3357,7 @@ export default function App() {
                   onInit={handleInit}
                   onConfirm={handleConfirm}
                   onDone={resetCart}
-                  onCancel={handleCancel}
+                  onStatusChange={handleStatusChange}
                   onRate={handleRate}
                   onSupport={handleSupport}
                   onRequestStatus={handleRequestStatus}
@@ -2910,6 +3368,9 @@ export default function App() {
           </>
         )}
       </AnimatePresence>
+
+      <Tour steps={steps} open={tourOpen} onClose={closeTour} onStep={onTourStep}
+        state={{ cartCount, isCartOpen, cartCheckout, isOrdersOpen, status: transaction?.status }} />
     </div>
   );
 }

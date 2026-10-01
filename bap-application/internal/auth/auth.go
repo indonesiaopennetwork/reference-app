@@ -99,18 +99,18 @@ func (v *Verifier) verify(ctx context.Context, rawToken string) (verifiedClaims,
 const contextTokenRejectedKey = "auth.tokenRejected"
 
 // OptionalAuth is Gin middleware: if a valid bearer token is present, it
-// stores the buyer's Zitadel subject in the request context. If the token
-// is missing, malformed, or fails verification, it does NOT reject the
-// request -- it just proceeds with no subject set. v may be nil (Zitadel
-// was unreachable at startup); in that case this is a no-op, since
-// bap-application should keep serving traffic even if Zitadel is down.
+// stores the buyer's Zitadel subject in the request context. A request with
+// no token proceeds with no subject set. A token that IS sent but fails
+// verification (expired, or signed by a Zitadel instance that has since been
+// reset) is rejected with 401, so the buyer app sends the shopper back to
+// log in -- otherwise the order would silently be placed without its buyer
+// and never show in their order history. v may be nil (Zitadel was
+// unreachable at startup); then this is a no-op, since bap-application should
+// keep serving traffic even if Zitadel is down.
 //
-// A rejected token is recorded in the context and logged at Warn. It used
-// to be swallowed with no trace at all, which made an expired or otherwise
-// unverifiable token indistinguishable from an anonymous visit: the whole
-// shop kept working (discover/select/init/confirm need no identity) while
-// every buyer-scoped read silently returned "not found", with nothing in
-// the logs to say why. lh may be nil, in which case nothing is logged.
+// A rejected token is also recorded in the context and logged at Warn, so
+// the cause of the 401 is visible in the logs. lh may be nil, in which case
+// nothing is logged.
 func OptionalAuth(v *Verifier, lh *logharbour.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if v == nil {
@@ -126,11 +126,9 @@ func OptionalAuth(v *Verifier, lh *logharbour.Logger) gin.HandlerFunc {
 		if err != nil {
 			c.Set(contextTokenRejectedKey, true)
 			if lh != nil {
-				lh.WithModule("auth").Warn().Error(err).Log(
-					"bearer token present but failed verification; request proceeds with no buyer identity, so buyer-scoped reads will find nothing",
-				)
+				lh.WithModule("auth").Warn().Error(err).Log("bearer token present but failed verification; rejecting with 401")
 			}
-			c.Next()
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired login; please log in again"})
 			return
 		}
 		c.Set(contextTokenRejectedKey, false)

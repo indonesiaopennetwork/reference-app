@@ -133,7 +133,7 @@ type InsertUpdateRequestParams struct {
 
 // Buyer-side tracking of outbound /update requests and the seller decision
 // recovered from the matching on_update. See migration
-// 012_update_requests.sql for why the decision has to be inferred rather
+// 013_update_requests.sql for why the decision has to be inferred rather
 // than read off a field.
 // Records a PENDING request at /update send time. Returns the row id.
 // The partial unique index on (transaction_id) WHERE outcome = 'PENDING'

@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -131,8 +132,6 @@ func (s *ClientService) DiscoverSync(ctx context.Context, req *ClientDiscoverReq
 	start := time.Now()
 	msgID := uuid.New()
 	txnID := uuid.New()
-
-
 
 	becknReq := map[string]any{
 		"context": map[string]any{
@@ -341,13 +340,28 @@ func buildSelectMessage(items []SelectItem, bapID string) ([]byte, error) {
 			offer["considerations"] = item.OfferConsiderations
 		}
 
+		resource := map[string]interface{}{
+			"id":       item.ResourceID,
+			"quantity": map[string]interface{}{"unitCode": "EA", "unitQuantity": qty},
+		}
+		var detail struct {
+			Descriptor         json.RawMessage `json:"descriptor"`
+			ResourceAttributes json.RawMessage `json:"resourceAttributes"`
+		}
+		if json.Unmarshal(item.Resource, &detail) == nil {
+			if isJSONObject(detail.Descriptor) {
+				resource["descriptor"] = detail.Descriptor
+			}
+			if isJSONObject(detail.ResourceAttributes) {
+				resource["resourceAttributes"] = detail.ResourceAttributes
+			}
+		}
+
 		commitments = append(commitments, map[string]interface{}{
-			"id":     cid,
-			"status": map[string]interface{}{"descriptor": map[string]interface{}{"code": "DRAFT"}},
-			"resources": []map[string]interface{}{
-				{"id": item.ResourceID, "quantity": map[string]interface{}{"unitCode": "EA", "unitQuantity": qty}},
-			},
-			"offer": offer,
+			"id":        cid,
+			"status":    map[string]interface{}{"descriptor": map[string]interface{}{"code": "DRAFT"}},
+			"resources": []map[string]interface{}{resource},
+			"offer":     offer,
 			"commitmentAttributes": map[string]interface{}{
 				"@context":   "https://schema.ion.id/release1/schema/extension/trade/TradeCommitment/v1/context.jsonld",
 				"@type":      "ion:IONTradeCommitment",
@@ -420,6 +434,12 @@ func buildSelectMessage(items []SelectItem, bapID string) ([]byte, error) {
 	}
 
 	return json.Marshal(map[string]interface{}{"contract": contract})
+}
+
+// isJSONObject reports whether raw is a non-empty JSON object.
+func isJSONObject(raw json.RawMessage) bool {
+	var m map[string]json.RawMessage
+	return json.Unmarshal(raw, &m) == nil && len(m) > 0
 }
 
 // hasJSONItems reports whether raw is a non-empty JSON array.
@@ -815,9 +835,24 @@ func (s *ClientService) Cancel(ctx context.Context, req *ClientCancelRequest) er
 	// and everything else Contract mandates -- see contractFromSnapshot.
 	contractPayload := contractFromSnapshot(snapshot.Contract)
 
-	msgJSON, _ := json.Marshal(map[string]interface{}{
-		"contract": json.RawMessage(contractPayload),
-	})
+	// Declare what is cancelled and why (ION TradeContract
+	// contractAttributes.cancellation): every still-active commitment.
+	var contract map[string]interface{}
+	if err := json.Unmarshal(contractPayload, &contract); err != nil || contract == nil {
+		return fmt.Errorf("parse contract snapshot: %v", err)
+	}
+	var activeIDs []string
+	for _, raw := range asSlice(contract["commitments"]) {
+		if cm := asObj(raw); cm != nil && commitmentStatusCode(cm) != "CLOSED" {
+			activeIDs = append(activeIDs, asStr(cm["id"]))
+		}
+	}
+	if err := checkCancellationCutoff(contract, activeIDs); err != nil {
+		return err
+	}
+	setCancellation(contract, req.ReasonCode, activeIDs)
+
+	msgJSON, _ := json.Marshal(map[string]interface{}{"contract": contract})
 	becknReq := BecknRequest{
 		Context: s.newContext("cancel", req.TransactionID, msgID.String(), bppID, bppURI),
 		Message: json.RawMessage(msgJSON),
@@ -851,6 +886,433 @@ func (s *ClientService) Cancel(ctx context.Context, req *ClientCancelRequest) er
 	return nil
 }
 
+// CancelItems cancels the requested units of a confirmed order. When they add
+// up to everything still active it sends /cancel; otherwise it sends /update
+// with the latest contract, each chosen commitment's quantity lowered by the
+// cancelled units (or its status CLOSED when all of it goes) -- the BPP turns
+// that difference into a partial cancellation. Returns the new transaction status.
+func (s *ClientService) CancelItems(ctx context.Context, req *ClientCancelItemsRequest) (string, error) {
+	txnID, err := uuid.Parse(req.TransactionID)
+	if err != nil {
+		return "", fmt.Errorf("invalid transaction_id: %w", err)
+	}
+	snapshot, err := dbsqlc.New(s.pool).GetLatestContractSnapshot(ctx, txnID)
+	if err != nil {
+		return "", fmt.Errorf("no snapshot for txn %s: %w", txnID, err)
+	}
+	var contract map[string]interface{}
+	if err := json.Unmarshal(unwrapContract(snapshot.Contract), &contract); err != nil || contract == nil {
+		return "", fmt.Errorf("parse contract snapshot: %v", err)
+	}
+
+	active := map[string]map[string]interface{}{}
+	for _, raw := range asSlice(contract["commitments"]) {
+		cm := asObj(raw)
+		if cm != nil && commitmentStatusCode(cm) != "CLOSED" {
+			active[asStr(cm["id"])] = cm
+		}
+	}
+
+	cancelQty := map[string]float64{}
+	for _, it := range req.Items {
+		cm, ok := active[it.CommitmentID]
+		if !ok {
+			return "", fmt.Errorf("commitment %q is not an active item of this order", it.CommitmentID)
+		}
+		have := commitmentQuantity(cm)
+		q := it.Quantity
+		if q <= 0 {
+			q = have
+		}
+		if cancelQty[it.CommitmentID]+q > have {
+			return "", fmt.Errorf("cannot cancel %v of %q: only %v ordered", q, it.CommitmentID, have)
+		}
+		cancelQty[it.CommitmentID] += q
+	}
+
+	chosen := make([]string, 0, len(cancelQty))
+	for id := range cancelQty {
+		chosen = append(chosen, id)
+	}
+	if err := checkCancellationCutoff(contract, chosen); err != nil {
+		return "", err
+	}
+
+	full := true
+	for id, cm := range active {
+		if cancelQty[id] < commitmentQuantity(cm) {
+			full = false
+			break
+		}
+	}
+	if _, ok := cancellationReasons[req.ReasonCode]; !ok {
+		return "", fmt.Errorf("unknown cancellation reason %q", req.ReasonCode)
+	}
+	if full {
+		if err := s.Cancel(ctx, &ClientCancelRequest{TransactionID: req.TransactionID, ReasonCode: req.ReasonCode}); err != nil {
+			return "", err
+		}
+		return string(dbsqlc.TransactionStatusCANCELSENT), nil
+	}
+
+	var cancelledIDs []string
+	for id, q := range cancelQty {
+		cancelledIDs = append(cancelledIDs, id)
+		cm := active[id]
+		if remaining := commitmentQuantity(cm) - q; remaining > 0 {
+			setCommitmentQuantity(cm, remaining)
+		} else {
+			cm["status"] = map[string]interface{}{"descriptor": map[string]interface{}{"code": "CLOSED", "name": "Cancelled"}}
+		}
+	}
+	sort.Strings(cancelledIDs)
+	setCancellation(contract, req.ReasonCode, cancelledIDs)
+	contractJSON, err := json.Marshal(contract)
+	if err != nil {
+		return "", err
+	}
+	txn, err := dbsqlc.New(s.pool).GetTransaction(ctx, txnID)
+	if err != nil {
+		return "", fmt.Errorf("%w: %s", ErrTransactionNotFound, req.TransactionID)
+	}
+	if err := s.sendUpdate(ctx, txn, contractJSON, false); err != nil {
+		return "", err
+	}
+	return string(dbsqlc.TransactionStatusUPDATESENT), nil
+}
+
+// ReturnItems requests a return of the given units of a delivered order: it
+// checks each item's offer policies.returns (allowed, delivered, still inside
+// the window counted from delivery) and sends /update with the latest
+// contract, the returned quantities lowered (or CLOSED when all of an item
+// goes back) and a new RETURN performance (Return_Initiated). The BPP applies
+// the same policy and answers Return_Approved -- with the restocking fee and
+// refund -- or Return_Rejected.
+func (s *ClientService) ReturnItems(ctx context.Context, req *ClientReturnItemsRequest) (string, error) {
+	txnID, err := uuid.Parse(req.TransactionID)
+	if err != nil {
+		return "", fmt.Errorf("invalid transaction_id: %w", err)
+	}
+	snapshot, err := dbsqlc.New(s.pool).GetLatestContractSnapshot(ctx, txnID)
+	if err != nil {
+		return "", fmt.Errorf("no snapshot for txn %s: %w", txnID, err)
+	}
+	var contract map[string]interface{}
+	if err := json.Unmarshal(unwrapContract(snapshot.Contract), &contract); err != nil || contract == nil {
+		return "", fmt.Errorf("parse contract snapshot: %v", err)
+	}
+
+	stage, _ := fulfillmentStage(contract)
+	delivered := s.deliveredAt(ctx, txnID)
+	active := map[string]map[string]interface{}{}
+	for _, raw := range asSlice(contract["commitments"]) {
+		if cm := asObj(raw); cm != nil && commitmentStatusCode(cm) != "CLOSED" {
+			active[asStr(cm["id"])] = cm
+		}
+	}
+	returnQty := map[string]float64{}
+	for _, it := range req.Items {
+		cm, ok := active[it.CommitmentID]
+		if !ok {
+			return "", fmt.Errorf("commitment %q is not an active item of this order", it.CommitmentID)
+		}
+		if err := returnBlocked(cm, stage, delivered, time.Now()); err != nil {
+			return "", fmt.Errorf("%s cannot be returned: %v", it.CommitmentID, err)
+		}
+		have := commitmentQuantity(cm)
+		q := it.Quantity
+		if q <= 0 {
+			q = have
+		}
+		if returnQty[it.CommitmentID]+q > have {
+			return "", fmt.Errorf("cannot return %v of %q: only %v ordered", q, it.CommitmentID, have)
+		}
+		returnQty[it.CommitmentID] += q
+	}
+
+	var ids []string
+	for id, q := range returnQty {
+		ids = append(ids, id)
+		cm := active[id]
+		if remaining := commitmentQuantity(cm) - q; remaining > 0 {
+			setCommitmentQuantity(cm, remaining)
+		} else {
+			cm["status"] = map[string]interface{}{"descriptor": map[string]interface{}{"code": "CLOSED", "name": "Returned"}}
+		}
+	}
+	sort.Strings(ids)
+
+	perfIDs := map[string]bool{}
+	for _, p := range asSlice(contract["performance"]) {
+		perfIDs[asStr(asObj(p)["id"])] = true
+	}
+	perfID := ""
+	for n := 1; ; n++ {
+		if perfID = fmt.Sprintf("return-%d", n); !perfIDs[perfID] {
+			break
+		}
+	}
+	contract["performance"] = append(asSlice(contract["performance"]), map[string]interface{}{
+		"id":            perfID,
+		"commitmentIds": ids,
+		"status":        map[string]interface{}{"code": "Return_Initiated", "name": "Return requested"},
+		"performanceAttributes": map[string]interface{}{
+			"@context":                  "https://schema.ion.id/release1/schema/extension/trade/TradePerformance/v1/context.jsonld",
+			"@type":                     "ion:IONTradePerformance",
+			"type":                      "RETURN",
+			"supportedPerformanceModes": []string{"DELIVERY"},
+		},
+	})
+
+	contractJSON, err := json.Marshal(contract)
+	if err != nil {
+		return "", err
+	}
+	txn, err := dbsqlc.New(s.pool).GetTransaction(ctx, txnID)
+	if err != nil {
+		return "", fmt.Errorf("%w: %s", ErrTransactionNotFound, req.TransactionID)
+	}
+	if err := s.sendUpdate(ctx, txn, contractJSON, false); err != nil {
+		return "", err
+	}
+	return string(dbsqlc.TransactionStatusUPDATESENT), nil
+}
+
+// deliveredAt is when this BAP first saw the order as Delivered (the earliest
+// snapshot whose performance says so); zero when never seen.
+func (s *ClientService) deliveredAt(ctx context.Context, txnID uuid.UUID) time.Time {
+	var t *time.Time
+	_ = s.pool.QueryRow(ctx, `
+		SELECT min(created_at) FROM contract_snapshots
+		WHERE transaction_id = $1 AND contract->'performance' @> '[{"status":{"code":"Delivered"}}]'`, txnID).Scan(&t)
+	if t == nil {
+		return time.Time{}
+	}
+	return *t
+}
+
+// fulfillmentStage is the furthest stage the contract's performances reached.
+func fulfillmentStage(contract map[string]interface{}) (int, string) {
+	stage, name := stagePending, "PENDING"
+	for _, p := range asSlice(contract["performance"]) {
+		code := asStr(asObj(asObj(p)["status"])["code"])
+		if r := stageRank(code); r > stage {
+			stage, name = r, code
+		}
+	}
+	return stage, name
+}
+
+// returnBlocked explains why a commitment can't be returned under its offer's
+// policies.returns (the BPP enforces the same rule), or returns nil.
+func returnBlocked(cm map[string]interface{}, stage int, deliveredAt, now time.Time) error {
+	pol := asObj(asObj(asObj(asObj(cm["offer"])["offerAttributes"])["policies"])["returns"])
+	if allowed, _ := pol["allowed"].(bool); !allowed {
+		return fmt.Errorf("the offer does not accept returns")
+	}
+	if stage < stageDelivered {
+		return fmt.Errorf("the order has not been delivered yet")
+	}
+	if w := asStr(pol["window"]); w != "" && !deliveredAt.IsZero() {
+		d, err := parseISODuration(w)
+		if err != nil {
+			return fmt.Errorf("invalid return window %q", w)
+		}
+		if closes := deliveredAt.Add(d); now.After(closes) {
+			return fmt.Errorf("the %s return window closed at %s", w, closes.UTC().Format(time.RFC3339))
+		}
+	}
+	return nil
+}
+
+// parseISODuration parses an ISO 8601 duration such as P7D, PT2H or P1W2DT3H
+// (years as 365 days, months as 30).
+func parseISODuration(s string) (time.Duration, error) {
+	if !strings.HasPrefix(s, "P") || len(s) < 3 {
+		return 0, fmt.Errorf("not an ISO 8601 duration")
+	}
+	var total time.Duration
+	inTime, num := false, ""
+	units := map[bool]map[byte]time.Duration{
+		false: {'Y': 365 * 24 * time.Hour, 'M': 30 * 24 * time.Hour, 'W': 7 * 24 * time.Hour, 'D': 24 * time.Hour},
+		true:  {'H': time.Hour, 'M': time.Minute, 'S': time.Second},
+	}
+	for i := 1; i < len(s); i++ {
+		ch := s[i]
+		switch {
+		case ch == 'T':
+			inTime = true
+		case (ch >= '0' && ch <= '9') || ch == '.':
+			num += string(ch)
+		default:
+			unit, ok := units[inTime][ch]
+			if !ok || num == "" {
+				return 0, fmt.Errorf("bad component %q", string(ch))
+			}
+			var v float64
+			if _, err := fmt.Sscanf(num, "%g", &v); err != nil {
+				return 0, err
+			}
+			total += time.Duration(v * float64(unit))
+			num = ""
+		}
+	}
+	if num != "" {
+		return 0, fmt.Errorf("trailing number without unit")
+	}
+	return total, nil
+}
+
+// cancellationReasons are ION's cancellation reason codes (TradeOffer
+// policies.cancellation.allowedReasons) with their display names.
+var cancellationReasons = map[string]string{
+	"CHANGE_OF_MIND":           "Change of mind",
+	"WRONG_ITEM_ORDERED":       "Wrong item ordered",
+	"ORDERED_WRONG_VARIANT":    "Ordered wrong variant",
+	"FOUND_BETTER_PRICE":       "Found a better price",
+	"DELIVERY_TOO_LONG":        "Delivery takes too long",
+	"INCORRECT_ADDRESS":        "Incorrect address",
+	"DUPLICATE_ORDER":          "Duplicate order",
+	"PAYMENT_METHOD_CHANGE":    "Payment method change",
+	"ITEM_NO_LONGER_NEEDED":    "Item no longer needed",
+	"SELLER_UNRESPONSIVE":      "Seller unresponsive",
+	"BUYER_FRAUD_SUSPECTED":    "Buyer fraud suspected",
+	"QUALITY_ISSUE_AT_PREVIEW": "Quality issue at preview",
+}
+
+// Fulfillment stages, in order (performance status codes the seller sets:
+// PENDING → Packed → Shipped → Delivered; returns only follow delivery).
+const (
+	stagePending = iota
+	stagePacked
+	stageShipped
+	stageDelivered
+)
+
+func stageRank(code string) int {
+	switch c := strings.ToUpper(code); {
+	case c == "PACKED":
+		return stagePacked
+	case c == "DISPATCHED" || c == "SHIPPED" || c == "IN_TRANSIT" || c == "OUT_FOR_DELIVERY":
+		return stageShipped
+	case c == "DELIVERED" || strings.HasPrefix(c, "RETURN"):
+		return stageDelivered
+	}
+	return stagePending
+}
+
+// checkCancellationCutoff refuses a cancellation once the order has passed
+// any chosen commitment's offer policies.cancellation.cutoffEvent (e.g.
+// BEFORE_PACKING and the order is already Packed). The BPP enforces the same
+// rule; checking here gives the buyer the reason before anything is sent.
+func checkCancellationCutoff(contract map[string]interface{}, commitmentIDs []string) error {
+	stage, stageName := stagePending, "PENDING"
+	for _, p := range asSlice(contract["performance"]) {
+		code := asStr(asObj(asObj(p)["status"])["code"])
+		if r := stageRank(code); r > stage {
+			stage, stageName = r, code
+		}
+	}
+	chosen := map[string]bool{}
+	for _, id := range commitmentIDs {
+		chosen[id] = true
+	}
+	for _, raw := range asSlice(contract["commitments"]) {
+		cm := asObj(raw)
+		if cm == nil || !chosen[asStr(cm["id"])] {
+			continue
+		}
+		pol := asObj(asObj(asObj(asObj(cm["offer"])["offerAttributes"])["policies"])["cancellation"])
+		if allowed, ok := pol["allowed"].(bool); ok && !allowed {
+			return fmt.Errorf("this item's offer does not allow cancellation")
+		}
+		if stage >= stageDelivered {
+			return fmt.Errorf("the order is already %s: a delivered item is returned, not cancelled", stageName)
+		}
+		cutoff := asStr(pol["cutoffEvent"])
+		passed := false
+		switch cutoff {
+		case "BEFORE_CONFIRMATION":
+			passed = true
+		case "BEFORE_PACKING":
+			passed = stage >= stagePacked
+		case "BEFORE_DISPATCH", "BEFORE_SHIPMENT":
+			passed = stage >= stageShipped
+		}
+		if passed {
+			return fmt.Errorf("cancellation is no longer possible: the offer allows it only %s and the order is %s",
+				strings.ToLower(strings.ReplaceAll(cutoff, "_", " ")), stageName)
+		}
+	}
+	return nil
+}
+
+// setCancellation declares the cancellation in the contract's
+// contractAttributes (ION TradeContract): reason Descriptor and the affected
+// commitment IDs. Other contractAttributes fields are kept.
+func setCancellation(contract map[string]interface{}, reasonCode string, commitmentIDs []string) {
+	attrs := asObj(contract["contractAttributes"])
+	if attrs == nil {
+		attrs = map[string]interface{}{
+			"@context": "https://schema.ion.id/release1/schema/extension/trade/TradeContract/v1/context.jsonld",
+			"@type":    "ion:IONTradeContract",
+		}
+		contract["contractAttributes"] = attrs
+	}
+	reason := map[string]interface{}{"code": reasonCode}
+	if name, ok := cancellationReasons[reasonCode]; ok {
+		reason["name"] = name
+	}
+	attrs["cancellation"] = map[string]interface{}{"reason": reason, "commitmentIds": commitmentIDs}
+}
+
+// unwrapContract returns the contract object of a snapshot, which is stored
+// either bare or wrapped as {"message":{"contract":…}}.
+func unwrapContract(raw json.RawMessage) json.RawMessage {
+	var env struct {
+		Message struct {
+			Contract json.RawMessage `json:"contract"`
+		} `json:"message"`
+	}
+	if json.Unmarshal(raw, &env) == nil && len(env.Message.Contract) > 2 {
+		return env.Message.Contract
+	}
+	return raw
+}
+
+func commitmentStatusCode(cm map[string]interface{}) string {
+	return asStr(asObj(asObj(cm["status"])["descriptor"])["code"])
+}
+
+// commitmentQuantity reads resources[0].quantity.unitQuantity, falling back to
+// commitmentAttributes.quantity.unitQuantity, then 1.
+func commitmentQuantity(cm map[string]interface{}) float64 {
+	if rs := asSlice(cm["resources"]); len(rs) > 0 {
+		if q, _ := asObj(asObj(rs[0])["quantity"])["unitQuantity"].(float64); q > 0 {
+			return q
+		}
+	}
+	if q, _ := asObj(asObj(cm["commitmentAttributes"])["quantity"])["unitQuantity"].(float64); q > 0 {
+		return q
+	}
+	return 1
+}
+
+func setCommitmentQuantity(cm map[string]interface{}, q float64) {
+	for _, r := range asSlice(cm["resources"]) {
+		if qm := asObj(asObj(r)["quantity"]); qm != nil {
+			qm["unitQuantity"] = q
+		}
+	}
+	if qm := asObj(asObj(cm["commitmentAttributes"])["quantity"]); qm != nil {
+		qm["unitQuantity"] = q
+	}
+}
+
+func asObj(v interface{}) map[string]interface{} { m, _ := v.(map[string]interface{}); return m }
+func asSlice(v interface{}) []interface{}        { s, _ := v.([]interface{}); return s }
+func asStr(v interface{}) string                 { s, _ := v.(string); return s }
+
 // Update sends a Beckn update request with partial contract changes.
 //
 // Guards against several edge cases the plain select/init/confirm/cancel
@@ -873,7 +1335,6 @@ func (s *ClientService) Update(ctx context.Context, req *ClientUpdateRequest, bu
 	if err != nil {
 		return fmt.Errorf("%w: %q: %v", ErrInvalidTransactionID, req.TransactionID, err)
 	}
-	msgID := uuid.New()
 	q := dbsqlc.New(s.pool)
 
 	var txn dbsqlc.GetTransactionRow
@@ -899,7 +1360,6 @@ func (s *ClientService) Update(ctx context.Context, req *ClientUpdateRequest, bu
 			return fmt.Errorf("%w: %s", ErrTransactionNotFound, req.TransactionID)
 		}
 	}
-	bppID, bppURI := s.resolveBPP(txn)
 
 	// Refuse a request that asks for nothing BEFORE touching any state:
 	// no quota spent, no CONFIRMED -> UPDATE_SENT transition, nothing sent
@@ -929,17 +1389,33 @@ func (s *ClientService) Update(ctx context.Context, req *ClientUpdateRequest, bu
 			ErrTooManyUpdateRequests, priorRequests, MaxUpdateRequestsPerOrder, req.TransactionID)
 	}
 
+	return s.sendUpdate(ctx, txn, req.Contract, true)
+}
+
+// sendUpdate sends /update with contract for an already-looked-up
+// transaction. It is shared by Update (a change request the seller reviews,
+// trackAsChangeRequest=true) and by CancelItems/ReturnItems (decided by the
+// offer's policies and answered at once, so there is no seller decision to
+// track). Both go through the same CONFIRMED -> UPDATE_SENT compare-and-swap,
+// so a cancellation, a return and a change request can never be in flight at
+// the same time.
+func (s *ClientService) sendUpdate(ctx context.Context, txn dbsqlc.GetTransactionRow, contract json.RawMessage, trackAsChangeRequest bool) error {
+	txnID := txn.TransactionID
+	msgID := uuid.New()
+	q := dbsqlc.New(s.pool)
+	bppID, bppURI := s.resolveBPP(txn)
+
 	rows, err := q.MarkUpdateSentIfConfirmed(ctx, txnID)
 	if err != nil {
-		return fmt.Errorf("check update eligibility for txn %s: %w", req.TransactionID, err)
+		return fmt.Errorf("check update eligibility for txn %s: %w", txnID, err)
 	}
 	if rows == 0 {
-		return fmt.Errorf("%w: transaction %s is %s (or an update is already in flight)", ErrInvalidUpdateState, req.TransactionID, txn.Status)
+		return fmt.Errorf("%w: transaction %s is %s (or an update is already in flight)", ErrInvalidUpdateState, txnID, txn.Status)
 	}
 
-	msgJSON, _ := json.Marshal(map[string]interface{}{"contract": req.Contract})
+	msgJSON, _ := json.Marshal(map[string]interface{}{"contract": contract})
 	becknReq := BecknRequest{
-		Context: s.newContext("update", req.TransactionID, msgID.String(), bppID, bppURI),
+		Context: s.newContext("update", txnID.String(), msgID.String(), bppID, bppURI),
 		Message: json.RawMessage(msgJSON),
 	}
 
@@ -949,7 +1425,7 @@ func (s *ClientService) Update(ctx context.Context, req *ClientUpdateRequest, bu
 	// field that says so, and a rejection comes back as the unchanged
 	// contract, so the decision is only recoverable by comparing the
 	// callback against this proposal and the pre-update snapshot. See
-	// migration 012_update_requests.sql.
+	// migration 013_update_requests.sql.
 	//
 	// Recorded after the CONFIRMED -> UPDATE_SENT compare-and-swap so the
 	// partial unique index (one PENDING row per transaction) can never be
@@ -964,33 +1440,40 @@ func (s *ClientService) Update(ctx context.Context, req *ClientUpdateRequest, bu
 	// index allows only one PENDING row per transaction -- otherwise the
 	// insert below fails, the new request goes untracked, and a later
 	// on_update resolves the OLD row, showing the buyer the wrong proposal.
+	// Done for cancellations and returns too: their on_update would
+	// otherwise resolve that stale row with the wrong contract.
 	if _, err := q.AbandonPendingUpdateRequests(ctx, []uuid.UUID{txnID}); err != nil {
-		s.lh.WithModule("client_svc").Warn().Error(err).Log("failed to retire stale pending update requests before inserting a new one")
+		s.lh.WithModule("client_svc").Warn().Error(err).Log("failed to retire stale pending update requests before sending a new update")
 	}
 
-	proposedContract := req.Contract
-	if len(proposedContract) == 0 {
-		proposedContract = json.RawMessage("null")
-	}
-	updateReqID, err := q.InsertUpdateRequest(ctx, dbsqlc.InsertUpdateRequestParams{
-		TransactionID:    txnID,
-		MessageID:        msgID,
-		ProposedContract: proposedContract,
-	})
-	if err != nil {
-		// Non-fatal: the update itself is still valid and worth sending.
-		// The buyer just won't get a decision readout for this one -- it
-		// degrades to the pre-existing behaviour (status returns to
-		// CONFIRMED with no explanation) rather than blocking the change.
-		s.lh.WithModule("client_svc").Warn().Error(err).Log("failed to record update request; proceeding without decision tracking")
+	var updateReqID uuid.UUID
+	if trackAsChangeRequest {
+		proposedContract := contract
+		if len(proposedContract) == 0 {
+			proposedContract = json.RawMessage("null")
+		}
+		updateReqID, err = q.InsertUpdateRequest(ctx, dbsqlc.InsertUpdateRequestParams{
+			TransactionID:    txnID,
+			MessageID:        msgID,
+			ProposedContract: proposedContract,
+		})
+		if err != nil {
+			// Non-fatal: the update itself is still valid and worth sending.
+			// The buyer just won't get a decision readout for this one -- it
+			// degrades to the pre-existing behaviour (status returns to
+			// CONFIRMED with no explanation) rather than blocking the change.
+			s.lh.WithModule("client_svc").Warn().Error(err).Log("failed to record update request; proceeding without decision tracking")
+		}
 	}
 
 	if err := s.sendToBPP(ctx, s.cfg.BapCallerURL, "update", txnID, msgID, s.cfg.NetworkID, becknReq); err != nil {
 		// Nothing is in flight, so the tracking row must not stay PENDING
 		// -- otherwise the buyer sees "awaiting seller review" forever for
 		// a request that was never delivered.
-		if _, abErr := q.AbandonPendingUpdateRequests(ctx, []uuid.UUID{txnID}); abErr != nil {
-			s.lh.WithModule("client_svc").Warn().Error(abErr).Log(fmt.Sprintf("failed to abandon update request %s after send failure", updateReqID))
+		if trackAsChangeRequest {
+			if _, abErr := q.AbandonPendingUpdateRequests(ctx, []uuid.UUID{txnID}); abErr != nil {
+				s.lh.WithModule("client_svc").Warn().Error(abErr).Log(fmt.Sprintf("failed to abandon update request %s after send failure", updateReqID))
+			}
 		}
 		// Delivery to the BPP never happened -- there's no update in
 		// flight to wait for, so undo the CONFIRMED -> UPDATE_SENT

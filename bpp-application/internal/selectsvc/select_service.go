@@ -114,7 +114,7 @@ func (s *SelectService) enrichContract(ctx context.Context, req *SelectRequest) 
 	currency := "IDR"
 
 	for _, c := range req.Message.Contract.Commitments {
-		enriched, unitPrice, curr, found := s.enrichCommitment(ctx, q, bppID, c)
+		enriched, unitLines, curr, found := s.enrichCommitment(ctx, q, bppID, c)
 		if curr != "" {
 			currency = curr
 		}
@@ -122,11 +122,12 @@ func (s *SelectService) enrichContract(ctx context.Context, req *SelectRequest) 
 
 		if found {
 			qty := extractQty(c.CommitmentAttributes)
-			allBreakup = append(allBreakup, breakupItem{
-				Title:  enriched.Offer.Descriptor.Name,
-				Amount: unitPrice * qty,
-				Type:   "BASE_PRICE",
-			})
+			for _, line := range unitLines {
+				if line.Type == "BASE_PRICE" {
+					line.Title = enriched.Offer.Descriptor.Name
+				}
+				allBreakup = append(allBreakup, line.scaled(qty))
+			}
 		}
 	}
 
@@ -170,10 +171,11 @@ func toOfferConsiderations(rows []dbsqlc.OfferConsideration) []OfferConsideratio
 }
 
 // enrichCommitment looks up the offer and each resource in the DB.
-// Returns the enriched Commitment, the unit price, currency, and whether the offer was found.
+// Returns the enriched Commitment, the per-unit price breakup lines (BASE_PRICE
+// plus any TAX lines), currency, and whether the offer was found.
 func (s *SelectService) enrichCommitment(
 	ctx context.Context, q *dbsqlc.Queries, bppID string, c Commitment,
-) (enriched Commitment, unitPrice float64, currency string, found bool) {
+) (enriched Commitment, unitLines []breakupItem, currency string, found bool) {
 	enriched = c
 
 	if c.Offer == nil {
@@ -217,8 +219,13 @@ func (s *SelectService) enrichCommitment(
 		ID:          dbOffer.ID,
 		ResourceIDs: dbOffer.ResourceIds,
 		Descriptor: &Descriptor{
-			Name:      strVal(dbOffer.DescriptorName),
-			ShortDesc: strVal(dbOffer.DescriptorShortDesc),
+			Code:           strVal(dbOffer.DescriptorCode),
+			Name:           strVal(dbOffer.DescriptorName),
+			ShortDesc:      strVal(dbOffer.DescriptorShortDesc),
+			LongDesc:       strVal(dbOffer.DescriptorLongDesc),
+			ThumbnailImage: strVal(dbOffer.DescriptorThumbnailImage),
+			Docs:           nonEmptyArray(dbOffer.DescriptorDocs),
+			MediaFile:      nonEmptyArray(dbOffer.DescriptorMediaFiles),
 		},
 		Provider:        provider,
 		OfferAttributes: dbOffer.OfferAttributes,
@@ -230,6 +237,7 @@ func (s *SelectService) enrichCommitment(
 	for _, r := range c.Resources {
 		dbRes, err := q.GetResource(ctx, dbsqlc.GetResourceParams{ID: r.ID, BppID: bppID})
 		if err != nil {
+			s.lh.WithModule("selectsvc").Warn().Error(err).Log(fmt.Sprintf("resource %q lookup failed; passing it through as sent", r.ID))
 			// Pass-through as-is, but the schema requires every resource to
 			// carry its own quantity — the inbound resource from BAP only
 			// has one nested in commitmentAttributes, not here.
@@ -242,9 +250,13 @@ func (s *SelectService) enrichCommitment(
 		enrichedResources = append(enrichedResources, Resource{
 			ID: r.ID,
 			Descriptor: &Descriptor{
-				Name:      strVal(dbRes.DescriptorName),
-				ShortDesc: strVal(dbRes.DescriptorShortDesc),
-				LongDesc:  strVal(dbRes.DescriptorLongDesc),
+				Code:           strVal(dbRes.DescriptorCode),
+				Name:           strVal(dbRes.DescriptorName),
+				ShortDesc:      strVal(dbRes.DescriptorShortDesc),
+				LongDesc:       strVal(dbRes.DescriptorLongDesc),
+				ThumbnailImage: strVal(dbRes.DescriptorThumbnailImage),
+				Docs:           nonEmptyArray(dbRes.DescriptorDocs),
+				MediaFile:      nonEmptyArray(dbRes.DescriptorMediaFiles),
 			},
 			ResourceAttributes: dbRes.ResourceAttributes,
 			Quantity:           &quantity{UnitCode: "EA", UnitQuantity: qty},
@@ -262,17 +274,51 @@ func (s *SelectService) enrichCommitment(
 	}
 	enriched.Offer.Considerations = toOfferConsiderations(considerations)
 
-	// Use the first active consideration's totalAmount as the unit price.
+	// The first consideration's breakup is the per-unit price; the commitment
+	// carries the pre-tax BASE_PRICE as its unit price.
 	var attrs dbConsiderationAttrs
+	var unitPrice float64
 	if err := json.Unmarshal(considerations[0].ConsiderationAttributes, &attrs); err == nil {
-		unitPrice = attrs.TotalAmount
 		currency = attrs.Currency
+		unitLines = unitBreakup(attrs)
+		unitPrice = attrs.TotalAmount
+		for _, line := range unitLines {
+			if line.Type == "BASE_PRICE" {
+				unitPrice = line.Amount
+			}
+		}
 	}
 
 	// Merge unit price into commitmentAttributes.
 	enriched.CommitmentAttributes = mergePrice(c.CommitmentAttributes, unitPrice, currency, qty)
 
 	return
+}
+
+// nonEmptyArray returns raw unless it is empty, null or "[]", so empty docs /
+// media lists are omitted rather than sent as [].
+func nonEmptyArray(raw json.RawMessage) json.RawMessage {
+	var items []json.RawMessage
+	if len(raw) == 0 || json.Unmarshal(raw, &items) != nil || len(items) == 0 {
+		return nil
+	}
+	return raw
+}
+
+// unitBreakup returns an offer consideration's per-unit breakup: its BASE_PRICE
+// and TAX lines, or -- for offers priced before breakups carried tax -- a
+// single BASE_PRICE line of totalAmount.
+func unitBreakup(attrs dbConsiderationAttrs) []breakupItem {
+	var lines []breakupItem
+	for _, b := range attrs.Breakup {
+		if b.Type == "BASE_PRICE" || b.Type == "TAX" {
+			lines = append(lines, b)
+		}
+	}
+	if len(lines) == 0 {
+		lines = []breakupItem{{Amount: attrs.TotalAmount, Type: "BASE_PRICE"}}
+	}
+	return lines
 }
 
 // callOnSelect POSTs the on_select payload via ONIX BPP caller and logs the OUTBOUND entry.
