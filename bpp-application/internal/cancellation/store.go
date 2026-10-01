@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	dbsqlc "github.com/ion/winroom/bpp/db/sqlc"
+	"github.com/ion/winroom/bpp/internal/config"
 	"github.com/ion/winroom/bpp/internal/stock"
 )
 
@@ -37,7 +38,7 @@ var ErrNotActive = errors.New("contract is not ACTIVE")
 func LatestContract(ctx context.Context, pool *pgxpool.Pool, txID uuid.UUID, contractAttributes json.RawMessage) (map[string]any, error) {
 	var c map[string]any
 	if len(contractAttributes) > 0 && json.Unmarshal(contractAttributes, &c) == nil && c["commitments"] != nil {
-		return c, nil
+		return normalizeSettlementBasis(c), nil
 	}
 	var payload []byte
 	if err := pool.QueryRow(ctx, `
@@ -54,7 +55,22 @@ func LatestContract(ctx context.Context, pool *pgxpool.Pool, txID uuid.UUID, con
 	if err := json.Unmarshal(payload, &msg); err != nil || msg.Message.Contract == nil {
 		return nil, fmt.Errorf("parse stored contract payload: %v", err)
 	}
-	return msg.Message.Contract, nil
+	return normalizeSettlementBasis(msg.Message.Contract), nil
+}
+
+// normalizeSettlementBasis renames a pre-ION settlementBasis (DELIVERY, ...)
+// in c's settlements, so a contract loaded from an older message still
+// validates when it is sent again.
+func normalizeSettlementBasis(c map[string]any) map[string]any {
+	settlements, _ := c["settlements"].([]any)
+	for _, raw := range settlements {
+		st, _ := raw.(map[string]any)
+		attrs, _ := st["settlementAttributes"].(map[string]any)
+		if basis, ok := attrs["settlementBasis"].(string); ok {
+			attrs["settlementBasis"] = config.NormalizeSettlementBasis(basis)
+		}
+	}
+	return c
 }
 
 // Execute cancels items (everything when empty) for req's reason on the

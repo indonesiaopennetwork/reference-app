@@ -989,7 +989,7 @@
               "currency": "IDR",
               "settledAt": "2026-09-29T15:06:31Z",
               "settledAmount": 90000,
-              "settlementBasis": "RETURN_WINDOW_EXPIRY",
+              "settlementBasis": "AFTER_RETURN_WINDOW",
               "settlementWindow": "P1D",
               "reconciliationId": "recon-2026-09-30T170000Z-onix-bap-x7m2wmy7nq-et.a.run.app",
               "reconciliationStatus": "PENDING"
@@ -1017,7 +1017,7 @@
               "currency": "IDR",
               "settledAt": "2026-09-29T15:06:31Z",
               "settledAmount": 45000,
-              "settlementBasis": "RETURN_WINDOW_EXPIRY",
+              "settlementBasis": "AFTER_RETURN_WINDOW",
               "settlementWindow": "P1D",
               "reconciliationId": "recon-2026-09-30T170000Z-onix-bap-x7m2wmy7nq-et.a.run.app",
               "reconciliationStatus": "PENDING"
@@ -1332,7 +1332,7 @@
               "currency": "IDR",
               "settledAt": "2026-09-29T15:31:07Z",
               "settledAmount": 90000,
-              "settlementBasis": "DELIVERY",
+              "settlementBasis": "AFTER_DELIVERY",
               "settlementWindow": "P1D",
               "reconciliationId": "recon-2026-09-30T170000Z-onix-bap-x7m2wmy7nq-et.a.run.app",
               "reconciliationStatus": "PENDING"
@@ -1398,7 +1398,7 @@
       "bppId": "onix-bap-x7m2wmy7nq-et.a.run.app",
       "currency": "IDR",
       "settlementDate": "2026-09-30",
-      "settlementBasis": "DELIVERY",
+      "settlementBasis": "AFTER_DELIVERY",
       "settlementWindow": "P1D",
       "contractCount": 3,
       "totalPaidAmount": 270000,

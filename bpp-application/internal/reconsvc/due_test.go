@@ -9,11 +9,12 @@ import (
 )
 
 func testService() *Service {
-	return &Service{cfg: &config.Config{BppID: "bpp-1", SettlementBasis: "DELIVERY", SettlementWindow: "P1D"}}
+	return &Service{cfg: &config.Config{BppID: "bpp-1", SettlementBasis: "AFTER_DELIVERY", SettlementWindow: "P1D"}}
 }
 
-// contract: paid 90,000 with DELIVERY / PT2M terms, then 45,000 refunded from
-// the gateway (cancellation of 1 of 2 units).
+// contract: paid 90,000 with DELIVERY / PT2M terms (the pre-ION name for
+// AFTER_DELIVERY, as older stored settlements have it), then 45,000 refunded
+// from the gateway (cancellation of 1 of 2 units).
 func testContract(t *testing.T) map[string]any {
 	var c map[string]any
 	err := json.Unmarshal([]byte(`{
@@ -133,5 +134,32 @@ func TestReconciliationIDIncludesTime(t *testing.T) {
 	taken := map[string]bool{"recon-2026-09-29T130205Z-bap": true}
 	if got := reconciliationID(at, "bap", func(id string) bool { return taken[id] }); got != "recon-2026-09-29T130205Z-bap-2" {
 		t.Errorf("same-second id = %s, want the -2 suffix", got)
+	}
+}
+
+func TestLegacyBasisReadAsION(t *testing.T) {
+	s := testService()
+	delivered := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+	d := DueContract{contract: testContract(t)}
+	s.assess(&d, &delivered, nil, delivered)
+	if d.Basis != "AFTER_DELIVERY" || d.BasisEvent != "delivered" {
+		t.Fatalf("basis = %q (%s), want AFTER_DELIVERY from delivery", d.Basis, d.BasisEvent)
+	}
+}
+
+func TestDueOnConfirmation(t *testing.T) {
+	s := testService()
+	c := testContract(t)
+	attrs := c["settlements"].([]any)[0].(map[string]any)["settlementAttributes"].(map[string]any)
+	attrs["settlementBasis"] = "ON_CONFIRMATION"
+	paid := time.Date(2026, 9, 29, 10, 0, 0, 0, time.UTC)
+
+	d := DueContract{contract: c}
+	s.assess(&d, nil, nil, paid.Add(time.Minute))
+	if d.BasisEvent != "confirmed" || d.DueAt == nil || !d.DueAt.Equal(paid.Add(2*time.Minute)) {
+		t.Fatalf("ON_CONFIRMATION: event %q, due %v; want confirmed, due 2 minutes after payment", d.BasisEvent, d.DueAt)
+	}
+	if d.Due {
+		t.Fatal("not due before the window has passed")
 	}
 }

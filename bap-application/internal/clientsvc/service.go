@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -568,10 +569,46 @@ func (s *ClientService) buildInitMessage(ctx context.Context, q *dbsqlc.Queries,
 		return nil, fmt.Errorf("parse contract snapshot: %w", err)
 	}
 
+	if err := checkQuoteAvailable(contract); err != nil {
+		return nil, err
+	}
+
 	patchBuyerParticipant(contract, s.cfg.BapID, billing)
 	patchPerformanceDelivery(contract, billing)
 
 	return json.Marshal(map[string]interface{}{"contract": contract})
+}
+
+// ErrQuoteUnavailable means the seller's quote (on_select) can't be ordered:
+// it marked an item it no longer has as CLOSED, or priced nothing at all.
+var ErrQuoteUnavailable = errors.New("the seller can no longer supply this order")
+
+// checkQuoteAvailable returns ErrQuoteUnavailable, naming the items, unless
+// every commitment is available and the contract carries a price.
+func checkQuoteAvailable(contract map[string]interface{}) error {
+	var closed []string
+	commitments, _ := contract["commitments"].([]interface{})
+	for _, raw := range commitments {
+		c, _ := raw.(map[string]interface{})
+		status, _ := c["status"].(map[string]interface{})
+		desc, _ := status["descriptor"].(map[string]interface{})
+		if code, _ := desc["code"].(string); code != "CLOSED" {
+			continue
+		}
+		name := ""
+		if resources, _ := c["resources"].([]interface{}); len(resources) > 0 {
+			r, _ := resources[0].(map[string]interface{})
+			name, _ = r["id"].(string)
+		}
+		closed = append(closed, name)
+	}
+	if len(closed) > 0 {
+		return fmt.Errorf("%w: unavailable items %s", ErrQuoteUnavailable, strings.Join(closed, ", "))
+	}
+	if considerations, _ := contract["consideration"].([]interface{}); len(considerations) == 0 {
+		return fmt.Errorf("%w: the quote has no price", ErrQuoteUnavailable)
+	}
+	return nil
 }
 
 // patchBuyerParticipant updates the buyer participant's person details with

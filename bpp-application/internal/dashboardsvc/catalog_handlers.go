@@ -239,6 +239,13 @@ func (h *Handler) HandleCreateCatalog(c *gin.Context) {
 			return
 		}
 	}
+	if published, err := h.catalogPublished(ctx, req.ID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	} else if published {
+		c.JSON(http.StatusConflict, gin.H{"error": errCatalogPublished})
+		return
+	}
 
 	// Upsert provider -- always the caller's own, regardless of whatever
 	// provider info was submitted (a seller already has exactly one
@@ -448,6 +455,13 @@ func (h *Handler) HandleAddProduct(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "catalog not found"})
 		return
 	}
+	if published, err := h.catalogPublished(ctx, catalogID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	} else if published {
+		c.JSON(http.StatusConflict, gin.H{"error": errCatalogPublished})
+		return
+	}
 
 	tx, err := h.pool.Begin(ctx)
 	if err != nil {
@@ -589,6 +603,13 @@ func (h *Handler) HandlePublishCatalog(c *gin.Context) {
 		return
 	} else if !owned {
 		c.JSON(http.StatusNotFound, gin.H{"error": "catalog not found"})
+		return
+	}
+	if published, err := h.catalogPublished(ctx, catalogID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	} else if published {
+		c.JSON(http.StatusConflict, gin.H{"error": "this catalog is already published"})
 		return
 	}
 
@@ -997,6 +1018,13 @@ func (h *Handler) HandleAddOffer(c *gin.Context) {
 		return
 	} else if !owned {
 		c.JSON(http.StatusNotFound, gin.H{"error": "catalog not found"})
+		return
+	}
+	if published, err := h.catalogPublished(ctx, catalogID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	} else if published {
+		c.JSON(http.StatusConflict, gin.H{"error": errCatalogPublished})
 		return
 	}
 
