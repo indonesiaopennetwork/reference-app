@@ -133,6 +133,9 @@ if [ -z "${CLIENT_ID:-}" ] || [ "$CLIENT_ID" = "null" ]; then
   exit 1
 fi
 
+# Login page look, matching the BAP / BPP apps.
+BASE_URL="$BASE_URL" PAT="$PAT" ./scripts/zitadel-branding.sh
+
 echo ""
 echo "Done. Set this in terraform/terraform.tfvars and run 'terraform apply' again:"
 echo ""
