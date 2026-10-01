@@ -143,6 +143,9 @@ if [ -n "$SMTP_HOST" ]; then
   echo "SMTP config ${SMTP_ID} created and activated."
 fi
 
+# Login page look, matching the BAP / BPP apps.
+BASE_URL="$BASE_URL" PAT="$PAT" ./scripts/zitadel-branding.sh
+
 if grep -q '^ZITADEL_CLIENT_ID=' .env; then
   sed -i.bak "s|^ZITADEL_CLIENT_ID=.*|ZITADEL_CLIENT_ID=${CLIENT_ID}|" .env && rm -f .env.bak
 else

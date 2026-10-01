@@ -28,7 +28,9 @@ export function clearToken() {
 
 export function redirectToLogin() {
   const url = window.__env__?.LANDING_PAGE_URL || import.meta.env.VITE_LANDING_PAGE_URL || 'http://localhost:3002'
-  window.location.href = url
+  // Pass on the chosen language (see i18n.jsx) so the login page matches it.
+  const lang = localStorage.getItem('lang')
+  window.location.href = lang ? `${url}?lang=${encodeURIComponent(lang)}` : url
 }
 
 // This app never talks to Zitadel directly (no id_token), so ending the SSO

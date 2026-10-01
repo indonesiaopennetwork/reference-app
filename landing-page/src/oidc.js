@@ -28,6 +28,20 @@ async function codeChallengeFor(verifier) {
   return base64url(digest)
 }
 
+// The language the user chose in BAP / BPP (they send ?lang=en|id when
+// redirecting here), remembered so Zitadel's login page is shown in it.
+// Without one, Zitadel follows the browser's language.
+const LANG_KEY = 'landing.lang'
+function loginLocale() {
+  const fromUrl = new URLSearchParams(window.location.search).get('lang')
+  if (fromUrl === 'en' || fromUrl === 'id') {
+    localStorage.setItem(LANG_KEY, fromUrl)
+    return fromUrl
+  }
+  const stored = localStorage.getItem(LANG_KEY)
+  return stored === 'en' || stored === 'id' ? stored : null
+}
+
 // Redirects the browser to Zitadel's hosted login/register page. Called
 // whenever this app has no valid session -- see App.jsx.
 export async function startLogin() {
@@ -46,6 +60,8 @@ export async function startLogin() {
     code_challenge_method: 'S256',
     state,
   })
+  const locale = loginLocale()
+  if (locale) params.set('ui_locales', locale)
   window.location.href = `${config.zitadelIssuer}/oauth/v2/authorize?${params}`
 }
 
