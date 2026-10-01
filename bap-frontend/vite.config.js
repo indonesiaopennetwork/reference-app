@@ -4,6 +4,9 @@ import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig({
   envDir: '../',
+  // Relative asset URLs so one build works both at a domain root and behind
+  // ion-landing-page's /tsp/remiges/cn/ proxy -- see basePath in src/auth.js.
+  base: './',
   plugins: [react(), tailwindcss()],
   server: {
     // Dev-server proxy: forwards /api/* to the BAP application.

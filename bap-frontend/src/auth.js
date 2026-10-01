@@ -3,6 +3,13 @@
 // this app's own use. There's no login UI here at all -- landing-page is
 // the single entry point; a visit with no token, ever, redirects there.
 const TOKEN_KEY = 'bap.accessToken'
+const PROVIDER_ID_KEY = 'bap.providerId'
+
+// Path this app is mounted at, with a trailing slash: '/' when served at a
+// domain root, '/tsp/remiges/cn/' behind ion-landing-page's proxy. Derived
+// from where the bundle itself was loaded from (<base>assets/index-*.js in a
+// build, /src/auth.js under `npm run dev`), so no per-mount config needed.
+export const basePath = new URL('..', import.meta.url).pathname
 
 // Reads ?token= from the URL (if present), stores it, and strips it from
 // the URL bar via history.replaceState so it doesn't linger in the
@@ -10,9 +17,15 @@ const TOKEN_KEY = 'bap.accessToken'
 export function captureTokenFromUrl() {
   const params = new URLSearchParams(window.location.search)
   const token = params.get('token')
-  if (!token) return
-  localStorage.setItem(TOKEN_KEY, token)
-  params.delete('token')
+  const providerId = params.get('providerId')
+  if (token) {
+    localStorage.setItem(TOKEN_KEY, token)
+    params.delete('token')
+  }
+  if (providerId) {
+    localStorage.setItem(PROVIDER_ID_KEY, providerId)
+    params.delete('providerId')
+  }
   const query = params.toString()
   const newUrl = window.location.pathname + (query ? `?${query}` : '') + window.location.hash
   window.history.replaceState({}, '', newUrl)
@@ -22,8 +35,13 @@ export function getToken() {
   return localStorage.getItem(TOKEN_KEY)
 }
 
+export function getProviderId() {
+  return localStorage.getItem(PROVIDER_ID_KEY)
+}
+
 export function clearToken() {
   localStorage.removeItem(TOKEN_KEY)
+  localStorage.removeItem(PROVIDER_ID_KEY)
 }
 
 export function redirectToLogin() {

@@ -7,6 +7,49 @@ server {
         root /usr/share/nginx/env-config-out;
     }
 
+    # landing-page (seller login) mounted under this domain. Cloud Run
+    # domain mappings are whole-host only, so the path is proxied to the
+    # landing-page service's own run.app host; the trailing / on proxy_pass
+    # strips the prefix, and landing-page works out its own base path
+    # client-side (see landing-page/src/config.js's basePath).
+    # Relative Location: nginx only sees plain http behind Cloud Run, so an
+    # absolute redirect would bounce the browser through http://.
+    location = /tsp/remiges {
+        absolute_redirect off;
+        return 301 /tsp/remiges/;
+    }
+
+    location /tsp/remiges/ {
+        proxy_pass https://${LANDING_PAGE_UPSTREAM}/;
+        proxy_ssl_server_name on;
+        proxy_set_header Host ${LANDING_PAGE_UPSTREAM};
+    }
+
+    # bap-frontend (buyer app) and bpp-frontend (seller app), mounted the
+    # same way. Longest prefix wins, so these take precedence over
+    # /tsp/remiges/ above. Each app's own nginx still proxies its /api/.
+    location = /tsp/remiges/cn {
+        absolute_redirect off;
+        return 301 /tsp/remiges/cn/;
+    }
+
+    location /tsp/remiges/cn/ {
+        proxy_pass https://${BAP_FRONTEND_UPSTREAM}/;
+        proxy_ssl_server_name on;
+        proxy_set_header Host ${BAP_FRONTEND_UPSTREAM};
+    }
+
+    location = /tsp/remiges/pn {
+        absolute_redirect off;
+        return 301 /tsp/remiges/pn/;
+    }
+
+    location /tsp/remiges/pn/ {
+        proxy_pass https://${BPP_FRONTEND_UPSTREAM}/;
+        proxy_ssl_server_name on;
+        proxy_set_header Host ${BPP_FRONTEND_UPSTREAM};
+    }
+
     # GCS has no real "index" concept for a bare bucket-root request --
     # fetch the index.html object explicitly.
     location = / {

@@ -13,3 +13,9 @@ export const config = {
   zitadelIssuer: env.ZITADEL_ISSUER || 'http://localhost:8090',
   zitadelClientId: env.ZITADEL_CLIENT_ID || '',
 }
+
+// Path this app is mounted at, with a trailing slash: '/' when served at a
+// domain root, '/tsp/remiges/' behind ion-landing-page's proxy. Derived from
+// where the bundle itself was loaded from (<base>assets/index-*.js in a
+// build, /src/config.js under `npm run dev`), so no per-mount config needed.
+export const basePath = new URL('..', import.meta.url).pathname

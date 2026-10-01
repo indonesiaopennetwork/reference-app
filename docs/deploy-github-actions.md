@@ -24,11 +24,12 @@ are still applied with Terraform, as in `terraform/README.md`.
 
 The workflow signs in to Google Cloud with Workload Identity Federation, so
 no service-account key is stored in GitHub. Run these once, with
-`PROJECT_ID` set to the project `terraform/` deploys to.
+`PROJECT_ID` and `REGION` set to the `project_id` and `region` in
+`terraform/terraform.tfvars`.
 
 ```bash
 PROJECT_ID=<your project>
-REGION=asia-southeast2
+REGION=<region from terraform.tfvars>   # e.g. asia-southeast2 (the default) or asia-southeast1
 GITHUB_REPO=indonesiaopennetwork/reference-app
 PROJECT_NUMBER=$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')
 DEPLOY_SA="github-deploy@$PROJECT_ID.iam.gserviceaccount.com"
@@ -67,15 +68,25 @@ echo "GCP_WORKLOAD_IDENTITY_PROVIDER=projects/$PROJECT_NUMBER/locations/global/w
 echo "GCP_DEPLOY_SERVICE_ACCOUNT=$DEPLOY_SA"
 ```
 
-Then add these as repository **variables** (Settings → Secrets and variables
-→ Actions → Variables):
+Then add these as repository **variables**, not secrets. Either use the
+repository page (Settings → Secrets and variables → Actions → **Variables**
+tab → **New repository variable**), or the `gh` CLI, which needs admin access
+to the repository:
+
+```bash
+gh variable set GCP_PROJECT_ID -R "$GITHUB_REPO" -b "$PROJECT_ID"
+gh variable set GCP_REGION -R "$GITHUB_REPO" -b "$REGION"
+gh variable set GCP_WORKLOAD_IDENTITY_PROVIDER -R "$GITHUB_REPO" \
+  -b "projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/github/providers/reference-app"
+gh variable set GCP_DEPLOY_SERVICE_ACCOUNT -R "$GITHUB_REPO" -b "$DEPLOY_SA"
+```
 
 | Variable | Value |
 |---|---|
 | `GCP_PROJECT_ID` | the project ID |
 | `GCP_WORKLOAD_IDENTITY_PROVIDER` | printed above |
 | `GCP_DEPLOY_SERVICE_ACCOUNT` | printed above |
-| `GCP_REGION` | optional, default `asia-southeast2` |
+| `GCP_REGION` | the `region` in `terraform.tfvars`; required unless it is the default `asia-southeast2` |
 | `GCP_ARTIFACT_REPO` | optional, default `beckn-app` |
 
 Until they are set, the workflow stops at its first step with a message

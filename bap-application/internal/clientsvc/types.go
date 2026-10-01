@@ -83,7 +83,8 @@ type BecknContext struct {
 // ClientDiscoverRequest — carries the optional free-text search term from the frontend.
 // Populated from the ?q query parameter on GET /api/v1/discover.
 type ClientDiscoverRequest struct {
-	TextSearch string // maps to intent.textSearch in the outbound Beckn request
+	TextSearch   string // maps to intent.textSearch in the outbound Beckn request
+	ProviderName string // maps to intent.provider.descriptor.name
 }
 
 // ClientCancelRequest — frontend initiates Cancel.

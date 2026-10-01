@@ -177,7 +177,8 @@ jobs:
           echo "IMAGE=$image" >> "$GITHUB_ENV"
       - name: Run migrate-${{ matrix.app }}
         run: |
-          gcloud run jobs update "migrate-${{ matrix.app }}" --project="$PROJECT_ID" --region="$REGION" --image="$IMAGE"
+          gcloud run jobs update "migrate-${{ matrix.app }}" --project="$PROJECT_ID" --region="$REGION" \
+            --container=migrate --image="$IMAGE"
           gcloud run jobs execute "migrate-${{ matrix.app }}" --project="$PROJECT_ID" --region="$REGION" --wait
 
   deploy:

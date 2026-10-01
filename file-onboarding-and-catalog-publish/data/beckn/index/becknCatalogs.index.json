@@ -1,1 +1,348 @@
-{"nodeId":"onix-bap-x7m2wmy7nq-et.a.run.app","next_update":"2026-10-14T12:45:41.77830324Z","catalogs":[{"catalogId":"onix-bap-x7m2wmy7nq-et.a.run.app/cat-outdoor-gear-muo3las0","entryVersion":1,"catalogType":"REGULAR","networkIds":["beckn.one/testnet","nfh.global/testnet","ion.id/ion-launch"],"isActive":true,"baseline":{"version":1,"url":"http://catalog-files/catalogs/cat-outdoor-gear-muo3las0.v1.json.gz","size":1604,"digest":"sha-256:99b98bfc04994918ad01cf27aa0ac07f1acb634cf201725bb6d1b39efa6c68ff"},"latest":{"version":1,"url":"http://catalog-files/catalogs/cat-outdoor-gear-muo3las0.latest.json.gz","size":1604,"digest":"sha-256:99b98bfc04994918ad01cf27aa0ac07f1acb634cf201725bb6d1b39efa6c68ff"},"signature":{"keyId":"76EU91ME6AjAq2emEzHCJ2aNXgZAfRTF2VNRa3o6j6m7KPT7AdKmLc","value":"SjftAs29g7MG/p7fcYpljDv5NE8KpkqN+YyUVXf50vtHqmM+FaOsE9jW0ZgXCYCGu+0Yvlw2GlF19FUzMYNcBA=="}},{"catalogId":"onix-bap-x7m2wmy7nq-et.a.run.app/cat-outdoor-gear-muo00zwa","entryVersion":1,"catalogType":"REGULAR","networkIds":["beckn.one/testnet","nfh.global/testnet","ion.id/ion-launch"],"isActive":true,"baseline":{"version":1,"url":"http://catalog-files/catalogs/cat-outdoor-gear-muo00zwa.v1.json.gz","size":1600,"digest":"sha-256:384feffecefe9fb9cce99b14cf259a54be56221f366cfe14df2a9386912d34b2"},"latest":{"version":1,"url":"http://catalog-files/catalogs/cat-outdoor-gear-muo00zwa.latest.json.gz","size":1600,"digest":"sha-256:384feffecefe9fb9cce99b14cf259a54be56221f366cfe14df2a9386912d34b2"},"signature":{"keyId":"76EU91ME6AjAq2emEzHCJ2aNXgZAfRTF2VNRa3o6j6m7KPT7AdKmLc","value":"Fb/eTMbgoRHp7anTlEnpsr9cvzg7vYglM5+RAAFB4ymmV+gn7tkOV+4IJkZvYAsNIHrvOMkSoarmrRxWHBM5CQ=="}},{"catalogId":"onix-bap-x7m2wmy7nq-et.a.run.app/cat-electronics-mumzlmle","entryVersion":1,"catalogType":"REGULAR","networkIds":["beckn.one/testnet","nfh.global/testnet","ion.id/ion-launch"],"isActive":true,"baseline":{"version":1,"url":"http://catalog-files/catalogs/cat-electronics-mumzlmle.v1.json.gz","size":2440,"digest":"sha-256:ea81f002eaea587f014917a2056ad43ef73fd44d1d540bdfad66feacdae1ca94"},"latest":{"version":1,"url":"http://catalog-files/catalogs/cat-electronics-mumzlmle.latest.json.gz","size":2440,"digest":"sha-256:ea81f002eaea587f014917a2056ad43ef73fd44d1d540bdfad66feacdae1ca94"},"signature":{"keyId":"76EU91ME6AjAq2emEzHCJ2aNXgZAfRTF2VNRa3o6j6m7KPT7AdKmLc","value":"CE0aIheLBVvtmjh7BinbPymLBhcQv9ZA/CCKkK/APGXE6uL9Z2KsxvEsyCdkjwVPwgQKl42jpagSFFvN69f7CQ=="}},{"catalogId":"cat-jayu-outdoor-gear-mtcf3s1y","entryVersion":1,"catalogType":"REGULAR","isActive":true,"baseline":{"version":1,"url":"https://ion-ref-app.ayushmatha.in/catalogs/cat-jayu-outdoor-gear-mtcf3s1y.v1.json.gz","size":1222,"digest":"sha-256:cda315e577a16648f1d2d0a783fad723f7e320cd813a8ddc817233e4cf96403d"},"latest":{"version":1,"url":"https://ion-ref-app.ayushmatha.in/catalogs/cat-jayu-outdoor-gear-mtcf3s1y.latest.json.gz","size":1222,"digest":"sha-256:cda315e577a16648f1d2d0a783fad723f7e320cd813a8ddc817233e4cf96403d"},"signature":{"keyId":"76EU98UJTmvXVUkPcLH2Yrgzw8R3Rbwj11ituM1ZBbTxDzD7XXJoyP","value":"20oZxr48+BMGqWs6aDr2PwRFYpUmSbgkBFnAVTJdxGWnhlXq+8XTLNnrEmAdM9gek17QNWoMzhcbtZ14t0MaDA=="}},{"catalogId":"sample-pn.ayushmatha.in/CAT-ION-001","entryVersion":1,"catalogType":"REGULAR","networkIds":["beckn.one/testnet","nfh.global/testnet","ion.id/ion-launch"],"isActive":true,"baseline":{"version":1,"url":"https://ayushmatha.in/catalogs/CAT-ION-001.v1.json.gz","size":1152,"digest":"sha-256:7ff321bc9ee17a3b283696a5d1c7ac1ddbe6637c9b17393a947ac6ef54d06013"},"latest":{"version":1,"url":"https://ayushmatha.in/catalogs/CAT-ION-001.latest.json.gz","size":1152,"digest":"sha-256:7ff321bc9ee17a3b283696a5d1c7ac1ddbe6637c9b17393a947ac6ef54d06013"},"signature":{"keyId":"76EU8xm2zrv86SQSzeU8ckzNEfX3Pm5vJ8wtCqdXJpUezKn6u5iy6V","value":"u6z4MpvM+j8EW5n6WsDk2tk1Bj/i3UtHRkMU+sV5CAsXWWQThFEWJNZV7z+csFXH70t2DL/yfxNtEakI1vuYCQ=="}}]}
+{
+    "nodeId": "sample-pn.ion-ref-app.ayushmatha.in",
+    "next_update": "2026-10-15T08:18:05.166121337Z",
+    "catalogs": [
+        {
+            "catalogId": "onix-bap-x7m2wmy7nq-et.a.run.app/cat-electronics-mup9gy0t",
+            "entryVersion": 1,
+            "catalogType": "REGULAR",
+            "networkIds": [
+                "beckn.one/testnet",
+                "nfh.global/testnet",
+                "ion.id/ion-launch"
+            ],
+            "isActive": true,
+            "baseline": {
+                "version": 1,
+                "url": "http://catalog-files/catalogs/cat-electronics-mup9gy0t.v1.json.gz",
+                "size": 1601,
+                "digest": "sha-256:7ad4c4e4ab63c3ed76a240dd76b9ed2f4b772b5de1850e42cdc1dde02a4fe723"
+            },
+            "latest": {
+                "version": 1,
+                "url": "http://catalog-files/catalogs/cat-electronics-mup9gy0t.latest.json.gz",
+                "size": 1601,
+                "digest": "sha-256:7ad4c4e4ab63c3ed76a240dd76b9ed2f4b772b5de1850e42cdc1dde02a4fe723"
+            },
+            "signature": {
+                "keyId": "76EU98UJTmvXVUkPcLH2Yrgzw8R3Rbwj11ituM1ZBbTxDzD7XXJoyP",
+                "value": "6nW8axqvxpzbV+i4wH2tQYrILjqcaCbIlpRDkijLSoYoopY2TCBtX1jFD1fKl70QYeLF7tFPS+EpBygn3XHWCw=="
+            }
+        },
+        {
+            "catalogId": "cat-final-10-products",
+            "entryVersion": 2,
+            "catalogType": "REGULAR",
+            "isActive": true,
+            "baseline": {
+                "version": 1,
+                "url": "http://catalog-files/catalogs/cat-final-10-products.v1.json.gz",
+                "size": 3401,
+                "digest": "sha-256:90bc5f327b0c69c8811bebcda27ab7b29d8584f2eda5d0da0480ec85495d5dd3"
+            },
+            "changes": [
+                {
+                    "fromVersion": 1,
+                    "toVersion": 2,
+                    "url": "http://catalog-files/catalogs/changes/cat-final-10-products.v2.changes.json.gz",
+                    "size": 1418,
+                    "digest": "sha-256:282c0b05a464ff07ddd1af989aef413b6c58039ede392eadf464b2ce2e1187c0"
+                }
+            ],
+            "latest": {
+                "version": 2,
+                "url": "http://catalog-files/catalogs/cat-final-10-products.latest.json.gz",
+                "size": 3404,
+                "digest": "sha-256:53c600511249c56bed4b5ea827944cfc61f47e5226eb7b8f2eca91d7ae76b0e1"
+            },
+            "signature": {
+                "keyId": "76EU98UJTmvXVUkPcLH2Yrgzw8R3Rbwj11ituM1ZBbTxDzD7XXJoyP",
+                "value": "Jsr/1o0w1rOkfThJX8eMn1KwDJvk2OlU78pLoocz/dPvUGmDcM8j59Msw2pYZKWxLOogP0FfiJFwZfK3NmUzDg=="
+            }
+        },
+        {
+            "catalogId": "onix-bap-x7m2wmy7nq-et.a.run.app/cat-apparel-mugiyy6m",
+            "entryVersion": 2,
+            "catalogType": "REGULAR",
+            "networkIds": [
+                "beckn.one/testnet",
+                "nfh.global/testnet",
+                "ion.id/ion-launch"
+            ],
+            "isActive": true,
+            "baseline": {
+                "version": 1,
+                "url": "http://catalog-files/catalogs/cat-apparel-mugiyy6m.v1.json.gz",
+                "size": 1575,
+                "digest": "sha-256:818f542dce93c41070e7cb18f959a6edefdeceff7d6412d95c72de250bcaccb8"
+            },
+            "changes": [
+                {
+                    "fromVersion": 1,
+                    "toVersion": 2,
+                    "url": "http://catalog-files/catalogs/changes/cat-apparel-mugiyy6m.v2.changes.json.gz",
+                    "size": 1439,
+                    "digest": "sha-256:928ba36425b4078b2190bf0f49eb38599c8590f85563e5340ea79a5d6a5709c0"
+                }
+            ],
+            "latest": {
+                "version": 2,
+                "url": "http://catalog-files/catalogs/cat-apparel-mugiyy6m.latest.json.gz",
+                "size": 1964,
+                "digest": "sha-256:f9daa3ec3be97948d990d7df1f8507e8de9bad737e87abbffacc1dc714e29b74"
+            },
+            "signature": {
+                "keyId": "76EU98UJTmvXVUkPcLH2Yrgzw8R3Rbwj11ituM1ZBbTxDzD7XXJoyP",
+                "value": "5PU78mCq5abIzsDMbQS2KpEZH07pV7+ZPyyA18g5bWFXiSyifFbY4st1cHe9U+KPLMNhYs6X77ciddBSBcw1AA=="
+            }
+        },
+        {
+            "catalogId": "onix-bap-x7m2wmy7nq-et.a.run.app/cat-apparel-mudq0kzx",
+            "entryVersion": 1,
+            "catalogType": "REGULAR",
+            "networkIds": [
+                "beckn.one/testnet",
+                "nfh.global/testnet",
+                "ion.id/ion-launch"
+            ],
+            "isActive": true,
+            "baseline": {
+                "version": 1,
+                "url": "http://catalog-files/catalogs/cat-apparel-mudq0kzx.v1.json.gz",
+                "size": 1576,
+                "digest": "sha-256:fa75fc80fefe799567aaa322a1523aea46a8047da44448e0a306a559490f94c8"
+            },
+            "latest": {
+                "version": 1,
+                "url": "http://catalog-files/catalogs/cat-apparel-mudq0kzx.latest.json.gz",
+                "size": 1576,
+                "digest": "sha-256:fa75fc80fefe799567aaa322a1523aea46a8047da44448e0a306a559490f94c8"
+            },
+            "signature": {
+                "keyId": "76EU98UJTmvXVUkPcLH2Yrgzw8R3Rbwj11ituM1ZBbTxDzD7XXJoyP",
+                "value": "bB0zQFWfHScaUEYoU+JaqXJzONQ+NtPsCc89o9PEvWC5vF5EV3V3ry9eP1GMZQEQ2ZhGjOr6UW2PeToiVwDEDQ=="
+            }
+        },
+        {
+            "catalogId": "cat-new-lifestyle",
+            "entryVersion": 3,
+            "catalogType": "REGULAR",
+            "isActive": true,
+            "baseline": {
+                "version": 1,
+                "url": "http://catalog-files/catalogs/cat-new-lifestyle.v1.json.gz",
+                "size": 2908,
+                "digest": "sha-256:60e72779f63572f6bc489c4d7fead3b1b27ef8a483f2ff50707be7ce8367263c"
+            },
+            "changes": [
+                {
+                    "fromVersion": 1,
+                    "toVersion": 2,
+                    "url": "http://catalog-files/catalogs/changes/cat-new-lifestyle.v2.changes.json.gz",
+                    "size": 1433,
+                    "digest": "sha-256:8f1a0b35598b5244c11c870f5aeeeb60ca68739eed0cdad9ca6fbce6222d0d93"
+                },
+                {
+                    "fromVersion": 2,
+                    "toVersion": 3,
+                    "url": "http://catalog-files/catalogs/changes/cat-new-lifestyle.v3.changes.json.gz",
+                    "size": 1436,
+                    "digest": "sha-256:236474ed01dee9591edeeddcebc5a3c3bf7492ce1ff2671f4fe1dc9df2492f0f"
+                }
+            ],
+            "latest": {
+                "version": 3,
+                "url": "http://catalog-files/catalogs/cat-new-lifestyle.latest.json.gz",
+                "size": 2907,
+                "digest": "sha-256:c55f4165a05cc6bf39479185df554255972bfbaaa1410d18d167440b1d0bad3a"
+            },
+            "signature": {
+                "keyId": "76EU98UJTmvXVUkPcLH2Yrgzw8R3Rbwj11ituM1ZBbTxDzD7XXJoyP",
+                "value": "i9netagLL0QZLyXlwAVgUUI2P7sAXpwoTelJtPdhj4EoORR5WoYFFyOeo/XLLZSXK+91JeMzH8mObT7S8uaUBw=="
+            }
+        },
+        {
+            "catalogId": "onix-bap-x7m2wmy7nq-et.a.run.app/cat-electronics-mudos5kq",
+            "entryVersion": 1,
+            "catalogType": "REGULAR",
+            "networkIds": [
+                "beckn.one/testnet",
+                "nfh.global/testnet",
+                "ion.id/ion-launch"
+            ],
+            "isActive": true,
+            "baseline": {
+                "version": 1,
+                "url": "http://catalog-files/catalogs/cat-electronics-mudos5kq.v1.json.gz",
+                "size": 1546,
+                "digest": "sha-256:6510aa4a42cab6053b4abcbd37662792c45e00d4883bfc4ea4d1a48b41e55c1f"
+            },
+            "latest": {
+                "version": 1,
+                "url": "http://catalog-files/catalogs/cat-electronics-mudos5kq.latest.json.gz",
+                "size": 1546,
+                "digest": "sha-256:6510aa4a42cab6053b4abcbd37662792c45e00d4883bfc4ea4d1a48b41e55c1f"
+            },
+            "signature": {
+                "keyId": "76EU98UJTmvXVUkPcLH2Yrgzw8R3Rbwj11ituM1ZBbTxDzD7XXJoyP",
+                "value": "GWMmQ/oT6m1S4WFBaAOpCtDA4l9weYgf5e/TdCIdhsM1C/50UVhQlTDVcjl6743FIHSgYIEIYJ2tJVjq7qlrAw=="
+            }
+        },
+        {
+            "catalogId": "cat-new-groceries",
+            "entryVersion": 2,
+            "catalogType": "REGULAR",
+            "isActive": true,
+            "baseline": {
+                "version": 1,
+                "url": "http://catalog-files/catalogs/cat-new-groceries.v1.json.gz",
+                "size": 2906,
+                "digest": "sha-256:691dab9cc1ad59e1e849cf412c0b96665ea8767a12a573f9cbfa0c5bb0a4c551"
+            },
+            "changes": [
+                {
+                    "fromVersion": 1,
+                    "toVersion": 2,
+                    "url": "http://catalog-files/catalogs/changes/cat-new-groceries.v2.changes.json.gz",
+                    "size": 1428,
+                    "digest": "sha-256:4e8994bd8abf9526a2daf53c72bb6cd8069e2aac5b6efb8d7a4f21650bd0aa29"
+                }
+            ],
+            "latest": {
+                "version": 2,
+                "url": "http://catalog-files/catalogs/cat-new-groceries.latest.json.gz",
+                "size": 2921,
+                "digest": "sha-256:6091f8ab6f77432075ae49ca3db859225e002c469701eb7230a8227e8a34cc1b"
+            },
+            "signature": {
+                "keyId": "76EU98UJTmvXVUkPcLH2Yrgzw8R3Rbwj11ituM1ZBbTxDzD7XXJoyP",
+                "value": "Jjo6GcP6vEkge63ZEmMy7xho8YTSmaXihkC9AgnMhK8LWMtCEDJrGhACKiSTccjG06gjaLOnJcf9BQATlr0YBQ=="
+            }
+        },
+        {
+            "catalogId": "cat-go-10-products",
+            "entryVersion": 1,
+            "catalogType": "REGULAR",
+            "isActive": true,
+            "baseline": {
+                "version": 1,
+                "url": "http://catalog-files/catalogs/cat-go-10-products.v1.json.gz",
+                "size": 2900,
+                "digest": "sha-256:bd37b9b5031b19c254f06eade1312f0c131ff906d2fe632b6921b4933d57cf41"
+            },
+            "latest": {
+                "version": 1,
+                "url": "http://catalog-files/catalogs/cat-go-10-products.latest.json.gz",
+                "size": 2900,
+                "digest": "sha-256:bd37b9b5031b19c254f06eade1312f0c131ff906d2fe632b6921b4933d57cf41"
+            },
+            "signature": {
+                "keyId": "76EU98UJTmvXVUkPcLH2Yrgzw8R3Rbwj11ituM1ZBbTxDzD7XXJoyP",
+                "value": "ZlSkBPwaLoPi8yYgCRIn4g9JfoOC1ZWR8J3PG/0L0qNFQsHUnlXZYqoz6PCpgBze/4Dc7nZrXw4lbEGVj4b9Cg=="
+            }
+        },
+        {
+            "catalogId": "onix-bap-x7m2wmy7nq-et.a.run.app/cat-electronics-muf3urj1",
+            "entryVersion": 1,
+            "catalogType": "REGULAR",
+            "networkIds": [
+                "beckn.one/testnet",
+                "nfh.global/testnet",
+                "ion.id/ion-launch"
+            ],
+            "isActive": true,
+            "baseline": {
+                "version": 1,
+                "url": "http://catalog-files/catalogs/cat-electronics-muf3urj1.v1.json.gz",
+                "size": 1555,
+                "digest": "sha-256:58c10d9eea5c412285b42608a11e4a62bc1b110fe254458e2ec114934625c417"
+            },
+            "latest": {
+                "version": 1,
+                "url": "http://catalog-files/catalogs/cat-electronics-muf3urj1.latest.json.gz",
+                "size": 1555,
+                "digest": "sha-256:58c10d9eea5c412285b42608a11e4a62bc1b110fe254458e2ec114934625c417"
+            },
+            "signature": {
+                "keyId": "76EU98UJTmvXVUkPcLH2Yrgzw8R3Rbwj11ituM1ZBbTxDzD7XXJoyP",
+                "value": "PkmKslXtNoi5bj6GzGBaJC3Z2s7hSCXqIsu+fjvCbRoqEsd8jAdfiNCGbjh+3ErSKDkiiENE6+/dUKlBNzKlAA=="
+            }
+        },
+        {
+            "catalogId": "onix-bpp-x7m2wmy7nq-et.a.run.app/cat-indonesian-snacks-001",
+            "entryVersion": 1,
+            "catalogType": "REGULAR",
+            "networkIds": [
+                "beckn.one/testnet",
+                "nfh.global/testnet",
+                "ion.id/ion-launch"
+            ],
+            "isActive": true,
+            "baseline": {
+                "version": 1,
+                "url": "http://catalog-files/catalogs/cat-indonesian-snacks-001.v1.json.gz",
+                "size": 2340,
+                "digest": "sha-256:f3848dbdc29238dcefac0bbb30b2162568d1994c2ae484a2c0b91b7edc0d9fd4"
+            },
+            "latest": {
+                "version": 1,
+                "url": "http://catalog-files/catalogs/cat-indonesian-snacks-001.latest.json.gz",
+                "size": 2340,
+                "digest": "sha-256:f3848dbdc29238dcefac0bbb30b2162568d1994c2ae484a2c0b91b7edc0d9fd4"
+            },
+            "signature": {
+                "keyId": "76EU91ME6AjAq2emEzHCJ2aNXgZAfRTF2VNRa3o6j6m7KPT7AdKmLc",
+                "value": "ZUTgYqzT2TPtbz3zYgYY1lVLt51yg+o9Me4NDKQ1QDIUVvVRI4QNQHUAgBRkHaU9SKFOSbbftyVghk1e2sfSCg=="
+            }
+        },
+        {
+            "catalogId": "cat-jayu-outdoor-gear-mtcf3s1y",
+            "entryVersion": 1,
+            "catalogType": "REGULAR",
+            "isActive": true,
+            "baseline": {
+                "version": 1,
+                "url": "https://ion-ref-app.ayushmatha.in/catalogs/cat-jayu-outdoor-gear-mtcf3s1y.v1.json.gz",
+                "size": 1222,
+                "digest": "sha-256:cda315e577a16648f1d2d0a783fad723f7e320cd813a8ddc817233e4cf96403d"
+            },
+            "latest": {
+                "version": 1,
+                "url": "https://ion-ref-app.ayushmatha.in/catalogs/cat-jayu-outdoor-gear-mtcf3s1y.latest.json.gz",
+                "size": 1222,
+                "digest": "sha-256:cda315e577a16648f1d2d0a783fad723f7e320cd813a8ddc817233e4cf96403d"
+            },
+            "signature": {
+                "keyId": "76EU98UJTmvXVUkPcLH2Yrgzw8R3Rbwj11ituM1ZBbTxDzD7XXJoyP",
+                "value": "20oZxr48+BMGqWs6aDr2PwRFYpUmSbgkBFnAVTJdxGWnhlXq+8XTLNnrEmAdM9gek17QNWoMzhcbtZ14t0MaDA=="
+            }
+        },
+        {
+            "catalogId": "sample-pn.ayushmatha.in/CAT-ION-001",
+            "entryVersion": 1,
+            "catalogType": "REGULAR",
+            "networkIds": [
+                "beckn.one/testnet",
+                "nfh.global/testnet",
+                "ion.id/ion-launch"
+            ],
+            "isActive": true,
+            "baseline": {
+                "version": 1,
+                "url": "https://ayushmatha.in/catalogs/CAT-ION-001.v1.json.gz",
+                "size": 1152,
+                "digest": "sha-256:7ff321bc9ee17a3b283696a5d1c7ac1ddbe6637c9b17393a947ac6ef54d06013"
+            },
+            "latest": {
+                "version": 1,
+                "url": "https://ayushmatha.in/catalogs/CAT-ION-001.latest.json.gz",
+                "size": 1152,
+                "digest": "sha-256:7ff321bc9ee17a3b283696a5d1c7ac1ddbe6637c9b17393a947ac6ef54d06013"
+            },
+            "signature": {
+                "keyId": "76EU8xm2zrv86SQSzeU8ckzNEfX3Pm5vJ8wtCqdXJpUezKn6u5iy6V",
+                "value": "u6z4MpvM+j8EW5n6WsDk2tk1Bj/i3UtHRkMU+sV5CAsXWWQThFEWJNZV7z+csFXH70t2DL/yfxNtEakI1vuYCQ=="
+            }
+        }
+    ]
+}

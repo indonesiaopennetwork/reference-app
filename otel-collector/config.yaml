@@ -46,7 +46,7 @@ exporters:
   debug:
     verbosity: detailed
   otlp_http/collector-network:
-    endpoint: ${env:NETWORK_COLLECTOR_ENDPOINT}
+    endpoint: ${env:NETWORK_COLLECTOR_ENDPOINT:-https://netcol.iontest.in}
     compression: gzip
 
 extensions:
