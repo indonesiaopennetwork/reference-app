@@ -145,6 +145,20 @@ function parseCatalogs(data) {
 }
 
 // Parse the on_select contract from status polling to get the BPP-confirmed quote
+// The seller prices each item with its own tax line ("PPN 12%" per product).
+// Show tax once: lines with the same title are added up and listed after the
+// items. Different rates (PPN 11% / 12%) stay separate lines.
+function combineTax(breakup) {
+  const items = [], taxes = new Map();
+  for (const b of breakup || []) {
+    if (b.type !== 'TAX') { items.push(b); continue; }
+    const t = taxes.get(b.title);
+    if (t) t.amount = Math.round((t.amount + Number(b.amount || 0)) * 100) / 100;
+    else taxes.set(b.title, { ...b, amount: Number(b.amount || 0) });
+  }
+  return [...items, ...taxes.values()];
+}
+
 function parseOnSelectContract(contract) {
   if (!contract) return null;
   const consideration = contract.consideration?.[0] ?? contract.considerations?.[0];
@@ -154,7 +168,7 @@ function parseOnSelectContract(contract) {
   return {
     total: ca.totalAmount,
     currency: ca.currency || 'IDR',
-    breakup: ca.breakup || [],
+    breakup: combineTax(ca.breakup),
     paymentMethods: ca.paymentMethods || [],
     codAvailable: commitment?.offer?.offerAttributes?.paymentConstraints?.codAvailable,
     seller: commitment?.offer?.provider?.descriptor?.name,
@@ -1234,7 +1248,7 @@ function parseContractDetail(contract) {
   const consAttr = consideration?.considerationAttributes || {};
   const price = consAttr.totalAmount ?? null;
   const currency = consAttr.currency || 'IDR';
-  const breakup = consAttr.breakup || [];
+  const breakup = combineTax(consAttr.breakup);
 
   // Participants
   const participants = contract.participants || [];
