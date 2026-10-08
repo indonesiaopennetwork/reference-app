@@ -10,10 +10,17 @@ log:
     - module_id
 http:
   port: 8081
+  # write: 90 matches bap-application's own client timeout (see
+  # clientsvc/service.go) -- select/init/confirm go through two
+  # cold-Extended-Schema-cache-prone hops (this one, then onix-bpp's own)
+  # before bpp-application is even reached; onix-bap's own HTTP server was
+  # closing the connection at write:30 even though the real exchange
+  # completed fine a bit later, since this is a SERVER-side write deadline,
+  # independent of any client-side timeout.
   timeout:
-    read: 30
-    write: 30
-    idle: 30
+    read: 90
+    write: 90
+    idle: 90
 pluginManager:
   root: ./plugins
 
