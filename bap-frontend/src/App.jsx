@@ -7,12 +7,13 @@ import {
   Star, Info, Receipt, Store, MapPin, Calendar, Zap,
   User, Phone, Home, ChevronLeft, Banknote,
   Ban, MessageSquare, RefreshCw, ThumbsUp,
-  History, Wand2, ExternalLink, ChevronDown, ChevronUp, LogOut,
+  History, Wand2, ExternalLink, ChevronDown, ChevronUp,
   Compass, AlertCircle, Copy,
 } from 'lucide-react';
 import Tour from './Tour.jsx';
 import { useI18n, rich, LanguageToggle, tNow, localeNow } from './i18n.jsx';
-import { captureTokenFromUrl, getToken, getProviderId, clearToken, redirectToLogin, logout, basePath } from './auth.js';
+import { captureTokenFromUrl, getToken, getIdToken, getProviderId, clearToken, redirectToLogin, basePath } from './auth.js';
+import UserProfileMenu from './UserProfileMenu.jsx';
 
 // BPP target, network ID, and BAP identity are all server-side config (BAP .env).
 // The frontend only needs the API base path.
@@ -2643,7 +2644,7 @@ export default function App() {
           </div>
 
           <a
-            href={`${window.__env__?.BPP_ADMIN_URL || import.meta.env.VITE_BPP_ADMIN_URL || "#"}?token=${encodeURIComponent(getToken() || '')}`}
+            href={`${window.__env__?.BPP_ADMIN_URL || import.meta.env.VITE_BPP_ADMIN_URL || "#"}?token=${encodeURIComponent(getToken() || '')}&id_token=${encodeURIComponent(getIdToken() || '')}`}
             target="_blank"
             rel="noopener noreferrer" title={t('BPP APP')}
             className="shrink-0 ml-auto sm:ml-0 flex items-center gap-2 px-3 py-2 rounded-xl transition-all text-sm font-medium text-emerald-400 hover:text-emerald-300 border border-emerald-500/20 hover:border-emerald-500/40 bg-emerald-500/10"
@@ -2661,14 +2662,6 @@ export default function App() {
           </button>
 
           <span className="hidden sm:inline-flex"><LanguageToggle /></span>
-
-          <button
-            onClick={logout} title={t('Log out')}
-            className="shrink-0 flex items-center gap-2 px-3 py-2 rounded-xl transition-all text-sm font-medium text-rose-400 hover:text-rose-300 border border-rose-500/20 hover:border-rose-500/40 bg-rose-500/10"
-          >
-            <LogOut className="w-4 h-4" />
-            <span className="hidden xl:block">{t('Log out')}</span>
-          </button>
 
           <button
             onClick={() => setIsOrdersOpen(true)} data-tour="orders-button" title={t('Orders')}
@@ -2691,6 +2684,8 @@ export default function App() {
               </span>
             )}
           </button>
+
+          <UserProfileMenu />
         </div>
       </header>
 

@@ -7,11 +7,12 @@ import {
   Upload, Plus, Trash2, Eye, ArrowUpRight, Filter, Search,
   Activity, Zap, Store, Calendar, Tag, BarChart2, Inbox,
   ArrowRight, Circle, Star, Ticket, Ban, Wand2,
-  BookOpen, FolderOpen, Send, ArrowLeft, ExternalLink, LogOut,
+  BookOpen, FolderOpen, Send, ArrowLeft, ExternalLink,
   ChevronDown, Copy, Check, Scale, Pencil, Compass, Lock,
 } from 'lucide-react'
-import { captureTokenFromUrl, getToken, clearToken, redirectToLogin, logout, basePath } from './auth.js'
+import { captureTokenFromUrl, getToken, getIdToken, clearToken, redirectToLogin, basePath } from './auth.js'
 import Tour from './Tour.jsx'
+import UserProfileMenu from './UserProfileMenu.jsx'
 import { useI18n, rich, LanguageToggle, tNow, localeNow } from './i18n.jsx'
 
 const API_BASE = `${basePath}api/v1`
@@ -340,19 +341,14 @@ function Sidebar({ active, onNav, open, onClose, onTour }) {
           <Compass size={13} className="shrink-0" /> <span className="truncate">{t('Take the tour')}</span>
         </button>
         <a
-          href={`${window.__env__?.BAP_URL || import.meta.env.VITE_BAP_URL || "#"}?token=${encodeURIComponent(getToken() || '')}`}
+          href={`${window.__env__?.BAP_URL || import.meta.env.VITE_BAP_URL || "#"}?token=${encodeURIComponent(getToken() || '')}&id_token=${encodeURIComponent(getIdToken() || '')}`}
           target="_blank"
           rel="noopener noreferrer"
           className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-emerald-400 transition-all bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 hover:border-emerald-500/40"
         >
           <ExternalLink size={13} /> {t('Go to BAP APP')}
         </a>
-        <button
-          onClick={logout}
-          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-rose-400 transition-all bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 hover:border-rose-500/40"
-        >
-          <LogOut size={13} /> {t('Log out')}
-        </button>
+        <UserProfileMenu />
         <p className="text-[10px] text-slate-600 text-center">Beckn Protocol v2.0 · ION Retail</p>
       </div>
     </>
