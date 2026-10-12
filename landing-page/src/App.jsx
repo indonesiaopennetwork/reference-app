@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { LogOut } from 'lucide-react'
 import { config, basePath } from './config.js'
-import { startLogin, handleCallback, getValidToken, clearToken, logout } from './oidc.js'
+import { startLogin, handleCallback, getValidToken, getIdToken, clearToken, logout } from './oidc.js'
 
 async function bootstrap(token, businessName) {
   const res = await fetch(`${config.bppApiUrl}/api/v1/auth/bootstrap`, {
@@ -144,8 +144,12 @@ function SellerProfileForm({ onSubmit }) {
 }
 
 function Landing({ token, providerId }) {
-  const buyerUrl = `${config.bapUrl}/?token=${encodeURIComponent(token)}${providerId ? `&providerId=${encodeURIComponent(providerId)}` : ''}`
-  const sellerUrl = `${config.bppUrl}/?token=${encodeURIComponent(token)}${providerId ? `&providerId=${encodeURIComponent(providerId)}` : ''}`
+  // Forwarded so bap-frontend/bpp-frontend can decode profile claims
+  // (name/email) locally -- see their own auth.js/UserProfileMenu.jsx.
+  const idToken = getIdToken()
+  const idTokenParam = idToken ? `&id_token=${encodeURIComponent(idToken)}` : ''
+  const buyerUrl = `${config.bapUrl}/?token=${encodeURIComponent(token)}${idTokenParam}${providerId ? `&providerId=${encodeURIComponent(providerId)}` : ''}`
+  const sellerUrl = `${config.bppUrl}/?token=${encodeURIComponent(token)}${idTokenParam}${providerId ? `&providerId=${encodeURIComponent(providerId)}` : ''}`
   return (
     <div className="relative min-h-screen flex items-center justify-center p-6">
       <button
