@@ -162,3 +162,10 @@ export function getValidToken() {
   if (!token || Date.now() > expiresAt - 60_000) return null
   return token
 }
+
+// Returns the stored ID token, or null if missing. Forwarded to
+// bap-frontend/bpp-frontend on cross-nav so they can decode profile claims
+// (name/email) locally -- see App.jsx's buyerUrl/sellerUrl.
+export function getIdToken() {
+  return localStorage.getItem(STORAGE_IDTOKEN_KEY)
+}

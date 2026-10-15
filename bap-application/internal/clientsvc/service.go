@@ -51,7 +51,12 @@ func NewClientService(pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.Log
 		pool:     pool,
 		cfg:      cfg,
 		lh:       lh,
-		client:   httpclient.New(30 * time.Second),
+		// 90s (not a round-trip-sized 5-10s) for the same reason as
+		// discoverCallbackTimeout above: select/init/confirm go through TWO
+		// cold-Extended-Schema-cache-prone hops synchronously (onix-bap, then
+		// onix-bpp) before bpp-application is even reached. A measured cold
+		// round trip took 54s end-to-end; 90s leaves real margin above that.
+		client:   httpclient.New(90 * time.Second),
 		registry: registry,
 	}
 }
@@ -1638,7 +1643,9 @@ func (s *ClientService) newContext(action, txnID, msgID, bppID, bppURI string) B
 		BppID:         bppID,
 		BppURI:        bppURI,
 		NetworkID:     s.cfg.NetworkID,
-		TTL:           "PT30S",
+		// Matches the client timeout above (see its comment) -- advertises
+		// the same real budget this call is actually given.
+		TTL: "PT90S",
 	}
 }
 

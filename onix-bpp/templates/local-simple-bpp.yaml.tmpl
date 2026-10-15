@@ -10,10 +10,15 @@ log:
     - module_id
 http:
   port: 8082
+  # write: 90 matches bap-application's own client timeout (see
+  # clientsvc/service.go) and onix-bap's identical setting -- see that
+  # file's comment: this is a SERVER-side write deadline, independent of
+  # any client-side timeout, and was cutting the connection before a
+  # cold-Extended-Schema-cache select/init/confirm could finish.
   timeout:
-    read: 30
-    write: 30
-    idle: 30
+    read: 90
+    write: 90
+    idle: 90
 pluginManager:
   root: ./plugins
 

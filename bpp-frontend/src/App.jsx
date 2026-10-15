@@ -7,12 +7,13 @@ import {
   Upload, Plus, Trash2, Eye, ArrowUpRight, Filter, Search,
   Activity, Zap, Store, Calendar, Tag, BarChart2, Inbox,
   ArrowRight, Circle, Star, Ticket, Ban, Wand2,
-  BookOpen, FolderOpen, Send, ArrowLeft, ExternalLink, LogOut,
+  BookOpen, FolderOpen, Send, ArrowLeft, ExternalLink,
   ChevronDown, Copy, Check, Scale, Pencil, Compass, Lock,
 } from 'lucide-react'
-import { captureTokenFromUrl, getToken, clearToken, redirectToLogin, logout, basePath } from './auth.js'
+import { captureTokenFromUrl, getToken, getIdToken, clearToken, redirectToLogin, basePath } from './auth.js'
 import Tour from './Tour.jsx'
 import { useReconSelection, inDateRange } from './reconSelection.js'
+import UserProfileMenu from './UserProfileMenu.jsx'
 import { useI18n, rich, LanguageToggle, tNow, localeNow } from './i18n.jsx'
 
 const API_BASE = `${basePath}api/v1`
@@ -273,11 +274,11 @@ const tourSteps = t => [
   {
     eyebrow: t('Publish · {n} of 4', { n: 4 }), target: 'publish', until: () => !!document.querySelector('[data-tour="published-badge"]'), waitLabel: t('Click Publish'),
     title: t('Publish to Network'),
-    body: <><p>{rich(t('Your catalog now has a product with an offer. Click <b>Publish to Network</b> and confirm.'))}</p><p className="text-slate-400">{t('Buyer apps on the network can then find it and place orders. Once published, the catalog is locked and can no longer be edited.')}</p></>
+    body: <><p>{rich(t('Your catalog now has a product with an offer. Click <b>Publish to Network</b> and confirm.'))}</p><p className="text-slate-400">{t('Buyer apps on the network can then find it and place orders. You can keep editing and publish updates any time.')}</p></>
   },
   {
     eyebrow: t('Published'), target: 'published-badge', title: t("You're live"),
-    body: <><p>{rich(t('Your catalog is <b>Published</b>: buyers can find it now.'))}</p><p className="text-slate-400">{t('A published catalog is locked: its products and offers can no longer be changed. To sell something different, create a new catalog the same way.')}</p></>
+    body: <><p>{rich(t('Your catalog is <b>Published</b>: buyers can find it now.'))}</p><p className="text-slate-400">{t('You can still add products, edit existing ones, and click Update on Network any time to push your changes live.')}</p></>
   },
 
   {
@@ -366,19 +367,14 @@ function Sidebar({ active, onNav, open, onClose, onTour }) {
           <Compass size={13} className="shrink-0" /> <span className="truncate">{t('Take the tour')}</span>
         </button>
         <a
-          href={`${window.__env__?.BAP_URL || import.meta.env.VITE_BAP_URL || "#"}?token=${encodeURIComponent(getToken() || '')}`}
+          href={`${window.__env__?.BAP_URL || import.meta.env.VITE_BAP_URL || "#"}?token=${encodeURIComponent(getToken() || '')}&id_token=${encodeURIComponent(getIdToken() || '')}`}
           target="_blank"
           rel="noopener noreferrer"
           className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-emerald-400 transition-all bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 hover:border-emerald-500/40"
         >
           <ExternalLink size={13} /> {t('Go to BAP APP')}
         </a>
-        <button
-          onClick={logout}
-          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-rose-400 transition-all bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 hover:border-rose-500/40"
-        >
-          <LogOut size={13} /> {t('Log out')}
-        </button>
+        <UserProfileMenu />
         <p className="text-[10px] text-slate-600 text-center">Beckn Protocol v2.0 · ION Retail</p>
       </div>
     </>
@@ -3247,22 +3243,14 @@ function CatalogsPage({ onNav }) {
                         className="px-2.5 py-1 rounded-md text-xs font-medium border border-white/[0.10] text-slate-300 hover:text-white hover:border-white/30 transition-colors flex items-center gap-1">
                         <Eye size={11} /> {t('View')}
                       </button>
-                      {cat.isPublished ? (
-                        <span className="px-2.5 py-1 text-xs text-slate-500 flex items-center gap-1" title={t('Published catalogs can no longer be edited')}>
-                          <Lock size={11} /> {t('Locked')}
-                        </span>
-                      ) : (
-                        <>
-                          <button onClick={() => onNav('add_product', { catalogId: cat.id })}
-                            className="px-2.5 py-1 rounded-md text-xs font-medium border border-blue-500/30 text-blue-400 hover:bg-blue-500/10 transition-colors flex items-center gap-1">
-                            <Plus size={11} /> {t('Product')}
-                          </button>
-                          <button onClick={() => handlePublish(cat.id)} disabled={publishing === cat.id}
-                            className="px-2.5 py-1 rounded-md text-xs font-medium border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 transition-colors flex items-center gap-1 disabled:opacity-40">
-                            {publishing === cat.id ? <RefreshCw size={11} className="animate-spin" /> : <Send size={11} />} {t('Publish')}
-                          </button>
-                        </>
-                      )}
+                      <button onClick={() => onNav('add_product', { catalogId: cat.id })}
+                        className="px-2.5 py-1 rounded-md text-xs font-medium border border-blue-500/30 text-blue-400 hover:bg-blue-500/10 transition-colors flex items-center gap-1">
+                        <Plus size={11} /> {t('Product')}
+                      </button>
+                      <button onClick={() => handlePublish(cat.id)} disabled={publishing === cat.id}
+                        className="px-2.5 py-1 rounded-md text-xs font-medium border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 transition-colors flex items-center gap-1 disabled:opacity-40">
+                        {publishing === cat.id ? <RefreshCw size={11} className="animate-spin" /> : <Send size={11} />} {cat.isPublished ? t('Update') : t('Publish')}
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -3461,9 +3449,6 @@ function CatalogDetailPage({ onNav, catalogId }) {
     (o.resourceIds || []).forEach(rid => { offerByResourceId[rid] = o })
   })
 
-  // A published catalog is locked: no new or edited products or offers.
-  const locked = !!cat.isPublished
-
   const handlePublish = async () => {
     if (!window.confirm(t('Publish this catalog to the Beckn network?'))) return
     setPublishing(true)
@@ -3521,29 +3506,22 @@ function CatalogDetailPage({ onNav, catalogId }) {
             </>
           )}
         </div>
-        {locked ? (
-          <span className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-slate-400 border border-white/[0.08]"
-            title={t('Published catalogs can no longer be edited')}>
-            <Lock size={13} /> {t('Locked')}
-          </span>
-        ) : (
-          <div className="flex gap-2">
-            <button onClick={() => onNav('add_offer', { catalogId })}
-              className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold border border-slate-500/30 text-slate-400 hover:bg-slate-500/10 transition-colors">
-              <Tag size={14} /> {t('Add Offer')}
-            </button>
-            <button data-tour="add-product" onClick={() => onNav('add_product', { catalogId })}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold border border-blue-500/30 text-blue-400 hover:bg-blue-500/10 transition-colors">
-              <Plus size={14} /> {t('Add Product')}
-            </button>
-            <button data-tour="publish" onClick={handlePublish} disabled={publishing}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white shadow-lg transition-all hover:scale-105 active:scale-95 disabled:opacity-50"
-              style={{ background: BRAND }}>
-              {publishing ? <RefreshCw size={14} className="animate-spin" /> : <Send size={14} />}
-              {publishing ? t('Publishing…') : t('Publish to Network')}
-            </button>
-          </div>
-        )}
+        <div className="flex gap-2">
+          <button onClick={() => onNav('add_offer', { catalogId })}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold border border-slate-500/30 text-slate-400 hover:bg-slate-500/10 transition-colors">
+            <Tag size={14} /> {t('Add Offer')}
+          </button>
+          <button data-tour="add-product" onClick={() => onNav('add_product', { catalogId })}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold border border-blue-500/30 text-blue-400 hover:bg-blue-500/10 transition-colors">
+            <Plus size={14} /> {t('Add Product')}
+          </button>
+          <button data-tour="publish" onClick={handlePublish} disabled={publishing}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white shadow-lg transition-all hover:scale-105 active:scale-95 disabled:opacity-50"
+            style={{ background: BRAND }}>
+            {publishing ? <RefreshCw size={14} className="animate-spin" /> : <Send size={14} />}
+            {publishing ? t('Publishing…') : cat.isPublished ? t('Update on Network') : t('Publish to Network')}
+          </button>
+        </div>
       </div>
 
       {error && <ErrorBox message={error} />}
@@ -3582,19 +3560,16 @@ function CatalogDetailPage({ onNav, catalogId }) {
         <div className="flex items-center justify-between mb-4">
           <div>
             <p className="text-sm font-bold text-slate-200">{t('Products')}</p>
-            {locked && <p className="text-[11px] text-slate-500">{t('Published catalogs can no longer be edited. To sell something different, create a new catalog.')}</p>}
           </div>
           <div className="flex gap-2">
             <button onClick={reload} className="p-1.5 rounded-lg border border-white/[0.08] text-slate-500 hover:text-white transition-colors">
               <RefreshCw size={13} />
             </button>
-            {!locked && (
-              <button onClick={() => onNav('add_product', { catalogId })}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition-all hover:scale-105"
-                style={{ background: BRAND }}>
-                <Plus size={12} /> {t('Add Product')}
-              </button>
-            )}
+            <button onClick={() => onNav('add_product', { catalogId })}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition-all hover:scale-105"
+              style={{ background: BRAND }}>
+              <Plus size={12} /> {t('Add Product')}
+            </button>
           </div>
         </div>
         {loading ? <LoadingSpinner /> : (
@@ -3634,7 +3609,7 @@ function CatalogDetailPage({ onNav, catalogId }) {
                       {offer?.validityStart ? `${fmtDate(offer.validityStart)} – ${fmtDate(offer.validityEnd)}` : '—'}
                     </td>
                     <td className="px-4 py-3">
-                      {!locked && <div className="flex justify-end gap-1.5">
+                      <div className="flex justify-end gap-1.5">
                         <button onClick={() => onNav('edit_product', { catalogId, editResourceId: r.id })}
                           className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold border border-white/[0.08] text-slate-300 hover:text-white hover:border-white/20 transition-colors whitespace-nowrap">
                           <Pencil size={11} /> {t('Edit product')}
@@ -3650,7 +3625,7 @@ function CatalogDetailPage({ onNav, catalogId }) {
                             <Plus size={11} /> {t('Add offer')}
                           </button>
                         )}
-                      </div>}
+                      </div>
                     </td>
                   </tr>
                 )
@@ -3658,7 +3633,7 @@ function CatalogDetailPage({ onNav, catalogId }) {
               {!resources.length && (
                 <tr><td colSpan={6} className="px-4 py-12 text-center text-slate-500">
                   {t('No products yet.')}{' '}
-                  {!locked && <button onClick={() => onNav('add_product', { catalogId })} className="text-blue-400 hover:underline">{t('Add the first product →')}</button>}
+                  <button onClick={() => onNav('add_product', { catalogId })} className="text-blue-400 hover:underline">{t('Add the first product →')}</button>
                 </td></tr>
               )}
             </tbody>
