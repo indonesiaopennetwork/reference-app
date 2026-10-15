@@ -17,6 +17,13 @@
 #   GCP_DEPLOY_SERVICE_ACCOUNT      the service account the workflow acts as
 # See docs/deploy-github-actions.md for creating the identity pool and the
 # deploy service account (no JSON key is stored in GitHub).
+#
+# App settings: the "App settings" job sets two repository variables on the
+# Cloud Run services after every deploy (see docs/deploy-github-actions.md):
+#   SETTLEMENT_WINDOW                     on bpp
+#   RECONCILE_WAIT_FOR_SETTLEMENT_WINDOW  on bap and bpp
+# Run the workflow by hand with "Apply app settings only" to set them without
+# building, migrating or deploying anything.
 
 name: Deploy
 
@@ -31,6 +38,10 @@ on:
         default: false
       run_migrations:
         description: Run both migration jobs
+        type: boolean
+        default: false
+      apply_app_settings_only:
+        description: Apply app settings only (no builds, migrations or deploys)
         type: boolean
         default: false
 
@@ -51,6 +62,9 @@ env:
 jobs:
   changes:
     name: What changed
+    # Skipped on an "Apply app settings only" run. migrate, deploy and
+    # landing-files all need this job's success, so they are skipped too.
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.apply_app_settings_only) }}
     runs-on: ubuntu-latest
     outputs:
       services: ${{ steps.plan.outputs.services }}
@@ -150,7 +164,7 @@ jobs:
   migrate:
     name: Migrate ${{ matrix.app }}
     needs: changes
-    if: needs.changes.outputs.migrations != '[]'
+    if: needs.changes.result == 'success' && needs.changes.outputs.migrations != '[]'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: true
@@ -216,7 +230,7 @@ jobs:
   landing-files:
     name: Upload ion-landing-page files
     needs: changes
-    if: needs.changes.outputs.landing_files == 'true'
+    if: needs.changes.result == 'success' && needs.changes.outputs.landing_files == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -227,3 +241,119 @@ jobs:
       - uses: google-github-actions/setup-gcloud@v2
       - name: Upload index.html
         run: gcloud storage cp ion-landing-page/index.html "gs://$PROJECT_ID-ion-landing-page-static/index.html"
+
+  app-settings:
+    name: App settings
+    needs: [changes, migrate, deploy]
+    # On an "Apply app settings only" run, on its own (changes, migrate and
+    # deploy are skipped). Otherwise after the rollout -- so the two never
+    # update a service at the same time -- and not after a failed migration
+    # or rollout. !cancelled() lets it run when its needs were skipped.
+    if: >-
+      !cancelled() && (
+        (github.event_name == 'workflow_dispatch' && inputs.apply_app_settings_only) ||
+        (needs.changes.result == 'success' &&
+         (needs.migrate.result == 'success' || needs.migrate.result == 'skipped') &&
+         (needs.deploy.result == 'success' || needs.deploy.result == 'skipped'))
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write # Workload Identity Federation
+    env:
+      SETTLEMENT_WINDOW: ${{ vars.SETTLEMENT_WINDOW }}
+      RECONCILE_WAIT_FOR_SETTLEMENT_WINDOW: ${{ vars.RECONCILE_WAIT_FOR_SETTLEMENT_WINDOW }}
+    steps:
+      # Before signing in, so nothing is changed when a variable is wrong.
+      - name: Check the settings
+        env:
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          GCP_DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+        run: |
+          set -euo pipefail
+          errors=0
+          for v in GCP_PROJECT_ID GCP_WORKLOAD_IDENTITY_PROVIDER GCP_DEPLOY_SERVICE_ACCOUNT; do
+            if [ -z "${!v:-}" ]; then
+              echo "::error::Repository variable $v is not set (see docs/deploy-github-actions.md)."
+              errors=1
+            fi
+          done
+          # SETTLEMENT_WINDOW: an ISO 8601 duration, as the app reads it (e.g. PT2M, P1D).
+          if [ -z "${SETTLEMENT_WINDOW:-}" ]; then
+            echo "::error::Repository variable SETTLEMENT_WINDOW is not set. Set it, e.g. gh variable set SETTLEMENT_WINDOW --body 'PT2M'."
+            errors=1
+          elif ! grep -Eq '^P([0-9]+[YMWD])*(T([0-9]+[HMS])+)?$' <<<"$SETTLEMENT_WINDOW" ||
+               [ "$SETTLEMENT_WINDOW" = "P" ]; then
+            echo "::error::SETTLEMENT_WINDOW='$SETTLEMENT_WINDOW' is not an ISO 8601 duration such as PT2M or P1D."
+            errors=1
+          fi
+          # RECONCILE_WAIT_FOR_SETTLEMENT_WINDOW: true or false.
+          if [ -z "${RECONCILE_WAIT_FOR_SETTLEMENT_WINDOW:-}" ]; then
+            echo "::error::Repository variable RECONCILE_WAIT_FOR_SETTLEMENT_WINDOW is not set. Set it, e.g. gh variable set RECONCILE_WAIT_FOR_SETTLEMENT_WINDOW --body 'false'."
+            errors=1
+          elif [ "$RECONCILE_WAIT_FOR_SETTLEMENT_WINDOW" != "true" ] && [ "$RECONCILE_WAIT_FOR_SETTLEMENT_WINDOW" != "false" ]; then
+            echo "::error::RECONCILE_WAIT_FOR_SETTLEMENT_WINDOW='$RECONCILE_WAIT_FOR_SETTLEMENT_WINDOW' must be true or false."
+            errors=1
+          fi
+          exit "$errors"
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Update the services
+        run: |
+          set -euo pipefail
+          # The settings per Cloud Run service and container (the app's
+          # container; each service also runs a cloudsql-proxy sidecar).
+          targets=(
+            "bpp|bpp|SETTLEMENT_WINDOW=$SETTLEMENT_WINDOW RECONCILE_WAIT_FOR_SETTLEMENT_WINDOW=$RECONCILE_WAIT_FOR_SETTLEMENT_WINDOW"
+            "bap|bap|RECONCILE_WAIT_FOR_SETTLEMENT_WINDOW=$RECONCILE_WAIT_FOR_SETTLEMENT_WINDOW"
+          )
+
+          # The container's plain env values as NAME=value lines (values from
+          # Secret Manager are left out). Fails if the container is missing.
+          current_env() {
+            gcloud run services describe "$1" --project="$PROJECT_ID" --region="$REGION" --format=json |
+              jq -er --arg c "$2" '
+                [.spec.template.spec.containers[] | select(.name == $c)]
+                | if length == 0 then error("container \($c) not found") else .[0] end
+                | (.env // [])[] | select(.value != null) | "\(.name)=\(.value)"'
+          }
+
+          # Read both services first, so a missing service or container stops
+          # the job before either is changed.
+          declare -A updates=()
+          for t in "${targets[@]}"; do
+            IFS='|' read -r service container settings <<<"$t"
+            if ! current="$(current_env "$service" "$container")"; then
+              echo "::error::Could not read Cloud Run service $service (container $container) in $PROJECT_ID/$REGION."
+              exit 1
+            fi
+            changed=()
+            for kv in $settings; do
+              grep -qxF "$kv" <<<"$current" || changed+=("$kv")
+            done
+            updates[$service]="$container|$(IFS=,; echo "${changed[*]:-}")"
+          done
+
+          # Then update the ones that differ: --update-env-vars changes only
+          # these names and keeps every other variable, in one new revision.
+          for t in "${targets[@]}"; do
+            IFS='|' read -r service _ _ <<<"$t"
+            IFS='|' read -r container list <<<"${updates[$service]}"
+            if [ -z "$list" ]; then
+              echo "$service: already up to date, no new revision" | tee -a "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
+            echo "$service: setting $list" | tee -a "$GITHUB_STEP_SUMMARY"
+            if ! gcloud run services update "$service" --project="$PROJECT_ID" --region="$REGION" \
+                 --container="$container" --update-env-vars="$list" --quiet; then
+              echo "::error::Updating $service failed; see the gcloud output above."
+              exit 1
+            fi
+          done
