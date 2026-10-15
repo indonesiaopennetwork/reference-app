@@ -352,7 +352,7 @@ jobs:
             fi
             echo "$service: setting $list" | tee -a "$GITHUB_STEP_SUMMARY"
             if ! gcloud run services update "$service" --project="$PROJECT_ID" --region="$REGION" \
-                 --container="$container" --update-env-vars="$list" --quiet; then
+                 --container="$container" --update-env-vars="$list"; then
               echo "::error::Updating $service failed; see the gcloud output above."
               exit 1
             fi
