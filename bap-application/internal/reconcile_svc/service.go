@@ -45,6 +45,24 @@ const (
 // stated none (a contract agreed before the terms were carried).
 var defaultTerms = Terms{Basis: "AFTER_DELIVERY", Window: "P1D"}
 
+// terms are defaultTerms with this BAP's own payout account (see
+// Terms.Account).
+func (s *Service) terms() Terms {
+	t := defaultTerms
+	t.Account = s.account()
+	return t
+}
+
+// account is this BAP's payout account (for the finder fee).
+func (s *Service) account() map[string]any {
+	return map[string]any{
+		"holderRole":    "BAP",
+		"bankCode":      s.cfg.SettlementBankCode,
+		"accountNumber": s.cfg.SettlementAccountNumber,
+		"accountName":   s.cfg.SettlementAccountName,
+	}
+}
+
 // ErrNothingDue is returned when no contract with a BPP is due.
 var ErrNothingDue = errors.New("no contracts are due for reconciliation with this seller")
 
@@ -243,7 +261,7 @@ func (s *Service) verify(ctx context.Context, c, received map[string]any, settle
 	if err != nil {
 		return disagree(received, "UNKNOWN_CONTRACT", "the buyer app has no record of this contract"), nil, nil
 	}
-	f, err := contractFigures(own.contract, defaultTerms)
+	f, err := contractFigures(own.contract, s.terms())
 	if err != nil || f.SettlementID != settlementID {
 		return disagree(received, "UNKNOWN_SETTLEMENT", fmt.Sprintf("settlement %s is not this contract's payment", settlementID)), nil, nil
 	}
@@ -347,6 +365,7 @@ func (s *Service) Contracts(ctx context.Context, bppID string, now time.Time) ([
 		if !assess(&d, deliveredAt, snapAt, now) {
 			continue
 		}
+		d.Figures.Accounts = withAccount(d.Figures.Accounts, s.account())
 		d.windowDue = d.Due
 		if s.cfg.ReconcileBeforeWindow { // RECONCILE_WAIT_FOR_SETTLEMENT_WINDOW=false
 			d.Due = true

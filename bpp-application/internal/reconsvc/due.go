@@ -168,7 +168,7 @@ func (s *Service) assess(d *DueContract, deliveredAt, cancelledAt *time.Time, no
 		d.ReconciliationStatus = status
 		d.ReconciliationID = str(pa["reconciliationId"])
 	}
-	f, err := contractFigures(d.contract, Terms{Basis: s.cfg.SettlementBasis, Window: s.cfg.SettlementWindow})
+	f, err := contractFigures(d.contract, s.terms())
 	if err != nil {
 		return false
 	}
