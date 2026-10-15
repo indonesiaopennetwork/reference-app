@@ -20,6 +20,11 @@ import (
 	"github.com/ion/winroom/bpp/internal/httpclient"
 )
 
+// actionCatalogRetire is a 'catalog_retire' beckn_action -- added by
+// migration 033, ahead of this committed db/sqlc generated code (same
+// lag/cast pattern as reconsvc's actionReconcile).
+const actionCatalogRetire = dbsqlc.BecknAction("catalog_retire")
+
 // catalogOwnedByProvider reports whether catalogID belongs to providerID
 // (and this bpp). Every handler below that mutates or reads a specific
 // catalog by ID must check this first -- catalogID always comes from the
@@ -228,16 +233,22 @@ func (h *Handler) HandleCreateCatalog(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	} else if !owned {
+		// Deliberately no "AND deleted_at IS NULL" here -- a retired
+		// (soft-deleted) catalog ID must never be reusable either (Beckn
+		// spec NFH-014 §10.5 CON-TBD-26: a retired catalogId can never be
+		// re-listed, even under a new publish), so this also has to catch
+		// IDs this same provider previously deleted, not just another
+		// provider's still-live one.
 		var alreadyExists bool
 		if err := h.pool.QueryRow(ctx,
-			`SELECT EXISTS(SELECT 1 FROM catalogs WHERE id = $1 AND bpp_id = $2 AND deleted_at IS NULL)`,
+			`SELECT EXISTS(SELECT 1 FROM catalogs WHERE id = $1 AND bpp_id = $2)`,
 			req.ID, h.cfg.BppID,
 		).Scan(&alreadyExists); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 		if alreadyExists {
-			c.JSON(http.StatusConflict, gin.H{"error": "a catalog with this ID already exists"})
+			c.JSON(http.StatusConflict, gin.H{"error": "a catalog with this ID already exists or was previously deleted and cannot be reused"})
 			return
 		}
 	}
@@ -904,6 +915,140 @@ func (h *Handler) HandlePublishCatalog(c *gin.Context) {
 		catalogID, h.cfg.BppID)
 
 	c.JSON(http.StatusOK, gin.H{"status": "ACK", "message": "Catalog published to CDS"})
+}
+
+// ---------------------------------------------------------------------------
+// DELETE /api/v1/catalogs/:id  — retire (if ever published) and soft-delete
+//
+// Retirement is one-way (NFH-014 §10.4): once a catalog has been published,
+// deleting it tells onix-catalog-publish's catalog-publisher plugin to
+// write a tombstone entry (a "retire" sibling of catalogs/publishDirectives
+// on its own publish request, not a beckn.yaml field) so discovery-service
+// stops serving it -- and this catalog id can never be reused afterwards
+// (see HandleCreateCatalog's duplicate-id check, which deliberately ignores
+// deleted_at so a retired id stays blocked forever).
+// ---------------------------------------------------------------------------
+
+func (h *Handler) HandleDeleteCatalog(c *gin.Context) {
+	catalogID := c.Param("id")
+	ctx := c.Request.Context()
+
+	if owned, err := h.catalogOwnedByProvider(ctx, catalogID, auth.ProviderIDFromContext(c)); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	} else if !owned {
+		c.JSON(http.StatusNotFound, gin.H{"error": "catalog not found"})
+		return
+	}
+
+	var publishedAt pgtype.Timestamptz
+	if err := h.pool.QueryRow(ctx,
+		`SELECT network_published_at FROM catalogs WHERE id = $1 AND bpp_id = $2 AND deleted_at IS NULL`,
+		catalogID, h.cfg.BppID,
+	).Scan(&publishedAt); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "catalog not found"})
+		return
+	}
+
+	if publishedAt.Valid {
+		if h.cfg.CDSPublishURL == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "CDS_PUBLISH_URL not configured"})
+			return
+		}
+
+		start := time.Now()
+		txID := uuid.New()
+		msgID := uuid.New()
+
+		becknReq := catalog.OnixPublishRequest{
+			Context: catalog.BecknContext{
+				Version:       "2.0.0",
+				Action:        "catalog/publish",
+				Timestamp:     time.Now().UTC().Format(time.RFC3339),
+				TransactionID: txID.String(),
+				MessageID:     msgID.String(),
+				BppID:         h.cfg.BppID,
+				BppURI:        h.cfg.PublishedBppURI(),
+				NetworkID:     h.cfg.NetworkID,
+			},
+			Retire: []string{h.cfg.BppID + "/" + catalogID},
+		}
+
+		body, _ := json.Marshal(becknReq)
+
+		var respBody []byte
+		var callErr error
+		defer func() {
+			var errMsg *string
+			if callErr != nil {
+				errMsg = strPtr(callErr.Error())
+			}
+			ackStatus := dbsqlc.NullAckStatus{AckStatus: dbsqlc.AckStatusACK, Valid: true}
+			if callErr != nil {
+				ackStatus = dbsqlc.NullAckStatus{AckStatus: dbsqlc.AckStatusNACK, Valid: true}
+			}
+			dur := int32(time.Since(start).Milliseconds())
+			if err := dbsqlc.New(h.pool).InsertMessageLog(context.Background(), dbsqlc.InsertMessageLogParams{
+				TransactionID:        pgtype.UUID{Bytes: txID, Valid: true},
+				MessageID:            msgID,
+				Action:               actionCatalogRetire,
+				Direction:            dbsqlc.MessageDirectionOUTBOUND,
+				Url:                  strPtr(h.cfg.CDSPublishURL),
+				BppID:                strPtr(h.cfg.BppID),
+				BppUri:               strPtr(h.cfg.BppURI),
+				NetworkID:            strPtr(h.cfg.NetworkID),
+				AckStatus:            ackStatus,
+				RequestPayload:       body,
+				ResponsePayload:      json.RawMessage(respBody),
+				ErrorMessage:         errMsg,
+				ProcessingDurationMs: &dur,
+			}); err != nil && h.lh != nil {
+				h.lh.WithModule("dashboardsvc").Warn().Error(err).Log("failed to write beckn_message_log")
+			}
+		}()
+
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, h.cfg.CDSPublishURL, bytes.NewReader(body))
+		if err != nil {
+			callErr = fmt.Errorf("build CDS request: %w", err)
+			c.JSON(http.StatusBadGateway, gin.H{"error": callErr.Error()})
+			return
+		}
+		httpReq.Header.Set("Content-Type", "application/json")
+		if h.cfg.BppPrivateKey != "" {
+			authHeader, authErr := catalog.BuildAuthHeader(body, h.cfg.BppKeyID, h.cfg.BppPrivateKey)
+			if authErr != nil {
+				callErr = fmt.Errorf("build auth header: %w", authErr)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": callErr.Error()})
+				return
+			}
+			httpReq.Header.Set("Authorization", authHeader)
+		}
+
+		httpClient := httpclient.New(30 * time.Second)
+		resp, err := httpClient.Do(httpReq)
+		if err != nil {
+			callErr = fmt.Errorf("CDS call failed: %w", err)
+			c.JSON(http.StatusBadGateway, gin.H{"error": callErr.Error()})
+			return
+		}
+		defer resp.Body.Close() //nolint:errcheck
+		respBody, _ = io.ReadAll(resp.Body)
+
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			callErr = fmt.Errorf("CDS returned %d: %s", resp.StatusCode, string(respBody))
+			c.JSON(http.StatusBadGateway, gin.H{"error": callErr.Error()})
+			return
+		}
+	}
+
+	if _, err := h.pool.Exec(ctx,
+		`UPDATE catalogs SET deleted_at = NOW() WHERE id = $1 AND bpp_id = $2`,
+		catalogID, h.cfg.BppID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "delete catalog: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "deleted"})
 }
 
 // ---------------------------------------------------------------------------

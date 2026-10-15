@@ -191,6 +191,7 @@ func registerDashboardRoutes(v1 *gin.RouterGroup, pool *pgxpool.Pool, cfg *confi
 	dash.GET("/catalogs", h.HandleListCatalogs)
 	dash.POST("/catalogs", h.HandleCreateCatalog)
 	dash.GET("/catalogs/:id", h.HandleGetCatalog)
+	dash.DELETE("/catalogs/:id", h.HandleDeleteCatalog)
 	dash.PATCH("/catalogs/:id/active", h.HandleSetCatalogActive)
 	dash.GET("/catalogs/:id/resources", h.HandleGetCatalogResources)
 	dash.POST("/catalogs/:id/products", h.HandleAddProduct)
