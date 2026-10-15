@@ -19,6 +19,11 @@ const (
 // before the terms were carried with the settlement.
 type Terms struct {
 	Basis, Window string
+	// Account is this participant's own payout account (holderRole BAP or
+	// BPP). It is added to a contract whose settlement doesn't carry one --
+	// an order placed before payout accounts were declared -- so the
+	// reconcile figures always name it.
+	Account map[string]any
 }
 
 // Figures are one contract's reconciliation figures. The buyer's payment is
@@ -52,6 +57,21 @@ type Figures struct {
 	RefundedAfterPayout float64 `json:"refunded_after_payout"`
 }
 
+// withAccount returns accounts with account added when none of them has its
+// holderRole; unchanged when account is nil or has no number.
+func withAccount(accounts []any, account map[string]any) []any {
+	if account == nil || str(account["accountNumber"]) == "" {
+		return accounts
+	}
+	for _, raw := range accounts {
+		if asMap(raw)["holderRole"] == account["holderRole"] {
+			return accounts
+		}
+	}
+	out := append([]any{}, accounts...)
+	return append(out, account)
+}
+
 // contractFigures computes a contract's figures from its full state. Both the
 // BPP and the BAP apply this same rule to their own copy of the contract, so
 // matching copies give matching figures.
@@ -66,7 +86,7 @@ func contractFigures(contract map[string]any, defaults Terms) (*Figures, error) 
 		ConsiderationID:     str(payment["considerationId"]),
 		CollectedBy:         str(pa["collectedBy"]),
 		Currency:            str(pa["currency"]),
-		Accounts:            slice(pa["settlementAccounts"]),
+		Accounts:            withAccount(slice(pa["settlementAccounts"]), defaults.Account),
 		Payment:             settlement.PaymentDetails(pa),
 		OrderAmount:         a.Order,
 		Commission:          a.Commission,

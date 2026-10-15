@@ -47,7 +47,12 @@ func NewService(pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.Logger) *
 }
 
 func (s *Service) terms() Terms {
-	return Terms{Basis: s.cfg.SettlementBasis, Window: s.cfg.SettlementWindow}
+	return Terms{Basis: s.cfg.SettlementBasis, Window: s.cfg.SettlementWindow, Account: map[string]any{
+		"holderRole":    "BPP",
+		"bankCode":      s.cfg.SettlementBankCode,
+		"accountNumber": s.cfg.SettlementAccountNumber,
+		"accountName":   s.cfg.SettlementAccountName,
+	}}
 }
 
 // Batch is a reconciliations row.
