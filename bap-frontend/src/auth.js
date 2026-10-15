@@ -4,6 +4,7 @@
 // the single entry point; a visit with no token, ever, redirects there.
 const TOKEN_KEY = 'bap.accessToken'
 const PROVIDER_ID_KEY = 'bap.providerId'
+const ID_TOKEN_KEY = 'bap.idToken'
 
 // Path this app is mounted at, with a trailing slash: '/' when served at a
 // domain root, '/tsp/remiges/cn/' behind ion-landing-page's proxy. Derived
@@ -18,6 +19,7 @@ export function captureTokenFromUrl() {
   const params = new URLSearchParams(window.location.search)
   const token = params.get('token')
   const providerId = params.get('providerId')
+  const idToken = params.get('id_token')
   if (token) {
     localStorage.setItem(TOKEN_KEY, token)
     params.delete('token')
@@ -25,6 +27,10 @@ export function captureTokenFromUrl() {
   if (providerId) {
     localStorage.setItem(PROVIDER_ID_KEY, providerId)
     params.delete('providerId')
+  }
+  if (idToken) {
+    localStorage.setItem(ID_TOKEN_KEY, idToken)
+    params.delete('id_token')
   }
   const query = params.toString()
   const newUrl = window.location.pathname + (query ? `?${query}` : '') + window.location.hash
@@ -39,9 +45,16 @@ export function getProviderId() {
   return localStorage.getItem(PROVIDER_ID_KEY)
 }
 
+// Used only to decode profile claims (name/email) for UserProfileMenu --
+// never sent anywhere, never used for authorization (that's getToken()'s job).
+export function getIdToken() {
+  return localStorage.getItem(ID_TOKEN_KEY)
+}
+
 export function clearToken() {
   localStorage.removeItem(TOKEN_KEY)
   localStorage.removeItem(PROVIDER_ID_KEY)
+  localStorage.removeItem(ID_TOKEN_KEY)
 }
 
 export function redirectToLogin() {
@@ -51,9 +64,11 @@ export function redirectToLogin() {
   window.location.href = lang ? `${url}?lang=${encodeURIComponent(lang)}` : url
 }
 
-// This app never talks to Zitadel directly (no id_token), so ending the SSO
-// session has to happen on landing-page -- it owns the OIDC client and its
-// own stored id_token. See landing-page/src/App.jsx's "/logout" route.
+// This app never talks to Zitadel directly (it only decodes the id_token
+// locally for display, in UserProfileMenu.jsx -- see getIdToken() above), so
+// ending the SSO session has to happen on landing-page -- it owns the OIDC
+// client and is the one that actually calls Zitadel's end_session endpoint.
+// See landing-page/src/App.jsx's "/logout" route.
 export function logout() {
   clearToken()
   const base = window.__env__?.LANDING_PAGE_URL || import.meta.env.VITE_LANDING_PAGE_URL || 'http://localhost:3002'

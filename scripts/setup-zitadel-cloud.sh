@@ -37,7 +37,11 @@ cd ..
 PROJECT_NAME="reference-app"
 APP_NAME="landing-page"
 REDIRECT_URI="${LANDING_PAGE_URL}/callback"
-POST_LOGOUT_REDIRECT_URI="${LANDING_PAGE_URL}"
+# Trailing slash required -- landing-page/src/oidc.js's logout() builds this
+# as `${window.location.origin}${basePath}`, and basePath always has a
+# trailing slash (see config.js) even at a domain root. Omitting it here
+# causes Zitadel to reject logout with "post_logout_redirect_uri invalid".
+POST_LOGOUT_REDIRECT_URI="${LANDING_PAGE_URL}/"
 
 echo "Waiting for Zitadel at ${BASE_URL} to be ready..."
 for i in $(seq 1 60); do
@@ -98,6 +102,15 @@ CLIENT_ID="$(api /zitadel.application.v2.ApplicationService/ListApplications '{}
   | jq -r --arg pid "$PROJECT_ID_ZITADEL" --arg name "$APP_NAME" \
     '.applications[]? | select(.projectId == $pid and .name == $name) | .oidcConfiguration.clientId' | head -n1)"
 
+# idTokenUserinfoAssertion: without this, the id_token carries only
+# sub/iss/aud/etc -- no name/email -- even with scope=openid profile email
+# requested. bap-frontend/bpp-frontend's UserProfileMenu decodes the
+# id_token client-side (no userinfo call) specifically relying on this.
+# Yes, this is a deliberate, documented departure from strict OIDC
+# practice (Zitadel's own proto comment: "this violates the OIDC
+# specification... to prevent leaking of personal information in the id
+# token") -- accepted here since this id_token is already forwarded
+# between apps via URL params regardless.
 if [ -z "${CLIENT_ID:-}" ] || [ "$CLIENT_ID" = "null" ]; then
   echo "Creating OIDC application '${APP_NAME}' (public SPA client, PKCE)..."
   # developmentMode: false here (unlike the local script) -- this app is
@@ -121,13 +134,21 @@ if [ -z "${CLIENT_ID:-}" ] || [ "$CLIENT_ID" = "null" ]; then
         # (origin + basePath); Zitadel matches exactly, so register both.
         postLogoutRedirectUris: ([($logout | rtrimstr("/")), ($logout | rtrimstr("/")) + "/"]),
         developmentMode: false,
-        accessTokenType: "OIDC_TOKEN_TYPE_JWT"
+        accessTokenType: "OIDC_TOKEN_TYPE_JWT",
+        idTokenUserinfoAssertion: true
       }
     }')"
   CLIENT_ID="$(api /zitadel.application.v2.ApplicationService/CreateApplication "$CREATE_APP_BODY" \
     | jq -r '.oidcConfiguration.clientId')"
 else
-  echo "Found existing application, client ID ${CLIENT_ID}."
+  echo "Found existing application, client ID ${CLIENT_ID}. Ensuring idTokenUserinfoAssertion and postLogoutRedirectUris are up to date..."
+  APP_ID="$(api /zitadel.application.v2.ApplicationService/ListApplications '{}' \
+    | jq -r --arg pid "$PROJECT_ID_ZITADEL" --arg name "$APP_NAME" \
+      '.applications[]? | select(.projectId == $pid and .name == $name) | .applicationId' | head -n1)"
+  api /zitadel.application.v2.ApplicationService/UpdateApplication \
+    "$(jq -n --arg aid "$APP_ID" --arg pid "$PROJECT_ID_ZITADEL" --arg logout "$POST_LOGOUT_REDIRECT_URI" \
+      '{applicationId: $aid, projectId: $pid, oidcConfiguration: {idTokenUserinfoAssertion: true, postLogoutRedirectUris: [$logout]}}')" \
+    >/dev/null
 fi
 
 if [ -z "${CLIENT_ID:-}" ] || [ "$CLIENT_ID" = "null" ]; then
