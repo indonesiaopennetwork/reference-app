@@ -98,6 +98,12 @@ func ToCDSCatalog(cat Catalog) CDSCatalog {
 type OnixPublishRequest struct {
 	Context BecknContext       `json:"context"`
 	Message OnixPublishMessage `json:"message"`
+	// Retire lists namespaced "<bppId>/<catalogId>" ids to permanently
+	// retire -- the catalog-publisher plugin's own addition, a sibling of
+	// context/message with no beckn.yaml equivalent. A call may carry
+	// Retire with an empty Message.Catalogs; the plugin accepts that as a
+	// pure retirement, no catalog content required.
+	Retire []string `json:"retire,omitempty"`
 }
 
 type OnixPublishMessage struct {

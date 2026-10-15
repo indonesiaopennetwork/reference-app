@@ -3448,6 +3448,7 @@ function CatalogDetailPage({ onNav, catalogId }) {
   const { data, loading, error, reload } = useApi(`/catalogs/${catalogId}`, [catalogId])
   const [publishing, setPublishing] = useState(false)
   const [togglingActive, setTogglingActive] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   const cat = data?.catalog || {}
   const resources = data?.resources || []
@@ -3518,6 +3519,22 @@ function CatalogDetailPage({ onNav, catalogId }) {
     }
   }
 
+  const handleDeleteCatalog = async () => {
+    const name = cat.name || catalogId
+    const msg = cat.isPublished
+      ? t('This permanently retires "{name}" from the Beckn network. This cannot be undone, and this catalog ID can never be reused. Continue?', { name })
+      : t('Delete "{name}"? It has never been published, so this just removes it from your catalog list.', { name })
+    if (!window.confirm(msg)) return
+    setDeleting(true)
+    try {
+      await apiFetch(`/catalogs/${catalogId}`, { method: 'DELETE' })
+      onNav('catalogs')
+    } catch (e) {
+      alert(t('Delete failed: {error}', { error: e.message }))
+      setDeleting(false)
+    }
+  }
+
   const fmtDate = ts => ts ? new Date(ts).toLocaleDateString(localeNow()) : '—'
 
   const getPrice = (offer) => {
@@ -3566,6 +3583,12 @@ function CatalogDetailPage({ onNav, catalogId }) {
           )}
         </div>
         <div className="flex gap-2">
+          <button onClick={handleDeleteCatalog} disabled={deleting}
+            title={t('Permanently delete this catalog')}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-50">
+            <Trash2 size={14} />
+            {deleting ? t('Deleting…') : t('Delete Catalog')}
+          </button>
           <button onClick={handleToggleActive} disabled={togglingActive}
             className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold border border-slate-500/30 text-slate-400 hover:bg-slate-500/10 transition-colors disabled:opacity-50">
             {cat.isActive ? <PauseCircle size={14} /> : <PlayCircle size={14} />}
@@ -3753,13 +3776,14 @@ function OfferForm({ off, oSet, offOpen, setOffOpen, catalogId, lockId, showReso
   const labelCls = 'block text-[11px] uppercase tracking-widest text-slate-500 font-semibold mb-1'
   const inputCls = 'w-full px-3 py-2 rounded-lg text-sm text-white placeholder-slate-600 border border-white/[0.08] bg-slate-900 focus:outline-none focus:border-blue-500/50 transition-colors'
 
-  const { data: catResData } = useApi(showResourcePicker ? `/catalogs/${catalogId}/resources` : null, [catalogId, showResourcePicker])
+  const { data: catResData } = useApi(showResourcePicker && !lockId ? `/catalogs/${catalogId}/resources` : null, [catalogId, showResourcePicker, lockId])
   const existingResources = catResData?.items || []
 
   return (
     <>
-      {/* Resource picker for offer-only mode */}
-      {showResourcePicker && existingResources.length > 0 && (
+      {/* Resource picker for offer-only mode -- not shown while editing an
+          existing offer (lockId): its resource association stays fixed. */}
+      {showResourcePicker && !lockId && existingResources.length > 0 && (
         <div className="mb-4">
           <label className={labelCls}>{t('Link to Resource(s) *')}</label>
           <div className="space-y-1 max-h-48 overflow-y-auto">
@@ -3789,7 +3813,7 @@ function OfferForm({ off, oSet, offOpen, setOffOpen, catalogId, lockId, showReso
         <div><label className={labelCls}>{t('Offer Name *')}</label>
           <input className={inputCls} value={off.name} onChange={e => oSet('name', e.target.value)} placeholder={t('Flask 500ml Yellow')} required />
         </div>
-        {!showResourcePicker && (
+        {!showResourcePicker && !lockId && (
           <div className="col-span-full"><label className={labelCls}>{t('Resource IDs')} <span className="text-slate-600 font-normal">({t('comma-separated; leave blank to auto-link')})</span></label>
             <input className={inputCls} value={off.resource_ids} onChange={e => oSet('resource_ids', e.target.value)} placeholder="item-flask-mh500" />
           </div>
