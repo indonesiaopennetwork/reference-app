@@ -189,7 +189,7 @@ services:
       - beckn
 
   onix-bap:
-    image: fidedocker/onix-adapter:latest
+    image: fidedocker/onix-adapter:1.9.0
     container_name: onix-bap
     platform: linux/amd64
     restart: unless-stopped
@@ -224,7 +224,7 @@ services:
     command: [ "./server", "--config=/app/config/local-simple-bap.yaml" ]
 
   onix-bpp:
-    image: fidedocker/onix-adapter:latest
+    image: fidedocker/onix-adapter:1.9.0
     container_name: onix-bpp
     platform: linux/amd64
     restart: unless-stopped
