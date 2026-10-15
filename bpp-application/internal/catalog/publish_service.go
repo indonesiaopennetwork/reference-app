@@ -135,6 +135,9 @@ func (s *PublishService) forwardToCDS(ctx context.Context, txID uuid.UUID, req *
 	onixCatalogs := make([]OnixCatalog, len(req.Catalogs))
 	directives := make([]OnixPublishDirective, len(req.Catalogs))
 	for i, c := range req.Catalogs {
+		// This provider-submitted request has no is_active column to read --
+		// preserve the old always-active behavior for this path.
+		c.IsActive = true
 		onixCatalogs[i] = ToOnixCatalog(c, s.cfg.BppID, s.cfg.PublishedBppURI())
 		directives[i] = ToOnixPublishDirective(c, s.cfg.BppID)
 	}

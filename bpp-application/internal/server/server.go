@@ -191,6 +191,7 @@ func registerDashboardRoutes(v1 *gin.RouterGroup, pool *pgxpool.Pool, cfg *confi
 	dash.GET("/catalogs", h.HandleListCatalogs)
 	dash.POST("/catalogs", h.HandleCreateCatalog)
 	dash.GET("/catalogs/:id", h.HandleGetCatalog)
+	dash.PATCH("/catalogs/:id/active", h.HandleSetCatalogActive)
 	dash.GET("/catalogs/:id/resources", h.HandleGetCatalogResources)
 	dash.POST("/catalogs/:id/products", h.HandleAddProduct)
 	dash.POST("/catalogs/:id/offers", h.HandleAddOffer)
@@ -199,6 +200,7 @@ func registerDashboardRoutes(v1 *gin.RouterGroup, pool *pgxpool.Pool, cfg *confi
 	dash.PUT("/catalogs/:id/resources/:rid", h.HandleUpdateResource)
 	dash.GET("/catalogs/:id/offers/:oid", h.HandleGetOffer)
 	dash.PUT("/catalogs/:id/offers/:oid", h.HandleUpdateOffer)
+	dash.DELETE("/catalogs/:id/offers/:oid", h.HandleDeleteOffer)
 	dash.POST("/catalogs/:id/publish", h.HandlePublishCatalog)
 
 	// Settlement reconciliation with BAPs (sent manually for now; an

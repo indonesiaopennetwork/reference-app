@@ -74,6 +74,7 @@ func (h *Handler) HandleListCatalogs(c *gin.Context) {
 		    c.validity_end,
 		    c.created_at,
 		    c.network_published_at,
+		    c.is_active,
 		    COUNT(DISTINCT r.id) AS resource_count,
 		    COUNT(DISTINCT o.id) AS offer_count
 		FROM catalogs c
@@ -86,7 +87,7 @@ func (h *Handler) HandleListCatalogs(c *gin.Context) {
 		                 OR c.descriptor_name ILIKE '%' || $3 || '%'
 		                 OR c.provider_id     ILIKE '%' || $3 || '%')
 		GROUP BY c.id, c.descriptor_name, c.descriptor_short_desc, c.provider_id,
-		         c.catalog_type, c.validity_start, c.validity_end, c.created_at, c.network_published_at
+		         c.catalog_type, c.validity_start, c.validity_end, c.created_at, c.network_published_at, c.is_active
 		ORDER BY c.created_at DESC
 		LIMIT $4 OFFSET $5`
 
@@ -108,6 +109,7 @@ func (h *Handler) HandleListCatalogs(c *gin.Context) {
 		CreatedAt          string  `json:"createdAt"`
 		NetworkPublishedAt *string `json:"networkPublishedAt"`
 		IsPublished        bool    `json:"isPublished"`
+		IsActive           bool    `json:"isActive"`
 		ResourceCount      int64   `json:"resourceCount"`
 		OfferCount         int64   `json:"offerCount"`
 	}
@@ -122,7 +124,7 @@ func (h *Handler) HandleListCatalogs(c *gin.Context) {
 		var rc, oc int64
 
 		if err := rows.Scan(&row.ID, &row.Name, &sd, &row.ProviderID, &catType,
-			&vs, &ve, &ca, &npAt, &rc, &oc); err != nil {
+			&vs, &ve, &ca, &npAt, &row.IsActive, &rc, &oc); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
@@ -298,6 +300,7 @@ func (h *Handler) HandleGetCatalog(c *gin.Context) {
 		CreatedAt          string  `json:"createdAt"`
 		NetworkPublishedAt *string `json:"networkPublishedAt"`
 		IsPublished        bool    `json:"isPublished"`
+		IsActive           bool    `json:"isActive"`
 	}
 	var vs, ve, ca, npAt pgtype.Timestamptz
 	var sd *string
@@ -306,13 +309,13 @@ func (h *Handler) HandleGetCatalog(c *gin.Context) {
 		SELECT c.id, c.descriptor_name, c.descriptor_short_desc, c.provider_id,
 		       COALESCE(p.descriptor_name, c.provider_id),
 		       c.catalog_type, c.validity_start, c.validity_end, c.created_at,
-		       c.network_published_at
+		       c.network_published_at, c.is_active
 		FROM catalogs c
 		LEFT JOIN providers p ON p.id = c.provider_id AND p.bpp_id = c.bpp_id
 		WHERE c.id = $1 AND c.bpp_id = $2 AND c.provider_id = $3 AND c.deleted_at IS NULL`,
 		catalogID, h.cfg.BppID, auth.ProviderIDFromContext(c),
 	).Scan(&cat.ID, &cat.Name, &sd, &cat.ProviderID, &cat.ProviderName,
-		&catType, &vs, &ve, &ca, &npAt)
+		&catType, &vs, &ve, &ca, &npAt, &cat.IsActive)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "catalog not found"})
 		return
@@ -419,6 +422,45 @@ func (h *Handler) HandleGetCatalog(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"catalog": cat, "resources": resources, "offers": offers})
+}
+
+// ---------------------------------------------------------------------------
+// PATCH /api/v1/catalogs/:id/active  — pause/resume a catalog
+//
+// isActive is a freely-reversible ACTIVE<->PAUSED toggle (Beckn protocol
+// NFH-014 Catalog_Publishing_and_Discovery.md §10.4), distinct from
+// retiring a catalog: pausing never deletes or locks its data, it only
+// changes what the next publish advertises. The seller must click Publish
+// again afterwards for the change to reach the network.
+// ---------------------------------------------------------------------------
+
+type SetCatalogActiveRequest struct {
+	IsActive *bool `json:"isActive" binding:"required"`
+}
+
+func (h *Handler) HandleSetCatalogActive(c *gin.Context) {
+	catalogID := c.Param("id")
+	var req SetCatalogActiveRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.IsActive == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "isActive (boolean) is required"})
+		return
+	}
+	if !h.ownedCatalog(c, catalogID) {
+		return
+	}
+	tag, err := h.pool.Exec(c.Request.Context(), `
+		UPDATE catalogs SET is_active = $1, updated_at = NOW()
+		 WHERE id = $2 AND bpp_id = $3 AND deleted_at IS NULL`,
+		*req.IsActive, catalogID, h.cfg.BppID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "catalog not found"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "updated", "isActive": *req.IsActive})
 }
 
 // ---------------------------------------------------------------------------
@@ -602,17 +644,18 @@ func (h *Handler) HandlePublishCatalog(c *gin.Context) {
 		CatalogType         *string
 		ValidityStart       pgtype.Timestamptz
 		ValidityEnd         pgtype.Timestamptz
+		IsActive            bool
 	}
 	err := h.pool.QueryRow(ctx, `
 		SELECT c.descriptor_name, c.descriptor_short_desc, c.descriptor_long_desc,
 		       c.provider_id, COALESCE(p.descriptor_name, c.provider_id), c.catalog_type,
-		       c.validity_start, c.validity_end
+		       c.validity_start, c.validity_end, c.is_active
 		FROM catalogs c
 		LEFT JOIN providers p ON p.id = c.provider_id AND p.bpp_id = c.bpp_id
 		WHERE c.id = $1 AND c.bpp_id = $2 AND c.deleted_at IS NULL`,
 		catalogID, h.cfg.BppID,
 	).Scan(&cat.DescriptorName, &cat.DescriptorShortDesc, &cat.DescriptorLongDesc,
-		&cat.ProviderID, &cat.ProviderName, &cat.CatalogType, &cat.ValidityStart, &cat.ValidityEnd)
+		&cat.ProviderID, &cat.ProviderName, &cat.CatalogType, &cat.ValidityStart, &cat.ValidityEnd, &cat.IsActive)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "catalog not found"})
 		return
@@ -630,6 +673,7 @@ func (h *Handler) HandlePublishCatalog(c *gin.Context) {
 			ID:         cat.ProviderID,
 			Descriptor: catalog.Descriptor{Name: cat.ProviderName},
 		},
+		IsActive: cat.IsActive,
 	}
 	if cat.CatalogType != nil && *cat.CatalogType != "" {
 		becknCat.PublishDirectives = &catalog.PublishDirectives{CatalogType: *cat.CatalogType}
@@ -754,6 +798,14 @@ func (h *Handler) HandlePublishCatalog(c *gin.Context) {
 		if ro, ok := offerMap[oid]; ok {
 			becknCat.Offers = append(becknCat.Offers, ro.offer)
 		}
+	}
+
+	// The Beckn catalog schema requires at least one of resources/offers --
+	// reject here with a clear message instead of forwarding an empty
+	// catalog and relaying the CDS's own cryptic schema-validation error.
+	if len(becknCat.Resources) == 0 && len(becknCat.Offers) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "catalog has no products or offers to publish"})
+		return
 	}
 
 	// Forward to CDS using the same CDSCatalog stripping logic.

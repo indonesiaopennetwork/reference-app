@@ -168,7 +168,7 @@ func ToOnixCatalog(cat Catalog, bppID, bppURI string) OnixCatalog {
 		ID:         bppID + "/" + cat.ID,
 		BppID:      bppID,
 		BppURI:     bppURI,
-		IsActive:   true,
+		IsActive:   cat.IsActive,
 		Descriptor: cat.Descriptor,
 		Provider:   cat.Provider,
 		Resources:  resources,
@@ -205,6 +205,9 @@ type Catalog struct {
 	Offers            []Offer            `json:"offers,omitempty"`
 	Validity          *TimePeriod        `json:"validity,omitempty"`
 	PublishDirectives *PublishDirectives `json:"publishDirectives,omitempty"`
+	// IsActive mirrors catalogs.is_active -- a freely-reversible pause/resume
+	// signal (distinct from retiring a catalog), consumed by ToOnixCatalog.
+	IsActive bool `json:"-"`
 }
 
 type Descriptor struct {
