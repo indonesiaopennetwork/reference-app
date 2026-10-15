@@ -499,7 +499,8 @@ func (h *Handler) HandleListRatings(c *gin.Context) {
 const autoDeliverAfter = time.Minute
 
 // RunAutoDelivery marks orders Delivered once they have been Shipped for
-// autoDeliverAfter, every interval until ctx is done. It works from the
+// autoDeliverAfter, and completes delivered ones (completeDelivered), every
+// interval until ctx is done. It works from the
 // database (contract_performances), so orders shipped before a restart are
 // still delivered after it.
 func (h *Handler) RunAutoDelivery(ctx context.Context, interval time.Duration) {
@@ -507,6 +508,7 @@ func (h *Handler) RunAutoDelivery(ctx context.Context, interval time.Duration) {
 	defer t.Stop()
 	for {
 		h.deliverShipped(ctx)
+		h.completeDelivered(ctx)
 		select {
 		case <-ctx.Done():
 			return
@@ -549,11 +551,15 @@ func (h *Handler) deliverShipped(ctx context.Context) {
 
 // markDelivered stamps when the order was delivered -- the start of its return
 // window (offer policies.returns.window). The first delivery time is kept.
+// The contract becomes COMPLETE now if its settlement basis says so (see
+// completeAt), before the caller's on_status tells the buyer app.
 func (h *Handler) markDelivered(ctx context.Context, contractID uuid.UUID) {
 	if _, err := h.pool.Exec(ctx,
 		`UPDATE contracts SET delivered_at = COALESCE(delivered_at, NOW()) WHERE id = $1`, contractID); err != nil {
 		h.lh.WithModule("dashboardsvc").Warn().Error(err).Log("failed to record delivered_at")
+		return
 	}
+	h.completeIfDue(ctx, contractID, time.Now())
 }
 
 // HandleUpdateFulfillmentStatus updates the contract performance status

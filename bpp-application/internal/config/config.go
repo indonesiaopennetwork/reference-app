@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 )
 
 // Config holds all runtime configuration for the BPP application.
@@ -33,13 +34,28 @@ type Config struct {
 	// If empty, the service derives it from BppURI by replacing /bpp/receiver with /bpp/caller.
 	BppCallerURL string
 
-	// SettlementBasis / SettlementWindow are this seller's payout terms,
-	// written into every settlement's settlementAttributes (ION
-	// TradeSettlement): the event that starts the payout (ON_CONFIRMATION |
-	// AFTER_SHIPMENT | AFTER_DELIVERY | AFTER_RETURN_WINDOW) and the ISO 8601
-	// duration after it within which settlement happens.
+	// SettlementBasis / SettlementWindow are this seller's payout terms, set
+	// in on_init as settlementBasis / settlementWindow on the settlement
+	// object (package settlement): the event that starts the payout (ON_CONFIRMATION
+	// | AFTER_SHIPMENT | AFTER_DELIVERY | AFTER_RETURN_WINDOW) and the ISO 8601
+	// duration after it within which the PJP pays out.
 	SettlementBasis  string
 	SettlementWindow string
+
+	// ReconcileBeforeWindow lets every open paid contract be sent to
+	// /reconcile right away, without waiting for its settlement window to
+	// pass (for testing). Set by RECONCILE_WAIT_FOR_SETTLEMENT_WINDOW=false;
+	// the default (true) waits. It only affects sending: a BAP answering a
+	// /reconcile still rejects contracts whose window hasn't passed.
+	ReconcileBeforeWindow bool
+
+	// SettlementAccount* is this BPP's bank account for PJP payouts (the
+	// order proceeds), added in on_init as a settlementAccounts entry on the
+	// settlement object with holderRole BPP. Env: SETTLEMENT_BANK_CODE,
+	// SETTLEMENT_ACCOUNT_NUMBER, SETTLEMENT_ACCOUNT_NAME.
+	SettlementBankCode      string
+	SettlementAccountNumber string
+	SettlementAccountName   string
 
 	// CDSPublishURL is the catalog discovery service endpoint that receives catalog/publish requests.
 	CDSPublishURL string
@@ -110,6 +126,11 @@ func Load() (*Config, error) {
 		SettlementBasis:  NormalizeSettlementBasis(getEnv("SETTLEMENT_BASIS", "AFTER_DELIVERY")),
 		SettlementWindow: getEnv("SETTLEMENT_WINDOW", "P1D"),
 
+		ReconcileBeforeWindow:   strings.EqualFold(os.Getenv("RECONCILE_WAIT_FOR_SETTLEMENT_WINDOW"), "false"),
+		SettlementBankCode:      getEnv("SETTLEMENT_BANK_CODE", "BCA"),
+		SettlementAccountNumber: getEnv("SETTLEMENT_ACCOUNT_NUMBER", "8730000000001"),
+		SettlementAccountName:   os.Getenv("SETTLEMENT_ACCOUNT_NAME"),
+
 		CDSPublishURL:  os.Getenv("CDS_PUBLISH_URL"),
 		CatalogBaseURL: os.Getenv("CATALOG_BASE_URL"),
 
@@ -122,6 +143,9 @@ func Load() (*Config, error) {
 	}
 	if cfg.ZitadelInternalURL == "" {
 		cfg.ZitadelInternalURL = cfg.ZitadelIssuer
+	}
+	if cfg.SettlementAccountName == "" {
+		cfg.SettlementAccountName = cfg.BppID
 	}
 
 	if err := cfg.validate(); err != nil {

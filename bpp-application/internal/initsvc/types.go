@@ -44,6 +44,10 @@ type InitContract struct {
 	Consideration       []Consideration     `json:"consideration,omitempty"`
 	Performance         []Performance       `json:"performance,omitempty"`
 	ContractAttributes  json.RawMessage     `json:"contractAttributes,omitempty"`
+	// Settlements carries the settlement object the BAP declared (ION
+	// IONSettlementReconciliation), answered in on_init with this BPP's terms,
+	// account and figures (applySellerTerms).
+	Settlements []json.RawMessage `json:"settlements,omitempty"`
 }
 
 // ---------------------------------------------------------------------------

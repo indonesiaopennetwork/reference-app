@@ -5,9 +5,6 @@
 # commit, then `gcloud run services update --image` (Terraform ignores image
 # changes on purpose -- see terraform/README.md "Code change in any service").
 #   - A change under <app>/db/migrations runs that app's migration job first.
-#   - A change to docs/specs/reconcile.yaml (the ION network extension spec)
-#     is copied into the onix-bap / onix-bpp templates (task specs:sync) and
-#     both adapters are redeployed.
 #   - A change to ion-landing-page/index.html uploads it to its GCS bucket.
 # Run it by hand from the Actions tab to redeploy everything.
 #
@@ -120,8 +117,6 @@ jobs:
             id="$(echo "$id" | xargs)"
             pattern="^${ctx}/"
             case "$id" in
-              # The ION spec is copied into the onix images at build time.
-              onix-bap|onix-bpp) pattern="^(${ctx}/|docs/specs/reconcile\.yaml$)" ;;
               # index.html is served from the bucket, not baked into the image.
               ion-landing-page) pattern="^ion-landing-page/(Dockerfile\.cloud|nginx\.conf\.template|env\.sh)$" ;;
             esac
@@ -197,9 +192,6 @@ jobs:
         service: ${{ fromJSON(needs.changes.outputs.services) }}
     steps:
       - uses: actions/checkout@v4
-      - name: Sync the ION spec into the onix templates
-        if: matrix.service.id == 'onix-bap' || matrix.service.id == 'onix-bpp'
-        run: cp docs/specs/reconcile.yaml "${{ matrix.service.context }}/templates/reconcile.yaml"
       - uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}

@@ -117,7 +117,9 @@ if [ -z "${CLIENT_ID:-}" ] || [ "$CLIENT_ID" = "null" ]; then
         grantTypes: ["OIDC_GRANT_TYPE_AUTHORIZATION_CODE"],
         applicationType: "OIDC_APP_TYPE_USER_AGENT",
         authMethodType: "OIDC_AUTH_METHOD_TYPE_NONE",
-        postLogoutRedirectUris: [$logout],
+        # landing-page logs out to its base URL with a trailing slash
+        # (origin + basePath); Zitadel matches exactly, so register both.
+        postLogoutRedirectUris: ([($logout | rtrimstr("/")), ($logout | rtrimstr("/")) + "/"]),
         developmentMode: false,
         accessTokenType: "OIDC_TOKEN_TYPE_JWT"
       }

@@ -10,53 +10,98 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// heldOrder is one order whose payment the gateway still holds (not yet
-// released by an agreed reconciliation).
-type heldOrder struct {
-	TransactionID string  `json:"transaction_id"`
-	ContractID    string  `json:"contract_id"`
-	Status        string  `json:"status"`
-	Held          float64 `json:"held"`
-	Paid          float64 `json:"paid"`
-	GatewayRefund float64 `json:"gateway_refund"`
-	// InBatch is the reconciliationId the payment is PENDING / DISPUTED in, if any.
-	InBatch string `json:"in_batch,omitempty"`
-}
-
-type batchView struct {
+// BatchView is one reconciliation batch, sent or received.
+type BatchView struct {
 	ID              string          `json:"id"`
+	Direction       string          `json:"direction"`
 	SettlementDate  string          `json:"settlement_date"`
 	Status          string          `json:"status"`
 	ClaimedSummary  json.RawMessage `json:"claimed_summary"`
 	ComputedSummary json.RawMessage `json:"computed_summary"`
 	Contracts       json.RawMessage `json:"contracts"`
-	Payout          json.RawMessage `json:"payout"`
 	RequestPayload  json.RawMessage `json:"request_payload"`
 	ResponsePayload json.RawMessage `json:"response_payload"`
 	ErrorMessage    *string         `json:"error_message"`
 	CreatedAt       time.Time       `json:"created_at"`
 }
 
+// bppView is one seller's reconciliation picture from this BAP's side.
 type bppView struct {
-	BppID      string      `json:"bpp_id"`
-	HeldAmount float64     `json:"held_amount"`
-	HeldOrders []heldOrder `json:"held_orders"`
-	Released   float64     `json:"released"`
-	Disputed   int         `json:"disputed_batches"`
-	Batches    []batchView `json:"batches"`
-	Currency   string      `json:"currency"`
+	BppID string `json:"bpp_id"`
+	// Held is what the PJP still holds for contracts not yet agreed
+	// (order amount less pre-payout refunds).
+	Held      float64       `json:"held_amount"`
+	Contracts []DueContract `json:"contracts"`
+	// AgreedNetPayable / AgreedCommission are what agreed contracts release:
+	// to the BPP and to this BAP. SEAM makes the payout through the PJP.
+	AgreedNetPayable float64 `json:"agreed_net_payable"`
+	AgreedCommission float64 `json:"agreed_commission"`
+	// RefundedAfterPayout is refunded by the BPP itself after a payout --
+	// outside reconciliation.
+	RefundedAfterPayout float64     `json:"refunded_after_payout"`
+	Disputed            int         `json:"disputed_batches"`
+	Batches             []BatchView `json:"batches"`
+	Currency            string      `json:"currency"`
 }
 
-// HandleAdminOverview (GET /api/v1/reconciliation): per seller (BPP),
-// what the gateway still holds for it, what has been released, and every
-// batch received with its verdicts, payout and messages.
+// logEntry is one /reconcile or /on_reconcile in this BAP's message log.
+type logEntry struct {
+	ID              string          `json:"id"`
+	MessageID       string          `json:"message_id"`
+	Action          string          `json:"action"`
+	Direction       string          `json:"direction"`
+	AckStatus       *string         `json:"ack_status"`
+	BppID           *string         `json:"bpp_id"`
+	URL             *string         `json:"url"`
+	ErrorMessage    *string         `json:"error_message"`
+	RequestPayload  json.RawMessage `json:"request_payload"`
+	ResponsePayload json.RawMessage `json:"response_payload"`
+	CreatedAt       time.Time       `json:"created_at"`
+}
+
+// HandleAdminOverview (GET /api/v1/reconciliation): per seller (BPP), the
+// contracts still to reconcile (and which are due), what the PJP holds for
+// them, what agreed contracts release, and every batch sent or received;
+// plus the recent /reconcile and /on_reconcile messages, sent or received.
 func (h *Handler) HandleAdminOverview(c *gin.Context) {
-	views, err := h.svc.overview(c.Request.Context())
+	ctx := c.Request.Context()
+	views, err := h.svc.overview(ctx)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"bpps": views})
+	messages, err := h.svc.messages(ctx, 100)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"bpps": views, "messages": messages, "now": time.Now().UTC()})
+}
+
+// messages is this BAP's recent /reconcile and /on_reconcile message log,
+// newest first. Reconciliation is between the participants, not any buyer's,
+// so it is not in the buyer's message log.
+func (s *Service) messages(ctx context.Context, limit int) ([]logEntry, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT m.id::text, m.message_id::text, m.action::text, m.direction::text, m.ack_status::text, m.bpp_id,
+		       m.url, m.error_message, m.request_payload, m.response_payload, m.created_at
+		  FROM beckn_message_log m
+		 WHERE m.bap_id = $1 AND m.action IN ('reconcile', 'on_reconcile')
+		 ORDER BY m.created_at DESC LIMIT $2`, s.cfg.BapID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []logEntry{}
+	for rows.Next() {
+		var e logEntry
+		if err := rows.Scan(&e.ID, &e.MessageID, &e.Action, &e.Direction, &e.AckStatus, &e.BppID,
+			&e.URL, &e.ErrorMessage, &e.RequestPayload, &e.ResponsePayload, &e.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
 }
 
 func (s *Service) overview(ctx context.Context) ([]*bppView, error) {
@@ -65,101 +110,78 @@ func (s *Service) overview(ctx context.Context) ([]*bppView, error) {
 		if v := views[bppID]; v != nil {
 			return v
 		}
-		v := &bppView{BppID: bppID, HeldOrders: []heldOrder{}, Batches: []batchView{}, Currency: "IDR"}
+		v := &bppView{BppID: bppID, Contracts: []DueContract{}, Batches: []BatchView{}, Currency: "IDR"}
 		views[bppID] = v
 		return v
 	}
 
-	// Held funds: each order's latest contract, payments and gateway refunds
-	// not yet released by an AGREED / ADJUSTED reconciliation.
-	rows, err := s.pool.Query(ctx, `
-		SELECT t.transaction_id::text, COALESCE(t.bpp_id, ''), t.status::text, s.contract_id, s.contract
-		  FROM transactions t
-		  JOIN LATERAL (SELECT contract_id, contract FROM contract_snapshots
-		                 WHERE transaction_id = t.transaction_id ORDER BY created_at DESC LIMIT 1) s ON TRUE
-		 WHERE t.status IN ('CONFIRMED', 'CANCELLED', 'COMPLETE', 'UPDATE_SENT', 'CANCEL_SENT', 'STATUS_SENT')`)
+	open, err := s.Contracts(ctx, "", time.Now().UTC())
 	if err != nil {
 		return nil, err
 	}
-	for rows.Next() {
-		var txn, bppID, status string
-		var contractID *string
-		var raw json.RawMessage
-		if err := rows.Scan(&txn, &bppID, &status, &contractID, &raw); err != nil {
-			rows.Close()
-			return nil, err
+	for _, d := range open {
+		v := view(d.BppID)
+		v.Contracts = append(v.Contracts, d)
+		v.Held = round2(v.Held + d.OrderAmount - d.Refund)
+		v.RefundedAfterPayout = round2(v.RefundedAfterPayout + d.RefundedAfterPayout)
+		if d.Currency != "" {
+			v.Currency = d.Currency
 		}
-		var contract map[string]any
-		if json.Unmarshal(unwrap(raw), &contract) != nil {
-			continue
-		}
-		o := heldOrder{TransactionID: txn, Status: status}
-		if contractID != nil {
-			o.ContractID = *contractID
-		}
-		var cur string
-		for _, st := range slice(contract["settlements"]) {
-			a := asMap(asMap(st)["settlementAttributes"])
-			if rs := str(a["reconciliationStatus"]); rs == "AGREED" || rs == "ADJUSTED" {
-				continue // released to the seller
-			}
-			if cur == "" {
-				cur = str(a["currency"])
-			}
-			refund := asMap(a["refund"])
-			switch {
-			case refund == nil:
-				o.Paid += num(a["settledAmount"])
-				o.InBatch = str(a["reconciliationId"])
-			case str(refund["source"]) != "PROVIDER":
-				o.GatewayRefund += num(refund["amount"])
-			}
-		}
-		o.Held = round2(o.Paid - o.GatewayRefund)
-		if o.Paid == 0 && o.GatewayRefund == 0 {
-			continue
-		}
-		v := view(bppID)
-		if cur != "" {
-			v.Currency = cur
-		}
-		v.HeldOrders = append(v.HeldOrders, o)
-		v.HeldAmount = round2(v.HeldAmount + o.Held)
 	}
-	rows.Close()
+	for _, v := range views {
+		var due []DueContract
+		for _, d := range v.Contracts {
+			if selectable(d) {
+				due = append(due, d)
+			}
+		}
+		_, batch := nextBatch(due, s.cfg.BapID)
+		next := map[string]bool{}
+		for _, d := range batch {
+			next[d.ContractID] = true
+		}
+		for i := range v.Contracts {
+			v.Contracts[i].InNextBatch = next[v.Contracts[i].ContractID]
+			v.Contracts[i].Selectable = selectable(v.Contracts[i])
+		}
+	}
 
-	brows, err := s.pool.Query(ctx, `
-		SELECT id, bpp_id, settlement_date::text, status, claimed_summary, computed_summary, contracts,
-		       payout, request_payload, response_payload, error_message, created_at
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, direction, bpp_id, settlement_date::text, status, claimed_summary, computed_summary, contracts,
+		       request_payload, response_payload, error_message, created_at
 		  FROM reconciliations ORDER BY created_at DESC LIMIT 200`)
 	if err != nil {
 		return nil, err
 	}
-	defer brows.Close()
-	for brows.Next() {
-		var b batchView
+	defer rows.Close()
+	for rows.Next() {
+		var b BatchView
 		var bppID string
-		if err := brows.Scan(&b.ID, &bppID, &b.SettlementDate, &b.Status, &b.ClaimedSummary, &b.ComputedSummary,
-			&b.Contracts, &b.Payout, &b.RequestPayload, &b.ResponsePayload, &b.ErrorMessage, &b.CreatedAt); err != nil {
+		if err := rows.Scan(&b.ID, &b.Direction, &bppID, &b.SettlementDate, &b.Status, &b.ClaimedSummary, &b.ComputedSummary,
+			&b.Contracts, &b.RequestPayload, &b.ResponsePayload, &b.ErrorMessage, &b.CreatedAt); err != nil {
 			return nil, err
 		}
 		v := view(bppID)
 		v.Batches = append(v.Batches, b)
-		if b.Status == "DISPUTED" {
+		if b.Status == "DISPUTED" || b.Status == "PARTIALLY_AGREED" {
 			v.Disputed++
 		}
-		var p map[string]any
-		if json.Unmarshal(b.Payout, &p) == nil {
-			v.Released = round2(v.Released + num(p["amount"]))
+		var verdicts []Verdict
+		if b.Status == "AGREED" && json.Unmarshal(b.Contracts, &verdicts) == nil {
+			for _, vd := range verdicts {
+				if vd.Accord {
+					v.AgreedNetPayable = round2(v.AgreedNetPayable + vd.NetPayable)
+					v.AgreedCommission = round2(v.AgreedCommission + vd.Commission)
+				}
+			}
 		}
 	}
-	if err := brows.Err(); err != nil {
+	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 
 	out := make([]*bppView, 0, len(views))
 	for _, v := range views {
-		sort.Slice(v.HeldOrders, func(i, j int) bool { return v.HeldOrders[i].Held > v.HeldOrders[j].Held })
 		out = append(out, v)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].BppID < out[j].BppID })

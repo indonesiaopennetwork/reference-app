@@ -1,59 +1,271 @@
 {
   "context": {
-    "version": "2.0.0",
     "action": "on_reconcile",
-    "timestamp": "2026-09-30T17:05:00Z",
-    "messageId": "6f0c9a7e-4d2b-4b8e-9d2f-1a7c3e5b9d10",
-    "transactionId": "b3e1d0a4-7c52-4f1e-8a93-2c6d4e8f0a17",
-    "bapId": "onix-bap-x7m2wmy7nq-et.a.run.app",
-    "bapUri": "http://onix-bap:8081/bap/receiver",
-    "bppId": "onix-bap-x7m2wmy7nq-et.a.run.app",
-    "bppUri": "http://onix-bpp:8082/bpp/receiver",
+    "bapId": "onix-bap.example",
+    "bapUri": "https://onix-bap.example/bap/receiver",
+    "bppId": "onix-bpp.example",
+    "bppUri": "https://onix-bpp.example/bpp/receiver",
+    "messageId": "c41e3f0a-7b2d-4e8f-9a1c-5d6e7f8a9b0c",
+    "networkId": "ion.id",
+    "receiverId": "onix-bpp.example",
+    "senderId": "onix-bap.example",
+    "timestamp": "2026-09-30T17:00:04Z",
+    "transactionId": "e2a9c4b7-3d1f-4a6e-8c5b-9f0d1e2a3b4c",
     "ttl": "PT30S",
-    "networkId": "ion.id/ion-launch"
+    "version": "2.0.0"
   },
   "message": {
-    "reconciliationId": "recon-2026-09-30T170000Z-onix-bap-x7m2wmy7nq-et.a.run.app",
-    "reconciliationStatus": "AGREED",
     "contracts": [
       {
-        "contractId": "6b86b4cd-f574-48f4-a5e2-3855ba00675c",
-        "reconciliationStatus": "AGREED"
+        "commitments": [
+          {
+            "id": "commitment-1",
+            "offer": {
+              "id": "offer-kopi-susu",
+              "resourceIds": [
+                "kopi-susu-1l"
+              ]
+            },
+            "resources": [
+              {
+                "id": "kopi-susu-1l",
+                "quantity": {
+                  "count": 2
+                }
+              }
+            ],
+            "status": {
+              "descriptor": {
+                "code": "ACTIVE"
+              }
+            }
+          }
+        ],
+        "id": "3f6c1d2e-8a4b-4c5d-9e6f-7a8b9c0d1e2f",
+        "settlements": [
+          {
+            "considerationId": "price-1",
+            "id": "settlement-3f6c1d2e",
+            "settlementAttributes": {
+              "@context": "https://schema.ion.id/release1/schema/common/Settlement/v1/context.jsonld",
+              "@type": "ion:IONSettlementReconciliation",
+              "accord": true,
+              "collectedBy": "BAP",
+              "commission": {
+                "value": 2400
+              },
+              "currency": "IDR",
+              "dueDate": "2026-09-30",
+              "finderFee": {
+                "appliesTo": "ITEM_TOTAL",
+                "feeType": "PERCENT",
+                "feeValue": 3,
+                "feeAmount": 2400
+              },
+              "netPayable": {
+                "value": 87600
+              },
+              "orderAmount": {
+                "value": 90000
+              },
+              "refundAmount": {
+                "value": 0
+              },
+              "settlementAccounts": [
+                {
+                  "accountName": "onix-bap.example",
+                  "accountNumber": "1370000000001",
+                  "bankCode": "MANDIRI",
+                  "holderRole": "BAP"
+                },
+                {
+                  "accountName": "onix-bpp.example",
+                  "accountNumber": "8730000000001",
+                  "bankCode": "BCA",
+                  "holderRole": "BPP"
+                }
+              ],
+              "settlementBasis": "AFTER_DELIVERY",
+              "settlementWindow": "P1D",
+              "withholdingAmount": {
+                "value": 0
+              }
+            }
+          }
+        ]
       },
       {
-        "contractId": "bfd0dcc5-1dcb-4987-be91-e563638b63d5",
-        "reconciliationStatus": "AGREED"
+        "commitments": [
+          {
+            "id": "commitment-1",
+            "offer": {
+              "id": "offer-kopi-susu",
+              "resourceIds": [
+                "kopi-susu-1l"
+              ]
+            },
+            "resources": [
+              {
+                "id": "kopi-susu-1l",
+                "quantity": {
+                  "count": 2
+                }
+              }
+            ],
+            "status": {
+              "descriptor": {
+                "code": "ACTIVE"
+              }
+            }
+          }
+        ],
+        "id": "7b2e4f6a-1c3d-4e5f-8a9b-0c1d2e3f4a5b",
+        "settlements": [
+          {
+            "considerationId": "price-1",
+            "id": "settlement-7b2e4f6a",
+            "settlementAttributes": {
+              "@context": "https://schema.ion.id/release1/schema/common/Settlement/v1/context.jsonld",
+              "@type": "ion:IONSettlementReconciliation",
+              "accord": true,
+              "collectedBy": "BAP",
+              "commission": {
+                "value": 1200
+              },
+              "currency": "IDR",
+              "dueDate": "2026-09-30",
+              "finderFee": {
+                "appliesTo": "ITEM_TOTAL",
+                "feeType": "PERCENT",
+                "feeValue": 3,
+                "feeAmount": 1200
+              },
+              "netPayable": {
+                "value": 43800
+              },
+              "orderAmount": {
+                "value": 90000
+              },
+              "refundAmount": {
+                "value": 45000
+              },
+              "settlementAccounts": [
+                {
+                  "accountName": "onix-bap.example",
+                  "accountNumber": "1370000000001",
+                  "bankCode": "MANDIRI",
+                  "holderRole": "BAP"
+                },
+                {
+                  "accountName": "onix-bpp.example",
+                  "accountNumber": "8730000000001",
+                  "bankCode": "BCA",
+                  "holderRole": "BPP"
+                }
+              ],
+              "settlementBasis": "AFTER_DELIVERY",
+              "settlementWindow": "P1D",
+              "withholdingAmount": {
+                "value": 0
+              }
+            }
+          }
+        ]
       },
       {
-        "contractId": "11f4d03b-1949-41da-b0d4-5e7a42bb058a",
-        "reconciliationStatus": "AGREED"
+        "commitments": [
+          {
+            "id": "commitment-1",
+            "offer": {
+              "id": "offer-kopi-susu",
+              "resourceIds": [
+                "kopi-susu-1l"
+              ]
+            },
+            "resources": [
+              {
+                "id": "kopi-susu-1l",
+                "quantity": {
+                  "count": 2
+                }
+              }
+            ],
+            "status": {
+              "descriptor": {
+                "code": "ACTIVE"
+              }
+            }
+          }
+        ],
+        "id": "9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a",
+        "settlements": [
+          {
+            "considerationId": "price-1",
+            "id": "settlement-9d8c7b6a",
+            "settlementAttributes": {
+              "@context": "https://schema.ion.id/release1/schema/common/Settlement/v1/context.jsonld",
+              "@type": "ion:IONSettlementReconciliation",
+              "accord": true,
+              "collectedBy": "BAP",
+              "commission": {
+                "value": 0
+              },
+              "currency": "IDR",
+              "dueDate": "2026-09-30",
+              "finderFee": {
+                "appliesTo": "ITEM_TOTAL",
+                "feeType": "PERCENT",
+                "feeValue": 3,
+                "feeAmount": 0
+              },
+              "netPayable": {
+                "value": 200
+              },
+              "orderAmount": {
+                "value": 90000
+              },
+              "refundAmount": {
+                "value": 89800
+              },
+              "settlementAccounts": [
+                {
+                  "accountName": "onix-bap.example",
+                  "accountNumber": "1370000000001",
+                  "bankCode": "MANDIRI",
+                  "holderRole": "BAP"
+                },
+                {
+                  "accountName": "onix-bpp.example",
+                  "accountNumber": "8730000000001",
+                  "bankCode": "BCA",
+                  "holderRole": "BPP"
+                }
+              ],
+              "settlementBasis": "AFTER_DELIVERY",
+              "settlementWindow": "P1D",
+              "withholdingAmount": {
+                "value": 0
+              }
+            }
+          }
+        ]
       }
     ],
+    "reconciliationId": "recon-2026-09-30T170000Z-onix-bpp.example",
+    "reconciliationStatus": "AGREED",
     "settlementSummary": {
-      "bapId": "onix-bap-x7m2wmy7nq-et.a.run.app",
-      "bppId": "onix-bap-x7m2wmy7nq-et.a.run.app",
+      "bapId": "onix-bap.example",
+      "bppId": "onix-bpp.example",
       "currency": "IDR",
       "settlementDate": "2026-09-30",
-      "settlementBasis": "AFTER_DELIVERY",
-      "settlementWindow": "P1D",
       "contractCount": 3,
-      "totalPaidAmount": 270000,
-      "totalGatewayRefundAmount": 134800,
-      "totalProviderRefundAmount": 0,
-      "totalFeesRetained": 200,
-      "totalSettledAmount": 135200,
-      "netPayable": 135200
-    },
-    "payout": {
-      "status": "COMPLETE",
-      "amount": 135200,
-      "currency": "IDR",
-      "paidAt": "2026-09-30T17:05:00Z",
-      "method": "BANK_TRANSFER",
-      "gateway": {
-        "name": "mock-gateway",
-        "transactionId": "9d1c2f7e-0b6a-4c4e-9a51-3f1e2d8b7c60"
-      }
+      "agreedCount": 3,
+      "disputedCount": 0,
+      "totalOrderAmount": 270000,
+      "totalCommission": 3600,
+      "totalWithholding": 0,
+      "totalRefund": 134800,
+      "totalNetPayable": 131600
     }
   }
 }

@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import { captureTokenFromUrl, getToken, clearToken, redirectToLogin, logout, basePath } from './auth.js'
 import Tour from './Tour.jsx'
+import { useReconSelection, inDateRange } from './reconSelection.js'
 import { useI18n, rich, LanguageToggle, tNow, localeNow } from './i18n.jsx'
 
 const API_BASE = `${basePath}api/v1`
@@ -40,7 +41,13 @@ async function apiFetch(path, opts = {}) {
   return res.json()
 }
 
-function useApi(path, deps = []) {
+// LIVE_EVERY is how often a live page (useApi with { live: true }) refreshes
+// its data in the background, so changes made elsewhere -- the buyer app's
+// answers, automatic delivery and completion, reconciliation replies -- show
+// without reloading the page.
+const LIVE_EVERY = 5000
+
+function useApi(path, deps = [], { live = false } = {}) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -52,6 +59,25 @@ function useApi(path, deps = []) {
     finally { setLoading(false) }
   }, [path, ...deps]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { load() }, [load])
+
+  // Live pages refresh quietly (no spinner; a failed refresh keeps what is
+  // shown) every LIVE_EVERY while the tab is visible, and when it comes back.
+  useEffect(() => {
+    if (!live || !path) return
+    const refresh = () => {
+      if (document.hidden) return
+      apiFetch(path).then(d => { setData(d); setError(null) }).catch(() => { })
+    }
+    const timer = setInterval(refresh, LIVE_EVERY)
+    document.addEventListener('visibilitychange', refresh)
+    window.addEventListener('focus', refresh)
+    return () => {
+      clearInterval(timer)
+      document.removeEventListener('visibilitychange', refresh)
+      window.removeEventListener('focus', refresh)
+    }
+  }, [live, path, ...deps]) // eslint-disable-line react-hooks/exhaustive-deps
+
   return { data, loading, error, reload: load }
 }
 
@@ -264,7 +290,7 @@ const tourSteps = t => [
   },
   {
     eyebrow: t('Reconciliation'), page: 'reconciliation', target: 'nav-reconciliation', title: t('Get paid'),
-    body: <p>{rich(t("After delivery plus your settlement window, an order's payment falls <b>due</b>. Send <b>reconcile</b> to the buyer app; when it agrees, the payment gateway releases the held funds to you."))}</p>
+    body: <p>{rich(t("After delivery plus your settlement window, an order's payment falls <b>due</b>. Send <b>reconcile</b> to the buyer app (it can also send you one); when both sides agree, SEAM has the PJP pay you from the held funds."))}</p>
   },
   {
     eyebrow: t('Support'), page: 'support', target: 'nav-support', title: t('Support tickets'),
@@ -519,8 +545,8 @@ function ActivityRow({ o, onView }) {
 
 function OverviewPage({ onNav }) {
   const { t } = useI18n()
-  const { data: stats, loading: sLoad, error: sErr, reload } = useApi('/dashboard/stats')
-  const { data: orders } = useApi('/orders?limit=6')
+  const { data: stats, loading: sLoad, error: sErr, reload } = useApi('/dashboard/stats', [], { live: true })
+  const { data: orders } = useApi('/orders?limit=6', [], { live: true })
   const { data: supportData } = useApi('/support-tickets?page=1&limit=1')
   const { data: ratingsData } = useApi('/ratings?page=1&limit=1')
   const totalTickets = supportData?.total ?? null
@@ -617,7 +643,7 @@ function OverviewPage({ onNav }) {
 
 function OrderDetailDrawer({ order, onClose }) {
   const { t } = useI18n()
-  const { data, loading, reload } = useApi(order?.id ? `/orders/${order.id}` : null, [order?.id])
+  const { data, loading, reload } = useApi(order?.id ? `/orders/${order.id}` : null, [order?.id], { live: true })
   const [updating, setUpdating] = useState(false)
 
   let contractAttrs = data?.contract?.contract_attributes;
@@ -858,7 +884,7 @@ function OrdersPage() {
   const [selected, setSelected] = useState(null)
   const [search, setSearch] = useState('')
   const limit = 20
-  const { data, loading, error, reload } = useApi(`/orders?page=${page}&limit=${limit}`, [page])
+  const { data, loading, error, reload } = useApi(`/orders?page=${page}&limit=${limit}`, [page], { live: true })
   const total = data?.total ?? 0
   const totalPages = Math.max(1, Math.ceil(total / limit))
   const items = (data?.items ?? []).filter(o =>
@@ -2332,7 +2358,7 @@ function MessagesPage() {
   const [limit, setLimit] = useState(50)
   const [filter, setFilter] = useState('')
   const [dirFilter, setDirFilter] = useState('ALL')
-  const { data, loading, error, reload } = useApi(`/messages?limit=${limit}`, [limit])
+  const { data, loading, error, reload } = useApi(`/messages?limit=${limit}`, [limit], { live: true })
   const [expanded, setExpanded] = useState(() => new Set())
   const toggle = key => setExpanded(prev => {
     const next = new Set(prev)
@@ -2640,10 +2666,11 @@ function PayloadPanel({ message: m }) {
 }
 
 // ─── Reconciliation ───────────────────────────────────────────────────────────
-// Settlement reconciliation with buyer apps (Beckn extension, docs/specs/
-// reconcile.yaml). Per BAP: contracts due now (payout basis event +
-// settlementWindow has passed) with the summary /reconcile would carry, and a
-// manual send; contracts still to fall due; and past batches.
+// Settlement reconciliation with buyer apps (ION Release 1
+// core/api/v2.0.0/ion-additional.yaml in ion-specs). The buyer's payment is held at the PJP. Per BAP:
+// contracts due now (payout basis event + settlementWindow has passed) with
+// the summary /reconcile would carry, and a manual send; contracts still to
+// fall due; and past batches, sent or received from the buyer app.
 
 const rupiah = n => n == null ? '—' : `Rp ${Number(n).toLocaleString('id-ID')}`
 
@@ -2655,37 +2682,91 @@ function untilText(dueAt, now) {
   return tNow('due in {time}', { time: d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : m ? `${m}m ${s % 60}s` : `${s}s` })
 }
 
-function ReconContractsTable({ rows, now }) {
+// How many contracts the next /reconcile to a BAP carries: a disputed batch
+// again in full, or what is due now (in_next_batch, decided by the server).
+// The batch summary for just the ticked contracts.
+function tickedSummary(rows) {
+  const sum = k => Math.round(rows.reduce((t, r) => t + (r[k] || 0), 0) * 100) / 100
+  return { contractCount: rows.length, totalOrderAmount: sum('order_amount'), totalRefund: sum('refund'), totalCommission: sum('commission'), totalNetPayable: sum('net_payable') }
+}
+
+// In a disputed batch only the contracts with accord false are in dispute;
+// last_result says which, and the figures that differ.
+const isDisputed = r => r.reconciliation_status === 'DISPUTED' && !r.last_result?.accord
+// Sent before its settlement window: the buyer app answered accord false and
+// the contract waits until it is due (no reconciliation status).
+const sentEarly = r => !r.reconciliation_status && r.last_result?.code === 'SETTLEMENT_WINDOW_NOT_REACHED'
+const diffOf = (r, field) => r.reconciliation_status === 'DISPUTED' && r.last_result?.diffs?.find(d => d.field === field)
+
+function DiffNote({ d }) {
+  const { t } = useI18n()
+  if (!d) return null
+  return (
+    <div className="text-[10px] font-semibold text-rose-300" title={t('Your figure: {ours}', { ours: rupiah(d.ours) })}>
+      {t('Buyer app: {amount}', { amount: rupiah(d.theirs) })} ({d.diff > 0 ? '+' : '−'}{rupiah(Math.abs(d.diff))})
+    </div>
+  )
+}
+
+// select (optional, from useReconSelection) adds a checkbox column for
+// choosing the contracts the next /reconcile carries.
+function ReconContractsTable({ rows, now, select }) {
   const { t } = useI18n()
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-xs">
         <thead>
           <tr className="text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-white/[0.06]">
+            {select && (
+              <th className="pl-4 pr-1 py-2 w-6">
+                <input type="checkbox" className="accent-cyan-500 cursor-pointer disabled:cursor-not-allowed" disabled={select.header.disabled}
+                  checked={select.header.checked} ref={el => { if (el) el.indeterminate = select.header.indeterminate }}
+                  onChange={select.toggleAll} title={t('Select all due and disputed contracts')} />
+              </th>
+            )}
             <th className="text-left px-4 py-2">{t('Contract')}</th>
+            <th className="text-left px-4 py-2">{t('Created')}</th>
             <th className="text-left px-4 py-2">{t('Status')}</th>
             <th className="text-left px-4 py-2">{t('Payout clock')}</th>
             <th className="text-right px-4 py-2">{t('Paid')}</th>
-            <th className="text-right px-4 py-2">{t('Gateway refund')}</th>
-            <th className="text-right px-4 py-2">{t('Provider refund')}</th>
-            <th className="text-right px-4 py-2">{t('Settled')}</th>
+            <th className="text-right px-4 py-2">{t('Refund')}</th>
+            <th className="text-right px-4 py-2">{t('Finder fee')}</th>
+            <th className="text-right px-4 py-2">{t('Net payable')}</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-white/[0.04]">
           {rows.map(r => (
             <tr key={r.contract_id}>
+              {select && (
+                <td className="pl-4 pr-1 py-2">
+                  {r.selectable && (
+                    <input type="checkbox" className="accent-cyan-500 cursor-pointer"
+                      checked={select.isTicked(r)} onChange={() => select.toggle(r)}
+                      title={t('Include in the next /reconcile')} />
+                  )}
+                </td>
+              )}
               <td className="px-4 py-2 font-mono text-slate-400 whitespace-nowrap" title={r.contract_id}>{String(r.contract_id).slice(0, 8)}…</td>
-              <td className="px-4 py-2"><StatusBadge status={r.status} /></td>
+              <td className="px-4 py-2 text-slate-400 whitespace-nowrap">{r.created_at ? fmtDate(r.created_at) : '—'}</td>
+              <td className="px-4 py-2 whitespace-nowrap">
+                <StatusBadge status={r.status} />
+                {isDisputed(r) && <span className="ml-1.5 text-[11px] font-semibold text-rose-300">{t('Disputed')}</span>}
+                {r.reconciliation_status === 'DISPUTED' && !isDisputed(r) && <span className="ml-1.5 text-[11px] text-slate-500">{t('Matched — batch disputed')}</span>}
+                {sentEarly(r) && <span className="ml-1.5 text-[11px] font-semibold text-amber-300" title={r.last_result.reason}>{t('Sent before settlement window')}</span>}
+                {sentEarly(r) && <div className="mt-0.5 text-[10px] text-amber-300/80 whitespace-normal max-w-[18rem]">{r.last_result.reason}</div>}
+                {isDisputed(r) && !r.last_result?.diffs?.length && r.last_result?.reason && <div className="mt-0.5 text-[10px] text-rose-300/80 whitespace-normal max-w-[18rem]">{r.last_result.reason}</div>}
+                {r.refunded_after_payout > 0 && <span className="ml-1.5 text-[11px] text-slate-500" title={t('Refunded by you after payout — outside reconciliation')}>{t('+{amount} refunded after payout', { amount: rupiah(r.refunded_after_payout) })}</span>}
+              </td>
               <td className="px-4 py-2 text-slate-400 min-w-[12rem]">
                 <span className="text-slate-300">{t(r.basis_event)}</span>
                 {r.basis_at && <> {fmtDate(r.basis_at)}</>}
                 <span className="text-slate-600"> + {r.settlement_window}</span>
                 {r.due_at && <span className={`ml-2 font-semibold ${r.due ? 'text-emerald-400' : 'text-amber-400'}`}>{untilText(r.due_at, now)}</span>}
               </td>
-              <td className="px-4 py-2 text-right tabular-nums text-slate-300 whitespace-nowrap">{rupiah(r.paid)}</td>
-              <td className="px-4 py-2 text-right tabular-nums text-rose-300 whitespace-nowrap">{r.gateway_refund ? `− ${rupiah(r.gateway_refund)}` : '—'}</td>
-              <td className="px-4 py-2 text-right tabular-nums text-slate-500 whitespace-nowrap">{r.provider_refund ? rupiah(r.provider_refund) : '—'}</td>
-              <td className="px-4 py-2 text-right tabular-nums font-semibold text-white whitespace-nowrap">{rupiah(r.paid - r.gateway_refund)}</td>
+              <td className="px-4 py-2 text-right tabular-nums text-slate-300 whitespace-nowrap">{rupiah(r.order_amount)}<DiffNote d={diffOf(r, 'orderAmount')} /></td>
+              <td className="px-4 py-2 text-right tabular-nums text-rose-300 whitespace-nowrap">{r.refund ? `− ${rupiah(r.refund)}` : '—'}<DiffNote d={diffOf(r, 'refundAmount')} /></td>
+              <td className="px-4 py-2 text-right tabular-nums text-amber-300 whitespace-nowrap">{r.commission ? `− ${rupiah(r.commission)}` : '—'}<DiffNote d={diffOf(r, 'commission')} /></td>
+              <td className="px-4 py-2 text-right tabular-nums font-semibold text-white whitespace-nowrap">{rupiah(r.net_payable)}<DiffNote d={diffOf(r, 'netPayable')} /></td>
             </tr>
           ))}
         </tbody>
@@ -2694,28 +2775,95 @@ function ReconContractsTable({ rows, now }) {
   )
 }
 
+// One buyer app's contracts to reconcile, and its Send. The ticked contracts
+// (see useReconSelection) are what the /reconcile carries.
+function BapReconCard({ g, now, visible, sending, onSend }) {
+  const { t } = useI18n()
+  const sel = useReconSelection(g.due, visible)
+  const count = sel.ticked.length
+  const due = g.due.filter(visible), upcoming = g.upcoming.filter(visible)
+  return (
+    <Card className="mb-5 overflow-hidden">
+      <div className="px-5 py-3 border-b border-white/[0.06] flex flex-wrap items-center gap-3">
+        <div className="min-w-0">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">{t('Buyer app')}</p>
+          <p className="text-sm font-mono text-white truncate">{g.bap_id}</p>
+        </div>
+        <button disabled={!count || sending} onClick={() => onSend(g.bap_id, sel.ticked)}
+          className="ml-auto flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-white disabled:opacity-40 transition-opacity"
+          style={{ background: BRAND }}>
+          <Send size={13} /> {sending ? t('Sending…')
+            : count && count < sel.total ? t('Send reconcile ({count} of {total})', { count, total: sel.total })
+            : count ? t('Send reconcile ({count})', { count })
+            : g.due.some(r => r.selectable) ? t('No contract selected') : t('Nothing due yet')}
+        </button>
+      </div>
+
+      {count > 0 && (() => {
+        const sm = tickedSummary(sel.ticked)
+        return (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-px bg-white/[0.04]">
+          {[
+            [t('Contracts'), sm.contractCount, 'text-white'],
+            [t('Paid (held at PJP)'), rupiah(sm.totalOrderAmount), 'text-slate-200'],
+            [t('Refunds'), sm.totalRefund ? `− ${rupiah(sm.totalRefund)}` : '—', 'text-rose-300'],
+            [t('Finder fee to buyer app'), sm.totalCommission ? `− ${rupiah(sm.totalCommission)}` : '—', 'text-amber-300'],
+            [t('Net payable'), rupiah(sm.totalNetPayable), 'text-emerald-300'],
+          ].map(([label, value, cls]) => (
+            <div key={label} className="bg-slate-950/40 px-4 py-3">
+              <p className="text-[10px] text-slate-500">{label}</p>
+              <p className={`text-sm font-bold tabular-nums ${cls}`}>{value}</p>
+            </div>
+          ))}
+        </div>
+        )
+      })()}
+
+      {due.length > 0 && (
+        <div className="pt-2">
+          <p className="px-5 pt-2 text-[11px] font-bold uppercase tracking-widest text-emerald-400">{t('Due now')}</p>
+          <ReconContractsTable rows={due} now={now} select={sel} />
+        </div>
+      )}
+      {upcoming.length > 0 && (
+        <div className="pt-2 pb-1">
+          <p className="px-5 pt-2 text-[11px] font-bold uppercase tracking-widest text-amber-400">{t('Upcoming')}</p>
+          <ReconContractsTable rows={upcoming} now={now} />
+        </div>
+      )}
+    </Card>
+  )
+}
+
 function ReconciliationPage() {
   const { t } = useI18n()
-  const { data, loading, error, reload } = useApi('/reconciliation')
+  const { data, loading, error, reload } = useApi('/reconciliation', [], { live: true })
   const [now, setNow] = useState(Date.now())
   const [sending, setSending] = useState(null)
   const [notice, setNotice] = useState(null)
   const [openBatch, setOpenBatch] = useState(null)
+  // Filters: one buyer app (each gets its own /reconcile) and the
+  // contracts' creation date.
+  const [np, setNp] = useState('')
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
+  const visible = useCallback(r => inDateRange(r, from, to), [from, to])
 
-  // Tick every second for the countdowns; re-fetch every 15s so contracts
-  // move from upcoming to due (and batch outcomes arrive) on their own.
+  // Tick every second for the countdowns; the data itself is live (useApi),
+  // so contracts move from upcoming to due and batch outcomes arrive.
   useEffect(() => {
     const tick = setInterval(() => setNow(Date.now()), 1000)
-    const r = setInterval(() => reload(), 15000)
-    return () => { clearInterval(tick); clearInterval(r) }
-  }, [reload])
+    return () => clearInterval(tick)
+  }, [])
 
-  const send = async bapId => {
-    if (!window.confirm(t('Send /reconcile to {bap} for everything due now?', { bap: bapId }))) return
+  const send = async (bapId, rows) => {
+    const ids = rows.map(r => r.contract_id)
+    const question = t('Send /reconcile to {bap} for the {count} selected contracts?', { bap: bapId, count: ids.length })
+    if (!window.confirm(question)) return
     setSending(bapId); setNotice(null)
     try {
-      const r = await apiFetch('/reconciliation/send', { method: 'POST', body: JSON.stringify({ bap_id: bapId }) })
-      setNotice({ ok: true, text: t('Sent {id} — net payable {amount}', { id: r.batch.id, amount: rupiah(r.batch.summary?.netPayable) }) })
+      const r = await apiFetch('/reconciliation/send', { method: 'POST', body: JSON.stringify({ bap_id: bapId, contract_ids: ids }) })
+      setNotice({ ok: true, text: t('Sent {id} — net payable {amount}', { id: r.batch.id, amount: rupiah(r.batch.summary?.totalNetPayable) }) })
     } catch (e) {
       let msg = e.message
       try { msg = JSON.parse(e.message).error || msg } catch { }
@@ -2725,7 +2873,8 @@ function ReconciliationPage() {
     }
   }
 
-  const baps = data?.baps || []
+  const allBaps = data?.baps || []
+  const baps = np ? allBaps.filter(g => g.bap_id === np) : allBaps
   const batches = data?.batches || []
   const terms = data?.terms
 
@@ -2741,6 +2890,30 @@ function ReconciliationPage() {
         }
       />
 
+      {allBaps.length > 0 && (
+        <Card className="mb-4 px-4 py-3 flex flex-wrap items-end gap-3">
+          <label className="text-[11px] text-slate-400 flex flex-col gap-1">
+            {t('Buyer app')}
+            <select value={np} onChange={e => setNp(e.target.value)} className="bg-slate-900 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white">
+              <option value="">{t('All buyer apps ({count})', { count: allBaps.length })}</option>
+              {allBaps.map(g => <option key={g.bap_id} value={g.bap_id}>{g.bap_id}</option>)}
+            </select>
+          </label>
+          <label className="text-[11px] text-slate-400 flex flex-col gap-1">
+            {t('Created from')}
+            <input type="date" value={from} max={to || undefined} onChange={e => setFrom(e.target.value)} className="bg-slate-900 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white [color-scheme:dark]" />
+          </label>
+          <label className="text-[11px] text-slate-400 flex flex-col gap-1">
+            {t('Created to')}
+            <input type="date" value={to} min={from || undefined} onChange={e => setTo(e.target.value)} className="bg-slate-900 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white [color-scheme:dark]" />
+          </label>
+          {(np || from || to) && (
+            <button onClick={() => { setNp(''); setFrom(''); setTo('') }} className="text-xs text-slate-400 hover:text-white px-3 py-1.5 rounded-lg border border-white/10">{t('Clear filters')}</button>
+          )}
+          <p className="text-[11px] text-slate-500 basis-full">{t('Each buyer app gets its own /reconcile. Tick any due or disputed contracts that match the filters; they go out together as a new batch.')}</p>
+        </Card>
+      )}
+
       {error && <div className="mb-4"><ErrorBox message={error} onRetry={reload} /></div>}
       {notice && (
         <div className={`mb-4 px-4 py-3 rounded-xl text-sm border ${notice.ok ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300' : 'bg-red-500/10 border-red-500/20 text-red-300'}`}>
@@ -2751,75 +2924,35 @@ function ReconciliationPage() {
       {loading && !data ? <LoadingSpinner label={t('Loading settlements…')} /> : baps.length === 0 ? (
         <Card className="p-8 text-center text-sm text-slate-500">{t('Nothing to reconcile — every settlement is in a batch.')}</Card>
       ) : baps.map(g => (
-        <Card key={g.bap_id} className="mb-5 overflow-hidden">
-          <div className="px-5 py-3 border-b border-white/[0.06] flex flex-wrap items-center gap-3">
-            <div className="min-w-0">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">{t('Buyer app')}</p>
-              <p className="text-sm font-mono text-white truncate">{g.bap_id}</p>
-            </div>
-            <button disabled={!g.due.length || sending === g.bap_id} onClick={() => send(g.bap_id)}
-              className="ml-auto flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-white disabled:opacity-40 transition-opacity"
-              style={{ background: BRAND }}>
-              <Send size={13} /> {sending === g.bap_id ? t('Sending…') : g.due.length ? t('Send reconcile ({count})', { count: g.due.length }) : t('Nothing due yet')}
-            </button>
-          </div>
-
-          {g.summary && (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-px bg-white/[0.04]">
-              {[
-                [t('Contracts'), g.summary.contractCount, 'text-white'],
-                [t('Paid (held)'), rupiah(g.summary.totalPaidAmount), 'text-slate-200'],
-                [t('Gateway refunds'), g.summary.totalGatewayRefundAmount ? `− ${rupiah(g.summary.totalGatewayRefundAmount)}` : '—', 'text-rose-300'],
-                [t('Provider refunds'), g.summary.totalProviderRefundAmount ? rupiah(g.summary.totalProviderRefundAmount) : '—', 'text-slate-400'],
-                [t('Fees retained'), rupiah(g.summary.totalFeesRetained), 'text-amber-300'],
-                [t('Net payable'), rupiah(g.summary.netPayable), 'text-emerald-300'],
-              ].map(([label, value, cls]) => (
-                <div key={label} className="bg-slate-950/40 px-4 py-3">
-                  <p className="text-[10px] text-slate-500">{label}</p>
-                  <p className={`text-sm font-bold tabular-nums ${cls}`}>{value}</p>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {g.due.length > 0 && (
-            <div className="pt-2">
-              <p className="px-5 pt-2 text-[11px] font-bold uppercase tracking-widest text-emerald-400">{t('Due now')}</p>
-              <ReconContractsTable rows={g.due} now={now} />
-            </div>
-          )}
-          {g.upcoming.length > 0 && (
-            <div className="pt-2 pb-1">
-              <p className="px-5 pt-2 text-[11px] font-bold uppercase tracking-widest text-amber-400">{t('Upcoming')}</p>
-              <ReconContractsTable rows={g.upcoming} now={now} />
-            </div>
-          )}
-        </Card>
+        <BapReconCard key={g.bap_id} g={g} now={now} visible={visible} sending={sending === g.bap_id} onSend={send} />
       ))}
 
       <SectionTitleBar>{t('Batches')}</SectionTitleBar>
       <Card>
-        {!batches.length ? <p className="px-5 py-8 text-center text-sm text-slate-500">{t('No reconciliation sent yet.')}</p> : (
+        {!batches.length ? <p className="px-5 py-8 text-center text-sm text-slate-500">{t('No reconciliation exchanged yet.')}</p> : (
           <div className="divide-y divide-white/[0.05]">
             {batches.map(b => {
               let sum = b.summary
               try { if (typeof sum === 'string') sum = JSON.parse(sum) } catch { }
               const open = openBatch === b.id
+              const sent = b.direction !== 'INBOUND'
               return (
                 <div key={b.id}>
                   <button onClick={() => setOpenBatch(open ? null : b.id)}
                     className="w-full text-left px-5 py-3 flex flex-wrap items-center gap-3 hover:bg-white/[0.025]">
                     <ChevronDown size={14} className={`text-slate-500 transition-transform ${open ? 'rotate-180 text-cyan-400' : ''}`} />
+                    <span className={`text-[10px] font-bold uppercase tracking-widest ${sent ? 'text-cyan-300' : 'text-slate-400'}`}>{sent ? t('Sent') : t('Received')}</span>
                     <span className="font-mono text-xs text-slate-300 truncate max-w-[22rem]" title={b.id}>{b.id}</span>
                     <StatusBadge status={b.status} />
                     <span className="text-xs text-slate-500">{t('{count} contracts', { count: b.contract_ids?.length || 0 })}</span>
-                    <span className="ml-auto text-xs font-semibold text-emerald-300 tabular-nums">{rupiah(sum?.netPayable)}</span>
+                    <span className="ml-auto text-xs font-semibold text-emerald-300 tabular-nums">{rupiah(sum?.totalNetPayable)}</span>
                     <span className="text-[11px] text-slate-500 whitespace-nowrap">{fmtDate(b.created_at)}</span>
                   </button>
                   {b.error_message && <p className="px-5 pb-2 -mt-1 text-xs text-red-300 break-words">{b.error_message}</p>}
                   {open && (
                     <div className="px-5 pb-4 grid grid-cols-1 lg:grid-cols-2 gap-3">
-                      {[[t('/reconcile sent'), b.request_payload], [t('/on_reconcile received'), b.response_payload]].map(([label, payload]) => (
+                      {[[sent ? t('/reconcile sent') : t('/reconcile received'), b.request_payload],
+                        [sent ? t('/on_reconcile received') : t('/on_reconcile sent'), b.response_payload]].map(([label, payload]) => (
                         <div key={label} className="rounded-xl border border-white/[0.07] bg-slate-950/60 overflow-hidden">
                           <p className="px-3 py-2 text-[11px] font-semibold text-slate-400 border-b border-white/[0.06]">{label}</p>
                           {payload ? (
@@ -2888,7 +3021,7 @@ function SupportPage() {
   const { t } = useI18n()
   const [page, setPage] = useState(1)
   const limit = 20
-  const { data, loading, error, reload } = useApi(`/support-tickets?page=${page}&limit=${limit}`, [page])
+  const { data, loading, error, reload } = useApi(`/support-tickets?page=${page}&limit=${limit}`, [page], { live: true })
   const items = data?.items || []
   const total = data?.total ?? 0
   const totalPages = Math.ceil(total / limit) || 1
@@ -2948,7 +3081,7 @@ function RatingsPage() {
   const { t } = useI18n()
   const [page, setPage] = useState(1)
   const limit = 20
-  const { data, loading, error, reload } = useApi(`/ratings?page=${page}&limit=${limit}`, [page])
+  const { data, loading, error, reload } = useApi(`/ratings?page=${page}&limit=${limit}`, [page], { live: true })
   const items = data?.items || []
   const total = data?.total ?? 0
   const totalPages = Math.ceil(total / limit) || 1

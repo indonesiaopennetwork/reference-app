@@ -130,7 +130,6 @@ func (s *Service) apply(ctx context.Context, txID uuid.UUID, txErr error, req *U
 			if len(items) > 0 {
 				res, err = cancellation.Execute(ctx, s.pool, s.cfg.BppID, txID, items, cancellation.Request{
 					Return: true, ReturnPerformance: perf,
-					SettlementTerms: cancellation.SettlementTerms(s.cfg.SettlementBasis, s.cfg.SettlementWindow),
 				})
 			}
 			if err != nil {
@@ -147,7 +146,6 @@ func (s *Service) apply(ctx context.Context, txID uuid.UUID, txErr error, req *U
 		}
 		if items := cancellation.ItemsFromUpdate(stored, requested); len(items) > 0 {
 			creq := cancellation.RequestFrom(requested)
-			creq.SettlementTerms = cancellation.SettlementTerms(s.cfg.SettlementBasis, s.cfg.SettlementWindow)
 			res, err := cancellation.Execute(ctx, s.pool, s.cfg.BppID, txID, items, creq)
 			if err != nil {
 				return nil, fmt.Errorf("partial cancellation failed: %w", err)

@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/ion/winroom/bpp/internal/settlement"
 )
 
 const (
@@ -66,10 +67,6 @@ type Request struct {
 	// ReturnPerformance is the RETURN performance the CN added to request the
 	// return; Apply records it on the contract as Return_Approved.
 	ReturnPerformance map[string]any
-
-	// SettlementTerms (settlementBasis / settlementWindow) are added to the
-	// refund settlement's settlementAttributes when set.
-	SettlementTerms map[string]any
 }
 
 // ErrReturnRejected is returned when the offer's return policy refuses a return.
@@ -257,13 +254,16 @@ func Apply(contract map[string]any, items []Item, req Request, now time.Time) (*
 		payment := paymentSettlement(settlements)
 		settledBefore := oldTotal
 		if len(settlements) > 0 {
-			settledBefore = num(asMap(asMap(settlements[len(settlements)-1])["settlementAttributes"])["settledAmount"])
+			settledBefore = settledAmount(asMap(asMap(settlements[len(settlements)-1])["settlementAttributes"]))
 		}
 		res.SettledAfter = round2(math.Max(0, settledBefore-res.Refund))
 		method, paymentID := "ONLINE", "settlement"
 		if payment != nil {
 			paymentID = str(payment["id"])
-			if m := str(asMap(payment["settlementAttributes"])["method"]); m != "" {
+			// An IONPayment method (QRIS, ...) on the settlement object is
+			// not a RetailSettlement one.
+			pa := asMap(payment["settlementAttributes"])
+			if m, typ := str(pa["method"]), str(pa["@type"]); m != "" && typ != settlement.Type && typ != "ion:IONPayment" {
 				method = m
 			}
 		}
@@ -281,17 +281,18 @@ func Apply(contract map[string]any, items []Item, req Request, now time.Time) (*
 				"refund": map[string]any{
 					"amount": res.Refund, "method": method,
 					"timelineDays": refundTimelineDays, "status": "INITIATED",
-					// Who pays it (see docs/specs/reconcile.yaml, RefundSource).
+					// Who pays it (RefundSource below).
 					"source": RefundSource(payment),
 				},
 			},
 		}
-		sa := asMap(res.RefundSettlement["settlementAttributes"])
-		for k, v := range req.SettlementTerms {
-			sa[k] = v
-		}
 		c["settlements"] = append(settlements, res.RefundSettlement)
 	}
+
+	// The settlement object's figures follow the items still ordered and
+	// the refund: finderFee.feeAmount (reported as the commission),
+	// refundAmount and netPayable.
+	settlement.Refresh(c)
 
 	res.Full = len(remaining) == 0
 	if req.Return {
@@ -663,6 +664,22 @@ func collectPerformanceIDs(c map[string]any) map[string]bool {
 
 // ParseISODuration parses an ISO 8601 duration such as P7D, PT2H or P1W2DT3H.
 // Years count as 365 days and months as 30.
+// LongestReturnWindow is the widest policies.returns.window among the
+// contract's offers (0 when none allows returns).
+func LongestReturnWindow(contract map[string]any) time.Duration {
+	var longest time.Duration
+	for _, c := range slice(contract["commitments"]) {
+		pol := asMap(asMap(asMap(asMap(asMap(c)["offer"])["offerAttributes"])["policies"])["returns"])
+		if allowed, _ := pol["allowed"].(bool); !allowed {
+			continue
+		}
+		if d, err := ParseISODuration(str(pol["window"])); err == nil && d > longest {
+			longest = d
+		}
+	}
+	return longest
+}
+
 func ParseISODuration(s string) (time.Duration, error) {
 	if !strings.HasPrefix(s, "P") || len(s) < 3 {
 		return 0, fmt.Errorf("not an ISO 8601 duration")
@@ -775,6 +792,14 @@ func RefundSource(payment map[string]any) string {
 		return "PROVIDER"
 	}
 	return "PAYMENT_GATEWAY"
+}
+
+// settledAmount is what a settlement leaves settled: a refund's
+// settledAmount (ION TradeSettlement), or what the buyer paid on the
+// settlement object.
+func settledAmount(attrs map[string]any) float64 {
+	v, _ := settlement.PaidAmount(attrs)
+	return v
 }
 
 // paymentSettlement is the first settlement that is not itself a refund.

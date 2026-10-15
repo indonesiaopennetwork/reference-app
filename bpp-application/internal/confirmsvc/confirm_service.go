@@ -21,6 +21,7 @@ import (
 	dbsqlc "github.com/ion/winroom/bpp/db/sqlc"
 	"github.com/ion/winroom/bpp/internal/config"
 	"github.com/ion/winroom/bpp/internal/httpclient"
+	"github.com/ion/winroom/bpp/internal/settlement"
 	"github.com/ion/winroom/bpp/internal/stock"
 )
 
@@ -58,11 +59,9 @@ func (s *ConfirmService) ProcessConfirm(ctx context.Context, req *ConfirmRequest
 
 	prettyLog(fmt.Sprintf("← IN   CONFIRM   | txn=%.8s… | bap=%s", req.Context.TransactionID, req.Context.BapID), req)
 
-	// The seller's payout terms go on every settlement before it is stored and echoed.
-	for i := range req.Message.Contract.Settlements {
-		st := &req.Message.Contract.Settlements[i]
-		st.SettlementAttributes = withSettlementTerms(st.SettlementAttributes, s.cfg.SettlementBasis, s.cfg.SettlementWindow)
-	}
+	// The seller's payout terms are agreed in on_init (on the settlement
+	// object); a contract initiated before that carried them gets them now.
+	withSettlementTerms(&req.Message.Contract, s.cfg.SettlementBasis, s.cfg.SettlementWindow)
 
 	// Transition DRAFT → ACTIVE, record settlements, and retrieve the contract UUID.
 	contractID, err := s.confirmContract(ctx, req)
@@ -247,24 +246,40 @@ func validateSettlements(c ConfirmContract) error {
 	return nil
 }
 
-// withSettlementTerms adds settlementBasis / settlementWindow (the seller's
-// payout terms, ION TradeSettlement) to a settlementAttributes object.
-func withSettlementTerms(raw json.RawMessage, basis, window string) json.RawMessage {
-	var attrs map[string]any
-	if json.Unmarshal(raw, &attrs) != nil || attrs == nil {
-		return raw
+// withSettlementTerms makes the contract's payment settlement the
+// settlement object (ION IONSettlementReconciliation, see package
+// settlement) and fills in settlementBasis / settlementWindow (the seller's
+// payout terms) when it does not carry them yet; terms agreed in on_init are
+// kept.
+func withSettlementTerms(c *ConfirmContract, basis, window string) {
+	raw, err := json.Marshal(c)
+	if err != nil {
+		return
 	}
-	if basis != "" {
+	var contract map[string]any
+	if json.Unmarshal(raw, &contract) != nil {
+		return
+	}
+	st, _ := settlement.Of(contract)
+	attrs := settlement.Normalize(contract)
+	if attrs == nil {
+		return
+	}
+	if _, ok := attrs["settlementBasis"]; !ok && basis != "" {
 		attrs["settlementBasis"] = basis
 	}
-	if window != "" {
+	if _, ok := attrs["settlementWindow"]; !ok && window != "" {
 		attrs["settlementWindow"] = window
 	}
 	out, err := json.Marshal(attrs)
 	if err != nil {
-		return raw
+		return
 	}
-	return out
+	for i := range c.Settlements {
+		if c.Settlements[i].ID == st["id"] {
+			c.Settlements[i].SettlementAttributes = out
+		}
+	}
 }
 
 // completedSettlements returns a copy of settlements marked COMPLETE — with no

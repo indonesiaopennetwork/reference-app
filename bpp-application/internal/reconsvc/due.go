@@ -1,6 +1,7 @@
-// Package reconsvc implements the BPP side of the Beckn reconcile extension
-// (docs/specs/reconcile.yaml): finding the settlements that are due, sending
-// one /reconcile per BAP, and applying the BAP's /on_reconcile.
+// Package reconsvc implements the BPP side of ION settlement reconciliation
+// (ION Release 1 core/api/v2.0.0/ion-additional.yaml in ion-specs):
+// finding the contracts whose settlement is due, sending /reconcile to a BAP
+// and applying its /on_reconcile, and answering a BAP's /reconcile.
 package reconsvc
 
 import (
@@ -9,18 +10,16 @@ import (
 	"fmt"
 	"math"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/ion/winroom/bpp/internal/cancellation"
-	"github.com/ion/winroom/bpp/internal/config"
 )
 
-// DueContract is a contract with settlements not yet reconciled, and when
-// they fall due.
+// DueContract is a contract whose settlement is not yet agreed, and when it
+// falls due.
 type DueContract struct {
 	ContractID    uuid.UUID `json:"contract_id"`
 	TransactionID uuid.UUID `json:"transaction_id"`
@@ -28,53 +27,71 @@ type DueContract struct {
 	BapURI        string    `json:"bap_uri"`
 	NetworkID     string    `json:"network_id"`
 	Status        string    `json:"status"`
-	Basis         string    `json:"settlement_basis"`
-	Window        string    `json:"settlement_window"`
+	// ReconciliationStatus is the payment's state in reconciliation: "" (not
+	// sent yet) or DISPUTED (sent again in the next batch).
+	ReconciliationStatus string `json:"reconciliation_status,omitempty"`
+	// ReconciliationID is the batch the contract was last in.
+	ReconciliationID string `json:"reconciliation_id,omitempty"`
+	// InNextBatch: the contract goes in this BPP's next /reconcile to its BAP
+	// (see nextBatch).
+	InNextBatch bool `json:"in_next_batch"`
+	// Selectable: the operator can choose the contract for a /reconcile (due
+	// or disputed; see choose).
+	Selectable bool `json:"selectable"`
+	// CreatedAt is when the contract was created.
+	CreatedAt time.Time `json:"created_at"`
+	// LastResult: for a contract its last batch didn't reconcile (disputed,
+	// or sent before its settlement window), how it fared there.
+	LastResult *Result `json:"last_result,omitempty"`
 	// BasisEvent is what started the payout clock ("delivered", "cancelled",
-	// "refund"); BasisAt is when. Zero BasisAt: the event hasn't happened.
+	// ...); BasisAt is when. Zero BasisAt: the event hasn't happened.
 	BasisEvent string     `json:"basis_event"`
 	BasisAt    *time.Time `json:"basis_at"`
 	DueAt      *time.Time `json:"due_at"`
 	Due        bool       `json:"due"`
 
-	Paid           float64 `json:"paid"`
-	GatewayRefund  float64 `json:"gateway_refund"`
-	ProviderRefund float64 `json:"provider_refund"`
-	Fees           float64 `json:"fees"`
-	Currency       string  `json:"currency"`
-
-	// SettlementIDs are the unreconciled settlements this contract contributes.
-	SettlementIDs []string `json:"settlement_ids"`
+	*Figures
 
 	contract map[string]any
 }
 
-// Summary is the settlementSummary of docs/specs/reconcile.yaml.
+// Summary is the settlementSummary of a /reconcile.
 type Summary struct {
-	BapID                     string  `json:"bapId"`
-	BppID                     string  `json:"bppId"`
-	Currency                  string  `json:"currency"`
-	SettlementDate            string  `json:"settlementDate"`
-	SettlementBasis           string  `json:"settlementBasis,omitempty"`
-	SettlementWindow          string  `json:"settlementWindow,omitempty"`
-	ContractCount             int     `json:"contractCount"`
-	TotalPaidAmount           float64 `json:"totalPaidAmount"`
-	TotalGatewayRefundAmount  float64 `json:"totalGatewayRefundAmount"`
-	TotalProviderRefundAmount float64 `json:"totalProviderRefundAmount"`
-	TotalFeesRetained         float64 `json:"totalFeesRetained"`
-	TotalSettledAmount        float64 `json:"totalSettledAmount"`
-	NetPayable                float64 `json:"netPayable"`
+	BapID            string  `json:"bapId"`
+	BppID            string  `json:"bppId"`
+	Currency         string  `json:"currency"`
+	SettlementDate   string  `json:"settlementDate"`
+	ContractCount    int     `json:"contractCount"`
+	TotalOrderAmount float64 `json:"totalOrderAmount"`
+	TotalCommission  float64 `json:"totalCommission"`
+	TotalWithholding float64 `json:"totalWithholding"`
+	TotalRefund      float64 `json:"totalRefund"`
+	TotalNetPayable  float64 `json:"totalNetPayable"`
+	// AgreedCount / DisputedCount count the contracts by accord; an
+	// /on_reconcile answer only.
+	AgreedCount   *int `json:"agreedCount,omitempty"`
+	DisputedCount *int `json:"disputedCount,omitempty"`
 }
 
-// Contracts returns this provider's contracts that have unreconciled
-// settlements, each with when it is due (due ones first, then by due time).
+// Contracts returns this provider's contracts whose settlement is not yet
+// agreed, each with when it is due (due ones first, then by due time).
 func (s *Service) Contracts(ctx context.Context, providerID string, now time.Time) ([]DueContract, error) {
+	return s.contracts(ctx, `AND provider_id = $2`, []any{s.cfg.BppID, providerID}, now)
+}
+
+// contractsWithBap is every contract with a BAP whose settlement is not yet
+// agreed, across this BPP's providers.
+func (s *Service) contractsWithBap(ctx context.Context, bapID string, now time.Time) ([]DueContract, error) {
+	return s.contracts(ctx, `AND bap_id = $2`, []any{s.cfg.BppID, bapID}, now)
+}
+
+func (s *Service) contracts(ctx context.Context, filter string, args []any, now time.Time) ([]DueContract, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, transaction_id, bap_id, bap_uri, COALESCE(network_id, ''), status::text,
-		       contract_attributes, delivered_at, updated_at
+		       contract_attributes, delivered_at, updated_at, created_at
 		  FROM contracts
-		 WHERE bpp_id = $1 AND provider_id = $2 AND deleted_at IS NULL
-		   AND status IN ('ACTIVE', 'CANCELLED', 'COMPLETE')`, s.cfg.BppID, providerID)
+		 WHERE bpp_id = $1 `+filter+` AND deleted_at IS NULL
+		   AND status IN ('ACTIVE', 'CANCELLED', 'COMPLETE')`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -84,11 +101,12 @@ func (s *Service) Contracts(ctx context.Context, providerID string, now time.Tim
 		attrs                      json.RawMessage
 		deliveredAt                *time.Time
 		updatedAt                  pgtype.Timestamptz
+		createdAt                  time.Time
 	}
 	var list []row
 	for rows.Next() {
 		var r row
-		if err := rows.Scan(&r.id, &r.txn, &r.bapID, &r.bapURI, &r.net, &r.status, &r.attrs, &r.deliveredAt, &r.updatedAt); err != nil {
+		if err := rows.Scan(&r.id, &r.txn, &r.bapID, &r.bapURI, &r.net, &r.status, &r.attrs, &r.deliveredAt, &r.updatedAt, &r.createdAt); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -106,7 +124,7 @@ func (s *Service) Contracts(ctx context.Context, providerID string, now time.Tim
 		contract["status"] = map[string]any{"code": r.status}
 		d := DueContract{
 			ContractID: r.id, TransactionID: r.txn, BapID: r.bapID, BapURI: r.bapURI,
-			NetworkID: r.net, Status: r.status, contract: contract,
+			NetworkID: r.net, Status: r.status, CreatedAt: r.createdAt, contract: contract,
 		}
 		var cancelledAt *time.Time
 		if r.status == "CANCELLED" && r.updatedAt.Valid {
@@ -115,6 +133,9 @@ func (s *Service) Contracts(ctx context.Context, providerID string, now time.Tim
 		}
 		if !s.assess(&d, r.deliveredAt, cancelledAt, now) {
 			continue
+		}
+		if s.cfg.ReconcileBeforeWindow { // RECONCILE_WAIT_FOR_SETTLEMENT_WINDOW=false
+			d.Due = true
 		}
 		out = append(out, d)
 	}
@@ -127,78 +148,43 @@ func (s *Service) Contracts(ctx context.Context, providerID string, now time.Tim
 		}
 		return out[i].DueAt.Before(*out[j].DueAt)
 	})
+	s.attachResults(ctx, out)
 	return out, nil
 }
 
-// assess fills d's amounts and due time from its unreconciled settlements.
-// It reports false when the contract has nothing left to reconcile.
+// assess fills d's figures and due time. It reports false when the contract
+// has nothing to reconcile: no payment, or its payment is already in a
+// pending batch or agreed. A DISPUTED payment is reconciled again.
 func (s *Service) assess(d *DueContract, deliveredAt, cancelledAt *time.Time, now time.Time) bool {
-	settlements := slice(d.contract["settlements"])
-	var payment map[string]any
-	var latestRefundAt *time.Time
-	for _, raw := range settlements {
-		st := asMap(raw)
-		a := asMap(st["settlementAttributes"])
-		refund := asMap(a["refund"])
-		if refund == nil && payment == nil {
-			payment = st
-		}
-		if str(a["reconciliationId"]) != "" {
-			continue // already in a batch
-		}
-		d.SettlementIDs = append(d.SettlementIDs, str(st["id"]))
-		if d.Currency == "" {
-			d.Currency = str(a["currency"])
-		}
-		if refund == nil {
-			d.Paid += num(a["settledAmount"])
-			continue
-		}
-		if str(refund["source"]) == "PROVIDER" {
-			d.ProviderRefund += num(refund["amount"])
-		} else {
-			d.GatewayRefund += num(refund["amount"])
-		}
-		if t, err := time.Parse(time.RFC3339, str(a["settledAt"])); err == nil && (latestRefundAt == nil || t.After(*latestRefundAt)) {
-			latestRefundAt = &t
-		}
-	}
-	if len(d.SettlementIDs) == 0 {
+	payment := paymentOf(d.contract)
+	if payment == nil {
 		return false
 	}
-	for _, c := range slice(d.contract["consideration"]) {
-		cm := asMap(c)
-		if id := str(cm["id"]); strings.HasPrefix(id, "cancellation-") || strings.HasPrefix(id, "restocking-") {
-			d.Fees += num(asMap(cm["considerationAttributes"])["totalAmount"])
-		}
+	pa := asMap(payment["settlementAttributes"])
+	switch status := str(pa["reconciliationStatus"]); status {
+	case "PENDING", "AGREED", "ADJUSTED":
+		return false
+	default:
+		d.ReconciliationStatus = status
+		d.ReconciliationID = str(pa["reconciliationId"])
 	}
+	f, err := contractFigures(d.contract, Terms{Basis: s.cfg.SettlementBasis, Window: s.cfg.SettlementWindow})
+	if err != nil {
+		return false
+	}
+	d.Figures = f
 
-	// Payout terms come from the payment settlement; the BPP's config is the
-	// fallback for settlements created before the terms existed.
-	pa := asMap(asMap(payment)["settlementAttributes"])
-	d.Basis, d.Window = config.NormalizeSettlementBasis(str(pa["settlementBasis"])), str(pa["settlementWindow"])
-	if d.Basis == "" {
-		d.Basis = s.cfg.SettlementBasis
-	}
-	if d.Window == "" {
-		d.Window = s.cfg.SettlementWindow
-	}
-
-	// What starts the clock: a payment still to reconcile waits for the basis
-	// event (or the cancellation, if that never came); settlements added after
-	// the payment was reconciled count from the latest refund. Shipment isn't
-	// recorded on its own, so AFTER_SHIPMENT counts from delivery.
-	paymentPending := payment != nil && str(pa["reconciliationId"]) == ""
-	paidAt, paidErr := time.Parse(time.RFC3339, str(pa["settledAt"]))
+	// What starts the clock. Shipment isn't recorded on its own, so
+	// AFTER_SHIPMENT counts from delivery; a contract cancelled before
+	// delivery counts from the cancellation.
+	paidAt, paidErr := time.Parse(time.RFC3339, firstNonEmpty(str(pa["paidAt"]), str(pa["settledAt"])))
 	switch {
-	case !paymentPending && latestRefundAt != nil:
-		d.BasisEvent, d.BasisAt = "refund", latestRefundAt
-	case d.Basis == "ON_CONFIRMATION" && paidErr == nil:
+	case f.Basis == "ON_CONFIRMATION" && paidErr == nil:
 		d.BasisEvent, d.BasisAt = "confirmed", &paidAt
 	case deliveredAt != nil:
 		d.BasisEvent, d.BasisAt = "delivered", deliveredAt
-		if d.Basis == "AFTER_RETURN_WINDOW" {
-			t := deliveredAt.Add(longestReturnWindow(d.contract))
+		if f.Basis == "AFTER_RETURN_WINDOW" {
+			t := deliveredAt.Add(cancellation.LongestReturnWindow(d.contract))
 			d.BasisEvent, d.BasisAt = "return window closed", &t
 		}
 	case cancelledAt != nil:
@@ -207,7 +193,7 @@ func (s *Service) assess(d *DueContract, deliveredAt, cancelledAt *time.Time, no
 		d.BasisEvent = "awaiting delivery"
 		return true
 	}
-	window, err := cancellation.ParseISODuration(d.Window)
+	window, err := cancellation.ParseISODuration(f.Window)
 	if err != nil {
 		window = 0
 	}
@@ -217,84 +203,73 @@ func (s *Service) assess(d *DueContract, deliveredAt, cancelledAt *time.Time, no
 	return true
 }
 
-// longestReturnWindow is the widest policies.returns.window among the
-// contract's offers (0 when none allows returns).
-func longestReturnWindow(contract map[string]any) time.Duration {
-	var longest time.Duration
-	for _, c := range slice(contract["commitments"]) {
-		pol := asMap(asMap(asMap(asMap(asMap(c)["offer"])["offerAttributes"])["policies"])["returns"])
-		if allowed, _ := pol["allowed"].(bool); !allowed {
-			continue
-		}
-		if d, err := cancellation.ParseISODuration(str(pol["window"])); err == nil && d > longest {
-			longest = d
-		}
-	}
-	return longest
-}
-
-// summarize totals the due contracts of one BAP (docs/specs/reconcile.yaml
-// SettlementSummary).
-func (s *Service) summarize(bapID string, due []DueContract, date string) Summary {
-	sm := Summary{BapID: bapID, BppID: s.cfg.BppID, SettlementDate: date, ContractCount: len(due), Currency: "IDR"}
+// summarize totals the figures of one BAP's due contracts.
+func summarize(bapID, bppID string, due []DueContract, date string) Summary {
+	sm := Summary{BapID: bapID, BppID: bppID, SettlementDate: date, ContractCount: len(due), Currency: "IDR"}
 	for i, d := range due {
-		if i == 0 {
-			sm.SettlementBasis, sm.SettlementWindow = d.Basis, d.Window
-			if d.Currency != "" {
-				sm.Currency = d.Currency
-			}
+		if i == 0 && d.Currency != "" {
+			sm.Currency = d.Currency
 		}
-		if d.Basis != sm.SettlementBasis {
-			sm.SettlementBasis = ""
-		}
-		if d.Window != sm.SettlementWindow {
-			sm.SettlementWindow = ""
-		}
-		sm.TotalPaidAmount += d.Paid
-		sm.TotalGatewayRefundAmount += d.GatewayRefund
-		sm.TotalProviderRefundAmount += d.ProviderRefund
-		sm.TotalFeesRetained += d.Fees
+		sm.TotalOrderAmount += d.OrderAmount
+		sm.TotalCommission += d.Commission
+		sm.TotalWithholding += d.Withholding
+		sm.TotalRefund += d.Refund
+		sm.TotalNetPayable += d.NetPayable
 	}
-	sm.TotalPaidAmount = round2(sm.TotalPaidAmount)
-	sm.TotalGatewayRefundAmount = round2(sm.TotalGatewayRefundAmount)
-	sm.TotalProviderRefundAmount = round2(sm.TotalProviderRefundAmount)
-	sm.TotalFeesRetained = round2(sm.TotalFeesRetained)
-	sm.TotalSettledAmount = round2(sm.TotalPaidAmount - sm.TotalGatewayRefundAmount)
-	sm.NetPayable = sm.TotalSettledAmount
+	sm.TotalOrderAmount = round2(sm.TotalOrderAmount)
+	sm.TotalCommission = round2(sm.TotalCommission)
+	sm.TotalWithholding = round2(sm.TotalWithholding)
+	sm.TotalRefund = round2(sm.TotalRefund)
+	sm.TotalNetPayable = round2(sm.TotalNetPayable)
 	return sm
 }
 
-// stamp returns a copy of d's contract with its unreconciled settlements
-// marked as part of batch reconciliationID (reconciliationStatus PENDING).
-func stamp(d DueContract, reconciliationID string) (map[string]any, error) {
-	b, err := json.Marshal(d.contract)
-	if err != nil {
-		return nil, err
-	}
-	var c map[string]any
-	if err := json.Unmarshal(b, &c); err != nil {
-		return nil, err
-	}
-	include := map[string]bool{}
-	for _, id := range d.SettlementIDs {
-		include[id] = true
-	}
-	for _, raw := range slice(c["settlements"]) {
-		st := asMap(raw)
-		if include[str(st["id"])] {
-			a := asMap(st["settlementAttributes"])
-			a["reconciliationId"], a["reconciliationStatus"] = reconciliationID, "PENDING"
+// summaryOf totals the reconciliation bags of a received or sent message.
+func summaryOf(bapID, bppID, date string, contracts []any) Summary {
+	sm := Summary{BapID: bapID, BppID: bppID, SettlementDate: date, Currency: "IDR"}
+	answered := false
+	agreed, disputed := 0, 0
+	for _, raw := range contracts {
+		sm.ContractCount++
+		contractAgreed := true
+		for _, st := range slice(asMap(raw)["settlements"]) {
+			b := asMap(asMap(st)["settlementAttributes"])
+			if accord, ok := b["accord"].(bool); ok {
+				answered = true
+				contractAgreed = contractAgreed && accord
+			}
+			if c := str(b["currency"]); c != "" {
+				sm.Currency = c
+			}
+			sm.TotalOrderAmount += num(asMap(b["orderAmount"])["value"])
+			sm.TotalCommission += num(asMap(b["commission"])["value"])
+			sm.TotalWithholding += num(asMap(b["withholdingAmount"])["value"])
+			sm.TotalRefund += num(asMap(b["refundAmount"])["value"])
+			sm.TotalNetPayable += num(asMap(b["netPayable"])["value"])
+		}
+		if contractAgreed {
+			agreed++
+		} else {
+			disputed++
 		}
 	}
-	return c, nil
+	if answered {
+		sm.AgreedCount, sm.DisputedCount = &agreed, &disputed
+	}
+	sm.TotalOrderAmount = round2(sm.TotalOrderAmount)
+	sm.TotalCommission = round2(sm.TotalCommission)
+	sm.TotalWithholding = round2(sm.TotalWithholding)
+	sm.TotalRefund = round2(sm.TotalRefund)
+	sm.TotalNetPayable = round2(sm.TotalNetPayable)
+	return sm
 }
 
-// reconciliationID names a batch by when it is sent and to whom:
-// recon-<settlement date>T<HHMMSS>Z-<bapId>, e.g.
-// recon-2026-09-29T183205Z-bap.example.com. The -N suffix only
-// disambiguates two batches to the same BAP within one second.
-func reconciliationID(at time.Time, bapID string, taken func(string) bool) string {
-	base := fmt.Sprintf("recon-%sZ-%s", at.UTC().Format("2006-01-02T150405"), bapID)
+// reconciliationID names a batch by when it is sent and who sends it:
+// recon-<settlement date>T<HHMMSS>Z-<senderId>, e.g.
+// recon-2026-09-29T183205Z-bpp.example.com. The -N suffix only
+// disambiguates two batches from the same sender within one second.
+func reconciliationID(at time.Time, senderID string, taken func(string) bool) string {
+	base := fmt.Sprintf("recon-%sZ-%s", at.UTC().Format("2006-01-02T150405"), senderID)
 	if !taken(base) {
 		return base
 	}
@@ -303,6 +278,15 @@ func reconciliationID(at time.Time, bapID string, taken func(string) bool) strin
 			return id
 		}
 	}
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func asMap(v any) map[string]any { m, _ := v.(map[string]any); return m }

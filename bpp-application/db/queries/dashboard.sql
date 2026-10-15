@@ -211,7 +211,8 @@ WHERE offer_id = $1
 -- provider_id scopes the log to one seller (the dashboard always passes the
 -- session's); NULL lists every seller's. A message belongs to a seller through
 -- its order (contracts.transaction_id, from select onwards), its
--- reconciliation batch (message.reconciliationId), or the catalog it
+-- reconciliation batch (message.reconciliationId: one the seller sent, or one
+-- a buyer app sent that covers the seller's contracts), or the catalog it
 -- publishes (message.catalogs[].id, "<bppId>/<catalogId>").
 SELECT
     m.id,
@@ -234,7 +235,11 @@ WHERE m.bpp_id = sqlc.arg(bpp_id)::text
          WHERE c.bpp_id = sqlc.arg(bpp_id)::text AND c.provider_id = sqlc.narg(provider_id)::text)
     OR m.request_payload->'message'->>'reconciliationId' IN (
         SELECT r.id FROM reconciliations r
-         WHERE r.bpp_id = sqlc.arg(bpp_id)::text AND r.provider_id = sqlc.narg(provider_id)::text)
+         WHERE r.bpp_id = sqlc.arg(bpp_id)::text
+           AND (r.provider_id = sqlc.narg(provider_id)::text
+                OR EXISTS (SELECT 1 FROM contracts c
+                            WHERE c.id = ANY (r.contract_ids)
+                              AND c.provider_id = sqlc.narg(provider_id)::text)))
     OR EXISTS (
         SELECT 1
           FROM catalogs k,

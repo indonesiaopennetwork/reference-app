@@ -90,6 +90,30 @@ type Config struct {
 	// identity resolution, not a hard requirement to serve traffic.
 	ZitadelIssuer      string
 	ZitadelInternalURL string
+
+	// FinderFee* is the fee this BAP asks for bringing an order, proposed in
+	// init as finderFee on the settlement object (package settlement): FinderFeeType
+	// PERCENT (of FinderFeeAppliesTo: ITEM_TOTAL | ORDER_TOTAL) or AMOUNT.
+	// The PJP pays it to this BAP after reconciliation.
+	// Env: FINDER_FEE_TYPE, FINDER_FEE_VALUE, FINDER_FEE_APPLIES_TO.
+	FinderFeeType      string
+	FinderFeeValue     float64
+	FinderFeeAppliesTo string
+
+	// ReconcileBeforeWindow lets every open paid contract be sent to
+	// /reconcile right away, without waiting for its settlement window to
+	// pass (for testing). Set by RECONCILE_WAIT_FOR_SETTLEMENT_WINDOW=false;
+	// the default (true) waits. It only affects sending: a BAP answering a
+	// /reconcile still rejects contracts whose window hasn't passed.
+	ReconcileBeforeWindow bool
+
+	// SettlementAccount* is this BAP's bank account for PJP payouts (its
+	// finder fee), declared in init as a settlementAccounts entry on the
+	// settlement object with holderRole BAP. Env: SETTLEMENT_BANK_CODE,
+	// SETTLEMENT_ACCOUNT_NUMBER, SETTLEMENT_ACCOUNT_NAME.
+	SettlementBankCode      string
+	SettlementAccountNumber string
+	SettlementAccountName   string
 }
 
 // Load reads all config values from the environment and returns a validated Config.
@@ -123,6 +147,23 @@ func Load() (*Config, error) {
 
 		ZitadelIssuer:      getEnv("ZITADEL_ISSUER", "http://localhost:8090"),
 		ZitadelInternalURL: os.Getenv("ZITADEL_INTERNAL_URL"),
+
+		FinderFeeType:      strings.ToUpper(getEnv("FINDER_FEE_TYPE", "PERCENT")),
+		FinderFeeAppliesTo: strings.ToUpper(getEnv("FINDER_FEE_APPLIES_TO", "ITEM_TOTAL")),
+
+		ReconcileBeforeWindow:   strings.EqualFold(os.Getenv("RECONCILE_WAIT_FOR_SETTLEMENT_WINDOW"), "false"),
+		SettlementBankCode:      getEnv("SETTLEMENT_BANK_CODE", "MANDIRI"),
+		SettlementAccountNumber: getEnv("SETTLEMENT_ACCOUNT_NUMBER", "1370000000001"),
+		SettlementAccountName:   os.Getenv("SETTLEMENT_ACCOUNT_NAME"),
+	}
+
+	fee, err := strconv.ParseFloat(getEnv("FINDER_FEE_VALUE", "3"), 64)
+	if err != nil || fee < 0 {
+		return nil, fmt.Errorf("FINDER_FEE_VALUE must be a non-negative number, got %q", os.Getenv("FINDER_FEE_VALUE"))
+	}
+	cfg.FinderFeeValue = fee
+	if cfg.SettlementAccountName == "" {
+		cfg.SettlementAccountName = cfg.BapID
 	}
 
 	if cfg.ZitadelInternalURL == "" {

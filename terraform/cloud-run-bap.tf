@@ -122,6 +122,35 @@ resource "google_cloud_run_v2_service" "bap" {
         name  = "DISCOVER_METHOD"
         value = var.discover_method
       }
+      # Settlement terms and reconciliation (see variables.tf).
+      env {
+        name  = "FINDER_FEE_TYPE"
+        value = var.finder_fee_type
+      }
+      env {
+        name  = "FINDER_FEE_VALUE"
+        value = tostring(var.finder_fee_value)
+      }
+      env {
+        name  = "FINDER_FEE_APPLIES_TO"
+        value = var.finder_fee_applies_to
+      }
+      env {
+        name  = "SETTLEMENT_BANK_CODE"
+        value = var.bap_settlement_bank_code
+      }
+      env {
+        name  = "SETTLEMENT_ACCOUNT_NUMBER"
+        value = var.bap_settlement_account_number
+      }
+      env {
+        name  = "SETTLEMENT_ACCOUNT_NAME"
+        value = var.bap_settlement_account_name
+      }
+      env {
+        name  = "RECONCILE_WAIT_FOR_SETTLEMENT_WINDOW"
+        value = tostring(var.reconcile_wait_for_settlement_window)
+      }
       env {
         # Buyer login (see bap-application/internal/auth.OptionalAuth, and
         # cloud-run-zitadel.tf) -- no ZITADEL_INTERNAL_URL needed, unlike

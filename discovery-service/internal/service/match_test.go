@@ -168,3 +168,29 @@ func TestMatchCatalogs_MediaSearchIsANoOp(t *testing.T) {
 		t.Fatalf("expected mediaSearch to be a no-op (nothing filtered), got %+v", got)
 	}
 }
+
+func TestMatchCatalogs_TextSearchMatchesTheProviderAndCatalogName(t *testing.T) {
+	cat := sampleMatchCatalogNoStorewideOffer()
+	cat.Provider.Descriptor.Name = "Tushar Store"
+	cat.Descriptor.Name = "Outdoor Gear"
+
+	// The provider's name alone finds all its resources.
+	out := matchCatalogs([]beckn.Catalog{cat}, beckn.Intent{TextSearch: "tushar"})
+	if len(out) != 1 || len(out[0].Resources) != 2 {
+		t.Fatalf("search by provider name: got %+v, want both resources", out)
+	}
+	// So does the catalog's own name.
+	out = matchCatalogs([]beckn.Catalog{cat}, beckn.Intent{TextSearch: "outdoor gear"})
+	if len(out) != 1 || len(out[0].Resources) != 2 {
+		t.Fatalf("search by catalog name: got %+v, want both resources", out)
+	}
+	// Provider name plus a product term narrows to that product.
+	out = matchCatalogs([]beckn.Catalog{cat}, beckn.Intent{TextSearch: "tushar mouse"})
+	if len(out) != 1 || len(out[0].Resources) != 1 || out[0].Resources[0].ID != "res-mouse" {
+		t.Fatalf("provider + product term: got %+v, want only res-mouse", out)
+	}
+	// Another provider's name matches nothing.
+	if out := matchCatalogs([]beckn.Catalog{cat}, beckn.Intent{TextSearch: "someone-else"}); len(out) != 0 {
+		t.Fatalf("other provider: got %+v, want nothing", out)
+	}
+}

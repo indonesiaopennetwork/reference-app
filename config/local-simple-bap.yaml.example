@@ -75,17 +75,18 @@ modules:
           id: schemav2validator
           config:
             type: url
-            location: https://schema.ion.id/release1/schema/vendored/beckn/protocol/v2.0.0/beckn.yaml
+            location: https://raw.githubusercontent.com/beckn/protocol-specifications-v2/refs/tags/core-v2.0.0-lts/api/v2.0.0/beckn.yaml
             cacheTTL: "3600"
             extendedSchema_enabled: "true"
             extendedSchema_cacheTTL: "86400"
             extendedSchema_maxCacheSize: "100"
             extendedSchema_downloadTimeout: "30"
             extendedSchema_allowedDomains: "raw.githubusercontent.com,schema.ion.id,schema.beckn.io"
-            # Beckn extension specs merged into the action index (/reconcile,
-            # /on_reconcile) -- see docs/specs/reconcile.yaml.
-            auxiliaryTypes: "file"
-            auxiliaryLocations: "/app/specs/reconcile.yaml"
+            # ION endpoints Beckn does not define (/reconcile, /on_reconcile),
+            # merged into the action index from ion-specs main. Their ION @context
+            # types (IONSettlementReconciliation, ...) are fetched from schema.ion.id.
+            auxiliaryTypes: "url"
+            auxiliaryLocations: "https://raw.githubusercontent.com/indonesiaopennetwork/ion-specs/refs/heads/main/releases/release1/schema/core/api/v2.0.0/ion-additional.yaml"
         cache:
           id: cache
           config:
@@ -147,17 +148,18 @@ modules:
           id: schemav2validator
           config:
             type: url
-            location: https://schema.ion.id/release1/schema/vendored/beckn/protocol/v2.0.0/beckn.yaml
+            location: https://raw.githubusercontent.com/beckn/protocol-specifications-v2/refs/tags/core-v2.0.0-lts/api/v2.0.0/beckn.yaml
             cacheTTL: "3600"
             extendedSchema_enabled: "true"
             extendedSchema_cacheTTL: "86400"
             extendedSchema_maxCacheSize: "100"
             extendedSchema_downloadTimeout: "30"
             extendedSchema_allowedDomains: "raw.githubusercontent.com,schema.ion.id,schema.beckn.io"
-            # Beckn extension specs merged into the action index (/reconcile,
-            # /on_reconcile) -- see docs/specs/reconcile.yaml.
-            auxiliaryTypes: "file"
-            auxiliaryLocations: "/app/specs/reconcile.yaml"
+            # ION endpoints Beckn does not define (/reconcile, /on_reconcile),
+            # merged into the action index from ion-specs main. Their ION @context
+            # types (IONSettlementReconciliation, ...) are fetched from schema.ion.id.
+            auxiliaryTypes: "url"
+            auxiliaryLocations: "https://raw.githubusercontent.com/indonesiaopennetwork/ion-specs/refs/heads/main/releases/release1/schema/core/api/v2.0.0/ion-additional.yaml"
         cache:
           id: cache
           config:

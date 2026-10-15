@@ -68,7 +68,7 @@ func matchCatalogs(catalogs []beckn.Catalog, intent beckn.Intent) []beckn.Catalo
 
 		resources := cat.Resources
 		if intent.TextSearch != "" {
-			resources = filterResourcesByText(resources, intent.TextSearch)
+			resources = filterResourcesByText(resources, intent.TextSearch, cat.Provider.Descriptor.Name+" "+cat.Descriptor.Name)
 		}
 		if filterPath != nil {
 			resources = filterResourcesByJSONPath(resources, filterPath)
@@ -92,8 +92,10 @@ func isEmptyIntent(intent beckn.Intent) bool {
 
 // filterResourcesByText keeps resources where every whitespace-separated
 // term in textSearch appears (case-insensitively) somewhere in the
-// resource's descriptor name/shortDesc/longDesc.
-func filterResourcesByText(resources []beckn.Resource, textSearch string) []beckn.Resource {
+// resource's descriptor name/shortDesc/longDesc or in catalogText -- the
+// catalog's provider name and its own name -- so a search for a provider
+// ("tushar") finds all its resources, and "tushar keripik" narrows them.
+func filterResourcesByText(resources []beckn.Resource, textSearch, catalogText string) []beckn.Resource {
 	terms := strings.Fields(strings.ToLower(textSearch))
 	if len(terms) == 0 {
 		return resources
@@ -101,7 +103,7 @@ func filterResourcesByText(resources []beckn.Resource, textSearch string) []beck
 
 	out := make([]beckn.Resource, 0, len(resources))
 	for _, r := range resources {
-		haystack := strings.ToLower(r.Descriptor.Name + " " + r.Descriptor.ShortDesc + " " + r.Descriptor.LongDesc)
+		haystack := strings.ToLower(r.Descriptor.Name + " " + r.Descriptor.ShortDesc + " " + r.Descriptor.LongDesc + " " + catalogText)
 		matched := true
 		for _, term := range terms {
 			if !strings.Contains(haystack, term) {

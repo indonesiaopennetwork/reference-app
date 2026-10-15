@@ -572,7 +572,11 @@ WHERE m.bpp_id = $1::text
          WHERE c.bpp_id = $1::text AND c.provider_id = $2::text)
     OR m.request_payload->'message'->>'reconciliationId' IN (
         SELECT r.id FROM reconciliations r
-         WHERE r.bpp_id = $1::text AND r.provider_id = $2::text)
+         WHERE r.bpp_id = $1::text
+           AND (r.provider_id = $2::text
+                OR EXISTS (SELECT 1 FROM contracts c
+                            WHERE c.id = ANY (r.contract_ids)
+                              AND c.provider_id = $2::text)))
     OR EXISTS (
         SELECT 1
           FROM catalogs k,
@@ -610,7 +614,8 @@ type ListRecentMessagesRow struct {
 // provider_id scopes the log to one seller (the dashboard always passes the
 // session's); NULL lists every seller's. A message belongs to a seller through
 // its order (contracts.transaction_id, from select onwards), its
-// reconciliation batch (message.reconciliationId), or the catalog it
+// reconciliation batch (message.reconciliationId: one the seller sent, or one
+// a buyer app sent that covers the seller's contracts), or the catalog it
 // publishes (message.catalogs[].id, "<bppId>/<catalogId>").
 func (q *Queries) ListRecentMessages(ctx context.Context, arg ListRecentMessagesParams) ([]ListRecentMessagesRow, error) {
 	rows, err := q.db.Query(ctx, listRecentMessages, arg.BppID, arg.ProviderID, arg.RowLimit)
