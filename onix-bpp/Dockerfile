@@ -1,4 +1,4 @@
-FROM fidedocker/onix-adapter:1.6.1
+FROM fidedocker/onix-adapter:1.9.0
 
 RUN apk add --no-cache gettext
 
