@@ -1,7 +1,6 @@
 package dashboardsvc
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -15,10 +14,12 @@ import (
 	"github.com/ion/winroom/bpp/internal/catalog"
 )
 
-// Editing a catalog's products (resources) and offers before publishing.
-// Each handler loads or saves one item of a catalog the caller's provider
-// owns. Once a catalog is published it is locked: its products and offers
-// can no longer be changed or added to.
+// Editing a catalog's products (resources) and offers. Each handler loads or
+// saves one item of a catalog the caller's provider owns. Publishing
+// (catalog_handlers.go's HandlePublishCatalog) doesn't lock a catalog -- it
+// can be edited and republished freely; onix-catalog-publish's own
+// catalog-publisher plugin diffs against what was last published, so a later
+// publish just sends the incremental change.
 
 // ownedCatalog aborts with 404 / 500 unless the caller's provider owns catalogID.
 func (h *Handler) ownedCatalog(c *gin.Context, catalogID string) bool {
@@ -34,38 +35,9 @@ func (h *Handler) ownedCatalog(c *gin.Context, catalogID string) bool {
 	return true
 }
 
-// errCatalogPublished is the 409 message for a write to a published catalog.
-const errCatalogPublished = "this catalog is published and can no longer be edited"
-
-// catalogPublished reports whether catalogID has been published to the network.
-func (h *Handler) catalogPublished(ctx context.Context, catalogID string) (bool, error) {
-	var published bool
-	err := h.pool.QueryRow(ctx,
-		`SELECT network_published_at IS NOT NULL FROM catalogs WHERE id = $1 AND bpp_id = $2 AND deleted_at IS NULL`,
-		catalogID, h.cfg.BppID,
-	).Scan(&published)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return false, nil
-	}
-	return published, err
-}
-
-// editableCatalog aborts unless the caller's provider owns catalogID (404)
-// and it hasn't been published yet (409).
+// editableCatalog aborts unless the caller's provider owns catalogID (404).
 func (h *Handler) editableCatalog(c *gin.Context, catalogID string) bool {
-	if !h.ownedCatalog(c, catalogID) {
-		return false
-	}
-	published, err := h.catalogPublished(c.Request.Context(), catalogID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return false
-	}
-	if published {
-		c.JSON(http.StatusConflict, gin.H{"error": errCatalogPublished})
-		return false
-	}
-	return true
+	return h.ownedCatalog(c, catalogID)
 }
 
 // HandleGetResource (GET /catalogs/:id/resources/:rid) returns one resource
