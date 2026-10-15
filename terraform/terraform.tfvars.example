@@ -75,3 +75,19 @@ region     = "asia-southeast1"
 # scripts/setup-zitadel-cloud.sh and set the real value it prints here, then
 # apply again — same two-phase pattern as the DB migration steps in README.md.
 # zitadel_client_id = "..."
+
+# --- Settlement and reconciliation (defaults in variables.tf) ---
+# Payout accounts: set your real ones -- the defaults are demo accounts.
+# bap_settlement_bank_code      = "MANDIRI"
+# bap_settlement_account_number = "1370000000001"
+# bap_settlement_account_name   = "Your BAP Pte Ltd"
+# bpp_settlement_bank_code      = "BCA"
+# bpp_settlement_account_number = "8730000000001"
+# bpp_settlement_account_name   = "Your BPP Pte Ltd"
+#
+# settlement_basis                     = "AFTER_DELIVERY" # or AFTER_SHIPMENT, ON_CONFIRMATION, AFTER_RETURN_WINDOW
+# settlement_window                    = "PT2M"           # testing; P1D for production
+# reconcile_wait_for_settlement_window = false            # testing; true for production
+# finder_fee_type                      = "PERCENT"        # or AMOUNT
+# finder_fee_value                     = 3
+# finder_fee_applies_to                = "ITEM_TOTAL"     # or ORDER_TOTAL

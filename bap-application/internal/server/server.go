@@ -67,15 +67,19 @@ func RegisterRoutes(r *gin.Engine, pool *pgxpool.Pool, cfg *config.Config, lh *l
 		onSupportH := onsupportsvc.NewHandler(pool, cfg, lh)
 		webhook.POST("/on_support", onSupportH.Handle)
 
-		// /reconcile — a BPP's settlement batch (Beckn extension,
-		// docs/specs/reconcile.yaml); answered with /on_reconcile.
+		// /reconcile — a BPP's settlement batch (ion-specs
+		// core/api/v2.0.0/ion-additional.yaml), answered with /on_reconcile; and
+		// /on_reconcile — a BPP's answer to this BAP's own /reconcile.
 		reconcileH := reconcilesvc.NewHandler(pool, cfg, lh)
 		webhook.POST("/reconcile", reconcileH.Handle)
+		webhook.POST("/on_reconcile", reconcileH.HandleOnReconcile)
 	}
 
-	// Settlement reconciliation overview (the /reconciliation page) -- open,
-	// no login or key required.
-	r.GET("/api/v1/reconciliation", reconcilesvc.NewHandler(pool, cfg, lh).HandleAdminOverview)
+	// Settlement reconciliation (the /reconciliation page) -- open, no login
+	// or key required: the overview, and sending this BAP's /reconcile.
+	reconAdmin := reconcilesvc.NewHandler(pool, cfg, lh)
+	r.GET("/api/v1/reconciliation", reconAdmin.HandleAdminOverview)
+	r.POST("/api/v1/reconciliation/send", reconAdmin.HandleSend)
 
 	// Client-facing APIs for the React frontend. OptionalAuth resolves a
 	// buyer identity from the bearer token when present, but never rejects

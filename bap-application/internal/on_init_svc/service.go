@@ -13,6 +13,7 @@ import (
 
 	dbsqlc "github.com/ion/winroom/bap/db/sqlc"
 	"github.com/ion/winroom/bap/internal/config"
+	reconcilesvc "github.com/ion/winroom/bap/internal/reconcile_svc"
 )
 
 // OnInitService persists the on_init contract snapshot (which carries the BPP-assigned contract id).
@@ -57,6 +58,17 @@ func (s *OnInitService) Process(ctx context.Context, req *OnInitRequest) {
 		Status:        dbsqlc.TransactionStatusINITRECEIVED,
 	}); err != nil {
 		s.lh.WithModule("on_init_svc").Warn().Error(err).Log("upsert transaction failed")
+	}
+
+	// The BPP states the finder fee its final price comes to
+	// (finderFee.feeAmount); flag it when this BAP computes otherwise --
+	// reconciliation would dispute the commission.
+	var priced map[string]any
+	if json.Unmarshal(req.Message.Contract, &priced) == nil {
+		if stated, computed, ok := reconcilesvc.CheckFinderFee(priced); ok && stated != computed {
+			s.lh.WithModule("on_init_svc").Warn().Log(fmt.Sprintf(
+				"finder fee mismatch on txn %s: seller states %v, buyer app computes %v", req.Context.TransactionID, stated, computed))
+		}
 	}
 
 	// Store contract snapshot under 'on_init', keeping the BPP contract id.

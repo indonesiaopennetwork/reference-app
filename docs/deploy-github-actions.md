@@ -9,7 +9,6 @@ pushed or merged to `main`. It redeploys only what changed, the same way
 | `bap-application/`, `bpp-application/`, `bap-frontend/`, `bpp-frontend/`, `onix-bap/`, `onix-bpp/`, `onix-catalog-publish/`, `dedi-static-server/`, `landing-page/`, `discovery-service/` | That service is rebuilt, pushed and rolled out |
 | `otel-collector/` | The collector sidecar is updated in `beckn-onix-bap` and `beckn-onix-bpp` |
 | `bap-application/db/migrations/`, `bpp-application/db/migrations/` | `migrate-bap` / `migrate-bpp` runs first; services roll out only if it succeeds |
-| `docs/specs/reconcile.yaml` | Copied into the onix templates (`task specs:sync`); both onix adapters are rolled out |
 | `ion-landing-page/Dockerfile.cloud`, `nginx.conf.template`, `env.sh` | The `ion-landing-page` image is rolled out |
 | `ion-landing-page/index.html` | Uploaded to the `<project>-ion-landing-page-static` bucket |
 

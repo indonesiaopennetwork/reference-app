@@ -107,16 +107,6 @@ tasks:
     cmds:
       - docker compose down
 
-  specs:sync:
-    desc: >-
-      Copy the ION network extension spec (docs/specs/reconcile.yaml) into the
-      onix-bap / onix-bpp image templates, where the cloud adapters load it
-      from /app/config (local compose mounts docs/specs directly). Run after
-      editing the spec, before redeploying the adapters.
-    cmds:
-      - cp docs/specs/reconcile.yaml onix-bap/templates/reconcile.yaml
-      - cp docs/specs/reconcile.yaml onix-bpp/templates/reconcile.yaml
-
   # ───────────────────────────────────────────────────────────────────────
   # Fresh deploy — mirrors README.md "Deploy to your fresh GCP project"
   # steps 0-9. Run in order. Steps 0/2/4 aren't here (a one-time backend.tf

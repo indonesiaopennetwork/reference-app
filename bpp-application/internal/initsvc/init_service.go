@@ -56,6 +56,12 @@ func (s *InitService) ProcessInit(ctx context.Context, req *InitRequest) {
 
 	prettyLog(fmt.Sprintf("← IN   INIT      | txn=%.8s… | bap=%s", req.Context.TransactionID, req.Context.BapID), req)
 
+	// This seller's payout terms and settlement account go into the contract
+	// before it is stored and echoed in on_init.
+	if err := applySellerTerms(&req.Message.Contract, s.cfg); err != nil {
+		s.lh.WithModule("initsvc").Warn().Error(err).Log("settlement terms not applied")
+	}
+
 	// Persist contract state and get (or create) the contract ID.
 	contractID, err := s.persistContract(ctx, req)
 	if err != nil {

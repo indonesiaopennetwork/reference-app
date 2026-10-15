@@ -16,20 +16,8 @@ import (
 	"github.com/ion/winroom/bpp/internal/stock"
 )
 
-// SettlementTerms builds the settlementBasis / settlementWindow attributes
-// (seller payout terms) for settlements; empty values are left out.
-func SettlementTerms(basis, window string) map[string]any {
-	t := map[string]any{}
-	if basis != "" {
-		t["settlementBasis"] = basis
-	}
-	if window != "" {
-		t["settlementWindow"] = window
-	}
-	return t
-}
-
-// ErrNotActive is returned when the contract is no longer ACTIVE.
+// ErrNotActive is returned when the contract is no longer ACTIVE (or, for
+// a return, COMPLETE).
 var ErrNotActive = errors.New("contract is not ACTIVE")
 
 // LatestContract returns a contract's latest full state: contract_attributes
@@ -82,7 +70,9 @@ func Execute(ctx context.Context, pool *pgxpool.Pool, bppID string, txID uuid.UU
 	if err != nil {
 		return nil, fmt.Errorf("contract not found: %w", err)
 	}
-	if row.Status != dbsqlc.ContractStatusACTIVE {
+	// A delivered contract may already be COMPLETE (its settlement basis
+	// event has passed); it can still be returned.
+	if row.Status != dbsqlc.ContractStatusACTIVE && !(req.Return && row.Status == dbsqlc.ContractStatusCOMPLETE) {
 		return nil, fmt.Errorf("%w (status %s)", ErrNotActive, row.Status)
 	}
 	contract, err := LatestContract(ctx, pool, txID, row.ContractAttributes)
@@ -122,7 +112,7 @@ func Execute(ctx context.Context, pool *pgxpool.Pool, bppID string, txID uuid.UU
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	status := dbsqlc.ContractStatusACTIVE
+	status := row.Status
 	if res.Full && req.Return {
 		status = dbsqlc.ContractStatusCOMPLETE
 	} else if res.Full {
@@ -130,8 +120,8 @@ func Execute(ctx context.Context, pool *pgxpool.Pool, bppID string, txID uuid.UU
 	}
 	tag, err := tx.Exec(ctx,
 		`UPDATE contracts SET status = $1, contract_attributes = $2, updated_at = NOW()
-		  WHERE id = $3 AND bpp_id = $4 AND status = 'ACTIVE'::contract_status AND deleted_at IS NULL`,
-		status, contractJSON, row.ID, bppID)
+		  WHERE id = $3 AND bpp_id = $4 AND status = $5 AND deleted_at IS NULL`,
+		status, contractJSON, row.ID, bppID, row.Status)
 	if err != nil {
 		return nil, fmt.Errorf("update contract: %w", err)
 	}

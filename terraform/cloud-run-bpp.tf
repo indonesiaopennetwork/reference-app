@@ -97,6 +97,31 @@ resource "google_cloud_run_v2_service" "bpp" {
         name  = "NETWORK_ID"
         value = var.network_id
       }
+      # Settlement terms and reconciliation (see variables.tf).
+      env {
+        name  = "SETTLEMENT_BASIS"
+        value = var.settlement_basis
+      }
+      env {
+        name  = "SETTLEMENT_WINDOW"
+        value = var.settlement_window
+      }
+      env {
+        name  = "SETTLEMENT_BANK_CODE"
+        value = var.bpp_settlement_bank_code
+      }
+      env {
+        name  = "SETTLEMENT_ACCOUNT_NUMBER"
+        value = var.bpp_settlement_account_number
+      }
+      env {
+        name  = "SETTLEMENT_ACCOUNT_NAME"
+        value = var.bpp_settlement_account_name
+      }
+      env {
+        name  = "RECONCILE_WAIT_FOR_SETTLEMENT_WINDOW"
+        value = tostring(var.reconcile_wait_for_settlement_window)
+      }
       env {
         name  = "CDS_PUBLISH_URL"
         value = "${google_cloud_run_v2_service.onix_catalog_publish.uri}/catalog/publish"

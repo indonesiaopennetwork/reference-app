@@ -453,3 +453,40 @@ func TestRefundSource(t *testing.T) {
 		t.Errorf("pending reconciliation: source = %s, want PAYMENT_GATEWAY", got)
 	}
 }
+
+// The finder fee (ION TradeContract finderFee.feeAmount) follows the items
+// still ordered: 3% of 90,000 before, of 45,000 after cancelling one of two
+// units, and nothing once everything is cancelled.
+func TestFinderFeeFollowsTheItemsStillOrdered(t *testing.T) {
+	withFee := func() map[string]any {
+		c := load(t)
+		c["contractAttributes"] = map[string]any{"finderFee": map[string]any{
+			"feeType": "PERCENT", "feeValue": 3.0, "appliesTo": "ITEM_TOTAL", "feeAmount": 2700.0}}
+		return c
+	}
+	fee := func(c map[string]any) any { return asMap(asMap(c["contractAttributes"])["finderFee"])["feeAmount"] }
+
+	res, err := Apply(withFee(), []Item{{CommitmentID: "commitment-cake", Quantity: 1}}, reason, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fee(res.Contract); got != 1350.0 {
+		t.Errorf("after cancelling 1 of 2: feeAmount = %v, want 1350", got)
+	}
+
+	res, err = Apply(withFee(), nil, reason, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fee(res.Contract); got != 0.0 {
+		t.Errorf("after a full cancel: feeAmount = %v, want 0", got)
+	}
+
+	res, err = Apply(load(t), nil, reason, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, has := asMap(res.Contract["contractAttributes"])["finderFee"]; has {
+		t.Error("a contract without a finder fee must not get one")
+	}
+}

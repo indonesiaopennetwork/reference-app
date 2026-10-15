@@ -68,9 +68,13 @@ func RegisterRoutes(svc *service.Service, cfg *config.Config, verifier *auth.Ver
 	registerTransactionRoutes(svc, webhook, pool, cfg)
 	registerFulfillmentRoutes(svc, webhook, pool, cfg)
 	registerPostFulfillmentRoutes(svc, webhook, pool, cfg)
-	// /webhook/on_reconcile — the BAP's reconciliation outcome (Beckn extension,
-	// docs/specs/reconcile.yaml); the BPP sends /reconcile from the dashboard.
-	webhook.POST("/on_reconcile", reconsvc.NewHandler(pool, cfg, svc.LogHarbour).HandleOnReconcile)
+	// /webhook/on_reconcile — the BAP's answer to the BPP's /reconcile (ION
+	// core/api/v2.0.0/ion-additional.yaml in ion-specs); the BPP sends /reconcile
+	// from the dashboard.
+	reconH := reconsvc.NewHandler(pool, cfg, svc.LogHarbour)
+	webhook.POST("/on_reconcile", reconH.HandleOnReconcile)
+	// /webhook/reconcile — a BAP's own /reconcile, answered with /on_reconcile.
+	webhook.POST("/reconcile", reconH.HandleReconcile)
 	registerBecknCatalogRoutes(svc, webhook)
 }
 

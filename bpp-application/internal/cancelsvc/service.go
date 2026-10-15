@@ -108,9 +108,7 @@ func (s *Service) Process(ctx context.Context, req *CancelRequest) {
 func (s *Service) cancelRequest(req *CancelRequest) cancellation.Request {
 	var contract map[string]any
 	_ = json.Unmarshal(req.Message.Contract, &contract)
-	r := cancellation.RequestFrom(contract)
-	r.SettlementTerms = cancellation.SettlementTerms(s.cfg.SettlementBasis, s.cfg.SettlementWindow)
-	return r
+	return cancellation.RequestFrom(contract)
 }
 
 // callOnCancel POSTs on_cancel through the ONIX BPP caller and logs the OUTBOUND entry.

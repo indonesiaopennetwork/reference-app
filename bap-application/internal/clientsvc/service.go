@@ -20,6 +20,7 @@ import (
 
 	dbsqlc "github.com/ion/winroom/bap/db/sqlc"
 	"github.com/ion/winroom/bap/internal/config"
+	"github.com/ion/winroom/bap/internal/settlement"
 	"github.com/ion/winroom/bap/internal/discoverwait"
 	"github.com/ion/winroom/bap/internal/httpclient"
 )
@@ -602,8 +603,72 @@ func (s *ClientService) buildInitMessage(ctx context.Context, q *dbsqlc.Queries,
 
 	patchBuyerParticipant(contract, s.cfg.BapID, billing)
 	patchPerformanceDelivery(contract, billing)
+	if err := declareSettlement(contract, s.cfg); err != nil {
+		return nil, err
+	}
 
 	return json.Marshal(map[string]interface{}{"contract": contract})
+}
+
+// declareSettlement adds the order's settlement object (ION
+// IONSettlementReconciliation, see package settlement), which the BPP answers
+// in on_init: this BAP collects the buyer payment by QRIS into the PJP, asks
+// for its finder fee (FinderFee*), and gives the account the fee is paid to
+// (holderRole BAP). The figures are estimates on the quoted price until the
+// BPP answers with its own.
+func declareSettlement(contract map[string]interface{}, cfg *config.Config) error {
+	considerationID, _, currency, err := firstConsideration(contract)
+	if err != nil {
+		return err
+	}
+	fee := map[string]interface{}{"feeType": cfg.FinderFeeType, "feeValue": cfg.FinderFeeValue}
+	if cfg.FinderFeeType == "PERCENT" {
+		fee["appliesTo"] = cfg.FinderFeeAppliesTo
+	}
+	contract["settlements"] = []interface{}{
+		map[string]interface{}{
+			"id":              "settlement-" + uuid.New().String()[:8],
+			"considerationId": considerationID,
+			"status":          "DRAFT",
+			"settlementAttributes": map[string]interface{}{
+				"@context":    settlement.Context,
+				"@type":       settlement.Type,
+				"method":      "QRIS",
+				"paymentRail": "QRIS",
+				"collectedBy": "BAP",
+				"timing":      "ON_ORDER",
+				"status":      "PENDING",
+				"currency":    currency,
+				"finderFee":   fee,
+				"settlementAccounts": []interface{}{map[string]interface{}{
+					"holderRole":    "BAP",
+					"bankCode":      cfg.SettlementBankCode,
+					"accountNumber": cfg.SettlementAccountNumber,
+					"accountName":   cfg.SettlementAccountName,
+				}},
+			},
+		},
+	}
+	settlement.Refresh(contract)
+	return nil
+}
+
+// firstConsideration returns the id, totalAmount and currency of the
+// contract's first consideration (the price the buyer pays).
+func firstConsideration(contract map[string]interface{}) (id string, amount float64, currency string, err error) {
+	considerations, _ := contract["consideration"].([]interface{})
+	if len(considerations) == 0 {
+		return "", 0, "", fmt.Errorf("contract has no consideration to settle")
+	}
+	consideration, _ := considerations[0].(map[string]interface{})
+	id, _ = consideration["id"].(string)
+	attrs, _ := consideration["considerationAttributes"].(map[string]interface{})
+	amount, okAmount := attrs["totalAmount"].(float64)
+	currency, _ = attrs["currency"].(string)
+	if id == "" || !okAmount || currency == "" {
+		return "", 0, "", fmt.Errorf("consideration is missing id, totalAmount or currency")
+	}
+	return id, amount, currency, nil
 }
 
 // ErrQuoteUnavailable means the seller's quote (on_select) can't be ordered:
@@ -739,7 +804,7 @@ func (s *ClientService) Confirm(ctx context.Context, req *ClientConfirmRequest) 
 	if err := json.Unmarshal(snapshot.Contract, &contract); err != nil {
 		return fmt.Errorf("parse contract snapshot: %w", err)
 	}
-	if err := attachSettlement(contract); err != nil {
+	if err := attachSettlement(contract, s.cfg); err != nil {
 		return fmt.Errorf("attach settlement for txn %s: %w", txnID, err)
 	}
 
@@ -773,42 +838,32 @@ func (s *ClientService) Confirm(ctx context.Context, req *ClientConfirmRequest) 
 // is generated in place of the gateway's transaction reference.
 const mockGatewayName = "mock-gateway"
 
-// attachSettlement adds a COMMITTED settlement (ION TradeSettlement
-// attributes) discharging the contract's first consideration, carrying the
-// payment proof the BPP needs to activate the contract on confirm.
-func attachSettlement(contract map[string]interface{}) error {
-	considerations, _ := contract["consideration"].([]interface{})
-	if len(considerations) == 0 {
-		return fmt.Errorf("contract has no consideration to settle")
+// attachSettlement records the buyer's payment on the settlement object
+// agreed in init / on_init, which the BPP needs to activate the contract on
+// confirm: status PAID, paidAt and gatewayRef, with orderAmount the
+// consideration total paid into the PJP. The terms, accounts and the finder
+// fee the BPP stated are kept. A contract from before init declared the
+// settlement gets a fresh one with this BAP's account only.
+func attachSettlement(contract map[string]interface{}, cfg *config.Config) error {
+	considerationID, amount, _, err := firstConsideration(contract)
+	if err != nil {
+		return err
 	}
-	consideration, _ := considerations[0].(map[string]interface{})
-	considerationID, _ := consideration["id"].(string)
-	attrs, _ := consideration["considerationAttributes"].(map[string]interface{})
-	amount, okAmount := attrs["totalAmount"].(float64)
-	currency, okCurrency := attrs["currency"].(string)
-	if considerationID == "" || !okAmount || !okCurrency || currency == "" {
-		return fmt.Errorf("consideration is missing id, totalAmount or currency")
+	if st, _ := settlement.Of(contract); st == nil {
+		if err := declareSettlement(contract, cfg); err != nil {
+			return err
+		}
 	}
-
-	contract["settlements"] = []interface{}{
-		map[string]interface{}{
-			"id":              "settlement-" + uuid.New().String()[:8],
-			"considerationId": considerationID,
-			"status":          "COMMITTED",
-			"settlementAttributes": map[string]interface{}{
-				"@context":      "https://schema.ion.id/release1/schema/extension/trade/TradeSettlement/v1/context.jsonld",
-				"@type":         "ion:IONTradeSettlement",
-				"method":        "ONLINE",
-				"settledAt":     time.Now().UTC().Format(time.RFC3339),
-				"settledAmount": amount,
-				"currency":      currency,
-				"gateway": map[string]interface{}{
-					"name":          mockGatewayName,
-					"transactionId": uuid.New().String(),
-				},
-			},
-		},
-	}
+	payment, _ := settlement.Of(contract)
+	attrs := settlement.Normalize(contract)
+	payment["considerationId"] = considerationID
+	payment["status"] = "COMMITTED"
+	attrs["status"] = "PAID"
+	attrs["orderAmount"] = map[string]interface{}{"value": amount}
+	attrs["paidAt"] = time.Now().UTC().Format(time.RFC3339)
+	attrs["gatewayRef"] = mockGatewayName + "-" + uuid.New().String()
+	settlement.SetFigures(attrs, settlement.Compute(contract, false))
+	contract["settlements"] = []interface{}{payment}
 	return nil
 }
 

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useLive } from './live.js';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ShoppingCart, Search, X, Package, CheckCircle2, Loader2,
@@ -1017,33 +1018,33 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
 
 const BILLING_PROFILES = [
   {
-    name: 'Arjun Sharma',
-    email: 'arjun.sharma@example.in',
-    phone: '+919876543210',
-    streetAddress: '42 MG Road, Koramangala',
-    addressLocality: 'Bengaluru',
-    addressRegion: 'Karnataka',
-    postalCode: '560034',
-    addressCountry: 'IN',
-  },
-  {
-    name: 'Priya Nair',
-    email: 'priya.nair@example.in',
-    phone: '+917012345678',
-    streetAddress: '15 Marine Drive, Fort',
-    addressLocality: 'Mumbai',
-    addressRegion: 'Maharashtra',
-    postalCode: '400001',
-    addressCountry: 'IN',
-  },
-  {
     name: 'Reza Pratama',
     email: 'reza.pratama@example.id',
     phone: '+6281234567890',
     streetAddress: 'Jl. Sudirman No. 52, Senayan',
-    addressLocality: 'Jakarta',
+    addressLocality: 'Jakarta Selatan',
     addressRegion: 'DKI Jakarta',
     postalCode: '10270',
+    addressCountry: 'ID',
+  },
+  {
+    name: 'Siti Rahmawati',
+    email: 'siti.rahmawati@example.id',
+    phone: '+6282112345678',
+    streetAddress: 'Jl. Ir. H. Juanda No. 88, Dago',
+    addressLocality: 'Bandung',
+    addressRegion: 'Jawa Barat',
+    postalCode: '40135',
+    addressCountry: 'ID',
+  },
+  {
+    name: 'Budi Santoso',
+    email: 'budi.santoso@example.id',
+    phone: '+6281398765432',
+    streetAddress: 'Jl. Tunjungan No. 21, Genteng',
+    addressLocality: 'Surabaya',
+    addressRegion: 'Jawa Timur',
+    postalCode: '60275',
     addressCountry: 'ID',
   },
 ];
@@ -1315,7 +1316,10 @@ function OrderItemsCard({ txnId, order, txnStatus, deliveredAt, onChanged }) {
   // Cancellation is offered on a confirmed order, per item, until its offer's cutoff.
   const canCancel = !delivered && txnStatus === 'CONFIRMED' && cancellable.length > 0;
   const returnable = activeItems.filter(it => !returnEligibility(it.returnPolicy, order.fulfillmentStatus, deliveredAt).blocked);
-  const canReturn = delivered && txnStatus === 'CONFIRMED' && returnable.length > 0;
+  // A delivered order may already be COMPLETE (its settlement basis event has
+  // passed); it can still be returned within the return window.
+  const returnOpen = txnStatus === 'CONFIRMED' || txnStatus === 'COMPLETE';
+  const canReturn = delivered && returnOpen && returnable.length > 0;
 
   const returnItems = async (items, key) => {
     if (!window.confirm(key === 'ALL' ? t('Return all items?') : t('Return the selected quantity of this item?'))) return;
@@ -1391,7 +1395,7 @@ function OrderItemsCard({ txnId, order, txnStatus, deliveredAt, onChanged }) {
               {!delivered && txnStatus === 'CONFIRMED' && !item.cancelled && blockedReason(item) && (
                 <p className="mt-1.5 text-right text-[10px] text-slate-500">{blockedReason(item)}</p>
               )}
-              {delivered && txnStatus === 'CONFIRMED' && !item.cancelled && (() => {
+              {delivered && returnOpen && !item.cancelled && (() => {
                 const el = returnEligibility(item.returnPolicy, order.fulfillmentStatus, deliveredAt);
                 if (el.blocked) return <p className="mt-1.5 text-right text-[10px] text-slate-500">{el.blocked}</p>;
                 return (
@@ -1529,6 +1533,10 @@ function OrderDetailPanel({ txnId, onBack }) {
       .then(d => { setDetail(d); setLoading(false); })
       .catch(e => { setError(String(e)); setLoading(false); });
   }, [txnId, reloadKey]);
+
+  // Live: re-fetch quietly so the seller's changes (delivery, completion,
+  // refunds) show on their own.
+  useLive(() => setReloadKey(k => k + 1), !!detail);
 
   // While a cancel/update is in flight, re-fetch until the BPP's callback lands.
   useEffect(() => {
@@ -1889,19 +1897,20 @@ function MessageLogPanel() {
   const [filter, setFilter] = useState('');
   const [open, setOpen] = useState(() => new Set());
 
-  const load = useCallback(async () => {
-    setLoading(true); setError(null);
+  const load = useCallback(async (silent = false) => {
+    if (!silent) { setLoading(true); setError(null); }
     try {
       const r = await apiFetch('/messages?limit=200');
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
       setItems((await r.json()).items || []);
     } catch (e) {
-      setError(e.message);
+      if (!silent) setError(e.message);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
   useEffect(() => { load(); }, [load]);
+  useLive(() => load(true));
 
   const toggle = id => setOpen(prev => {
     const next = new Set(prev);
@@ -1937,7 +1946,7 @@ function MessageLogPanel() {
               </button>
             ))}
           </div>
-          <button onClick={load} title={t('Refresh')}
+          <button onClick={() => load()} title={t('Refresh')}
             className="ml-auto p-1.5 rounded-lg text-slate-400 hover:text-white border border-white/[0.08]">
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
           </button>
@@ -2011,8 +2020,8 @@ function OrderHistoryDrawer({ open, onClose }) {
   const [tab, setTab] = useState('orders'); // orders | messages
   const limit = 10;
 
-  const load = useCallback(async (p = 1) => {
-    setLoading(true);
+  const load = useCallback(async (p = 1, silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const r = await apiFetch(`/orders?page=${p}&limit=${limit}`);
       if (!r.ok) throw new Error(await r.text());
@@ -2023,9 +2032,11 @@ function OrderHistoryDrawer({ open, onClose }) {
     } catch (e) {
       console.error('orders fetch', e);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
+  // Live while the order list is showing (the detail panel refreshes itself).
+  useLive(() => load(page, true), open && tab === 'orders' && !selectedId);
 
   useEffect(() => {
     if (open) { load(1); setSelectedId(null); setTab('orders'); }
@@ -2177,7 +2188,7 @@ function OrderHistoryDrawer({ open, onClose }) {
 // does the typing) and ends up with a sample order placed with a seller.
 const TOUR_DONE_KEY = 'bap.tourDone';
 const statusIn = (...list) => ({ status }) => list.includes(status);
-const PLACED = ['CONFIRMED', 'STATUS_SENT', 'CANCEL_SENT', 'CANCELLED', 'RATE_SENT', 'SUPPORT_SENT'];
+const PLACED = ['CONFIRMED', 'COMPLETE', 'STATUS_SENT', 'CANCEL_SENT', 'CANCELLED', 'RATE_SENT', 'SUPPORT_SENT'];
 const tourSteps = t => [
   { eyebrow: t('Welcome'), title: t('Shop the ION network'),
     body: <p>{t("This buyer app shows products from every seller on the ION network in one place. This tour shows how it works, and you'll place a sample order along the way. It takes about two minutes.")}</p> },
@@ -2243,7 +2254,7 @@ export default function App() {
   const [sortBy, setSortBy] = useState('default');
   const [billing, setBilling] = useState({
     name: '', email: '', phone: '',
-    streetAddress: '', addressLocality: '', addressRegion: '', postalCode: '', addressCountry: 'IN',
+    streetAddress: '', addressLocality: '', addressRegion: '', postalCode: '', addressCountry: 'ID',
   });
   const debounceRef = useRef(null);
   const [authReady, setAuthReady] = useState(false);
@@ -2374,7 +2385,7 @@ export default function App() {
 
   /* ── Transaction polling ─────────────────────────────────────────────── */
   useEffect(() => {
-    const terminalStatuses = ['CONFIRMED', 'CANCELLED'];
+    const terminalStatuses = ['CONFIRMED', 'CANCELLED', 'COMPLETE'];
     if (!transaction || terminalStatuses.includes(transaction.status)) return;
     const id = setInterval(() => {
       apiFetch(`/status/${transaction.id}`)
@@ -2469,7 +2480,7 @@ export default function App() {
             addressLocality: billing.addressLocality || 'TBD',
             addressRegion: billing.addressRegion || 'TBD',
             postalCode: billing.postalCode || '000000',
-            addressCountry: billing.addressCountry || 'IN',
+            addressCountry: billing.addressCountry || 'ID',
           },
         }),
       });
@@ -2577,7 +2588,7 @@ export default function App() {
     setCartCheckout(false);
     setTransaction(null);
     setCart([]);
-    setBilling({ name: '', email: '', phone: '', streetAddress: '', addressLocality: '', addressRegion: '', postalCode: '', addressCountry: 'IN' });
+    setBilling({ name: '', email: '', phone: '', streetAddress: '', addressLocality: '', addressRegion: '', postalCode: '', addressCountry: 'ID' });
     setIsCartOpen(false);
   };
 
