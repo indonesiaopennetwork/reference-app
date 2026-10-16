@@ -9,6 +9,7 @@ import {
   ArrowRight, Circle, Star, Ticket, Ban, Wand2,
   BookOpen, FolderOpen, Send, ArrowLeft, ExternalLink,
   ChevronDown, Copy, Check, Scale, Pencil, Compass, Lock,
+  PauseCircle, PlayCircle,
 } from 'lucide-react'
 import { captureTokenFromUrl, getToken, getIdToken, clearToken, redirectToLogin, basePath } from './auth.js'
 import Tour from './Tour.jsx'
@@ -3229,18 +3230,25 @@ function CatalogsPage({ onNav }) {
                     <span className="text-slate-300 text-xs">{t('{res} products · {offers} offers', { res: cat.resourceCount, offers: cat.offerCount })}</span>
                   </td>
                   <td className="px-4 py-3">
-                    {cat.isPublished ? (
-                      <div className="flex flex-col gap-0.5">
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-400 w-fit">
-                          <CheckCircle2 size={9} /> {t('Published')}
+                    <div className="flex flex-col gap-0.5">
+                      {cat.isPublished ? (
+                        <>
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-400 w-fit">
+                            <CheckCircle2 size={9} /> {t('Published')}
+                          </span>
+                          <span className="text-[10px] text-slate-600">{fmtDate(cat.networkPublishedAt)}</span>
+                        </>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 text-amber-400 w-fit">
+                          <Circle size={9} className="fill-amber-400" /> {t('Draft')}
                         </span>
-                        <span className="text-[10px] text-slate-600">{fmtDate(cat.networkPublishedAt)}</span>
-                      </div>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 text-amber-400 w-fit">
-                        <Circle size={9} className="fill-amber-400" /> {t('Draft')}
-                      </span>
-                    )}
+                      )}
+                      {!cat.isActive && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 text-amber-400 w-fit">
+                          <PauseCircle size={9} /> {t('Paused')}
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-xs text-slate-500">
                     {cat.validityStart ? `${fmtDate(cat.validityStart)} – ${fmtDate(cat.validityEnd)}` : '—'}
@@ -3255,7 +3263,8 @@ function CatalogsPage({ onNav }) {
                         className="px-2.5 py-1 rounded-md text-xs font-medium border border-blue-500/30 text-blue-400 hover:bg-blue-500/10 transition-colors flex items-center gap-1">
                         <Plus size={11} /> {t('Product')}
                       </button>
-                      <button onClick={() => handlePublish(cat.id)} disabled={publishing === cat.id}
+                      <button onClick={() => handlePublish(cat.id)} disabled={publishing === cat.id || !cat.resourceCount && !cat.offerCount}
+                        title={(!cat.resourceCount && !cat.offerCount) ? t('Add a product or offer before publishing') : undefined}
                         className="px-2.5 py-1 rounded-md text-xs font-medium border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 transition-colors flex items-center gap-1 disabled:opacity-40">
                         {publishing === cat.id ? <RefreshCw size={11} className="animate-spin" /> : <Send size={11} />} {cat.isPublished ? t('Update') : t('Publish')}
                       </button>
@@ -3451,15 +3460,32 @@ function CatalogDetailPage({ onNav, catalogId }) {
   const { t } = useI18n()
   const { data, loading, error, reload } = useApi(`/catalogs/${catalogId}`, [catalogId])
   const [publishing, setPublishing] = useState(false)
+  const [togglingActive, setTogglingActive] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   const cat = data?.catalog || {}
   const resources = data?.resources || []
   const offers = data?.offers || []
+  const catalogEmpty = !resources.length && !offers.length
 
-  // Build a map from resource_id → offer for quick lookup
-  const offerByResourceId = {}
+  // Build a map from resource_id → ALL offers referencing it (an offer's
+  // resourceIds is an array, so more than one offer can share a resource).
+  const offersByResourceId = {}
   offers.forEach(o => {
-    (o.resourceIds || []).forEach(rid => { offerByResourceId[rid] = o })
+    (o.resourceIds || []).forEach(rid => {
+      (offersByResourceId[rid] ||= []).push(o)
+    })
+  })
+
+  // Flatten to one row per resource-offer pair (a resource with N offers
+  // gets N rows; a resource with none gets a single offer-less row) so
+  // every offer is individually visible, editable and removable -- a
+  // resource with 2+ live offers otherwise hid every offer but the last
+  // from this page, including from "Remove offer".
+  const productRows = resources.flatMap(r => {
+    const rOffers = offersByResourceId[r.id] || []
+    if (rOffers.length === 0) return [{ resource: r, offer: null, isFirst: true }]
+    return rOffers.map((offer, i) => ({ resource: r, offer, isFirst: i === 0 }))
   })
 
   const handlePublish = async () => {
@@ -3476,15 +3502,60 @@ function CatalogDetailPage({ onNav, catalogId }) {
     }
   }
 
+  const handleToggleActive = async () => {
+    const next = !cat.isActive
+    const msg = next
+      ? t('Resume this catalog? It will be marked active on the next publish.')
+      : t('Pause this catalog? It stays fully intact, but will be excluded from search once you publish this change.')
+    if (!window.confirm(msg)) return
+    setTogglingActive(true)
+    try {
+      await apiFetch(`/catalogs/${catalogId}/active`, {
+        method: 'PATCH',
+        body: JSON.stringify({ isActive: next }),
+      })
+      reload()
+    } catch (e) {
+      alert(t('Update failed: {error}', { error: e.message }))
+    } finally {
+      setTogglingActive(false)
+    }
+  }
+
+  const handleRemoveOffer = async (oid) => {
+    if (!window.confirm(t('Remove this offer? This cannot be undone.'))) return
+    try {
+      await apiFetch(`/catalogs/${catalogId}/offers/${oid}`, { method: 'DELETE' })
+      reload()
+    } catch (e) {
+      alert(t('Remove failed: {error}', { error: e.message }))
+    }
+  }
+
+  const handleDeleteCatalog = async () => {
+    const name = cat.name || catalogId
+    const msg = cat.isPublished
+      ? t('This permanently retires "{name}" from the Beckn network. This cannot be undone, and this catalog ID can never be reused. Continue?', { name })
+      : t('Delete "{name}"? It has never been published, so this just removes it from your catalog list.', { name })
+    if (!window.confirm(msg)) return
+    setDeleting(true)
+    try {
+      await apiFetch(`/catalogs/${catalogId}`, { method: 'DELETE' })
+      onNav('catalogs')
+    } catch (e) {
+      alert(t('Delete failed: {error}', { error: e.message }))
+      setDeleting(false)
+    }
+  }
+
   const fmtDate = ts => ts ? new Date(ts).toLocaleDateString(localeNow()) : '—'
 
-  const getPrice = (r) => {
-    const o = offerByResourceId[r.id]
-    if (!o) return '—'
+  const getPrice = (offer) => {
+    if (!offer) return '—'
     try {
-      const ca = typeof o.considerationAttributes === 'string'
-        ? JSON.parse(o.considerationAttributes)
-        : o.considerationAttributes
+      const ca = typeof offer.considerationAttributes === 'string'
+        ? JSON.parse(offer.considerationAttributes)
+        : offer.considerationAttributes
       if (ca?.totalAmount !== undefined) return `${ca.currency || ''} ${ca.totalAmount}`.trim()
       if (ca?.breakup?.[0]?.amount !== undefined) return `${ca.breakup[0].amount}`
     } catch { /* ignore */ }
@@ -3517,6 +3588,11 @@ function CatalogDetailPage({ onNav, catalogId }) {
                     <Circle size={10} className="fill-amber-400" /> {t('Draft')}
                   </span>
                 )}
+                {!cat.isActive && (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-500/15 text-amber-400">
+                    <PauseCircle size={10} /> {t('Paused')}
+                  </span>
+                )}
               </div>
               <p className="text-xs text-slate-500 font-mono mt-0.5">{cat.id} · {cat.providerId}
                 {cat.networkPublishedAt && <span className="ml-2 text-emerald-600">· {t('Last published {date}', { date: fmtDate(cat.networkPublishedAt) })}</span>}
@@ -3525,6 +3601,17 @@ function CatalogDetailPage({ onNav, catalogId }) {
           )}
         </div>
         <div className="flex gap-2">
+          <button onClick={handleDeleteCatalog} disabled={deleting}
+            title={t('Permanently delete this catalog')}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-50">
+            <Trash2 size={14} />
+            {deleting ? t('Deleting…') : t('Delete Catalog')}
+          </button>
+          <button onClick={handleToggleActive} disabled={togglingActive}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold border border-slate-500/30 text-slate-400 hover:bg-slate-500/10 transition-colors disabled:opacity-50">
+            {cat.isActive ? <PauseCircle size={14} /> : <PlayCircle size={14} />}
+            {cat.isActive ? t('Pause') : t('Resume')}
+          </button>
           <button onClick={() => onNav('add_offer', { catalogId })}
             className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold border border-slate-500/30 text-slate-400 hover:bg-slate-500/10 transition-colors">
             <Tag size={14} /> {t('Add Offer')}
@@ -3533,12 +3620,17 @@ function CatalogDetailPage({ onNav, catalogId }) {
             className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold border border-blue-500/30 text-blue-400 hover:bg-blue-500/10 transition-colors">
             <Plus size={14} /> {t('Add Product')}
           </button>
-          <button data-tour="publish" onClick={handlePublish} disabled={publishing}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white shadow-lg transition-all hover:scale-105 active:scale-95 disabled:opacity-50"
-            style={{ background: BRAND }}>
-            {publishing ? <RefreshCw size={14} className="animate-spin" /> : <Send size={14} />}
-            {publishing ? t('Publishing…') : cat.isPublished ? t('Update on Network') : t('Publish to Network')}
-          </button>
+          <div className="flex flex-col items-end gap-1">
+            <button data-tour="publish" onClick={handlePublish} disabled={publishing || catalogEmpty}
+              title={catalogEmpty ? t('Add a product or offer before publishing') : undefined}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white shadow-lg transition-all hover:scale-105 active:scale-95 disabled:opacity-50 disabled:hover:scale-100">
+              {publishing ? <RefreshCw size={14} className="animate-spin" /> : <Send size={14} />}
+              {publishing ? t('Publishing…') : cat.isPublished ? t('Update on Network') : t('Publish to Network')}
+            </button>
+            {catalogEmpty && (
+              <p className="text-[11px] text-amber-500">{t('Add a product or offer before publishing')}</p>
+            )}
+          </div>
         </div>
       </div>
 
@@ -3568,6 +3660,9 @@ function CatalogDetailPage({ onNav, catalogId }) {
               </div>
             ) : (
               <span className="inline-flex items-center gap-1 text-xs font-bold text-amber-400"><Circle size={11} className="fill-amber-400" /> {t('Draft (never published)')}</span>
+            )}
+            {!cat.isActive && (
+              <p className="text-[10px] text-amber-500 mt-1 flex items-center gap-1"><PauseCircle size={10} /> {t('Paused — excluded from search once published')}</p>
             )}
           </Card>
         </div>
@@ -3600,11 +3695,10 @@ function CatalogDetailPage({ onNav, catalogId }) {
               </tr>
             </thead>
             <tbody>
-              {resources.map(r => {
-                const offer = offerByResourceId[r.id]
-                return (
-                  <tr key={r.id} className="border-b border-white/[0.04] hover:bg-white/[0.02] transition-colors">
-                    <td className="px-4 py-3">
+              {productRows.map(({ resource: r, offer, isFirst }, idx) => (
+                <tr key={`${r.id}-${offer?.id || 'none'}-${idx}`} className="border-b border-white/[0.04] hover:bg-white/[0.02] transition-colors">
+                  <td className="px-4 py-3">
+                    {isFirst ? (
                       <div className="flex items-center gap-3">
                         {r.mediaFiles && r.mediaFiles !== '[]' && r.mediaFiles !== 'null' && (() => {
                           try {
@@ -3619,35 +3713,45 @@ function CatalogDetailPage({ onNav, catalogId }) {
                           <p className="text-[11px] font-mono text-slate-500">{r.id}</p>
                         </div>
                       </div>
-                    </td>
-                    <td className="px-4 py-3 text-slate-400 text-xs max-w-48 truncate">{r.shortDesc || '—'}</td>
-                    <td className="px-4 py-3 font-semibold text-emerald-400">{getPrice(r)}</td>
-                    <td className="px-4 py-3 text-[11px] font-mono text-slate-500">{offer?.id || '—'}</td>
-                    <td className="px-4 py-3 text-xs text-slate-500">
-                      {offer?.validityStart ? `${fmtDate(offer.validityStart)} – ${fmtDate(offer.validityEnd)}` : '—'}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex justify-end gap-1.5">
+                    ) : (
+                      <p className="text-[11px] text-slate-600 italic pl-[52px]">{t('(same product)')}</p>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-slate-400 text-xs max-w-48 truncate">{isFirst ? (r.shortDesc || '—') : ''}</td>
+                  <td className="px-4 py-3 font-semibold text-emerald-400">{getPrice(offer)}</td>
+                  <td className="px-4 py-3 text-[11px] font-mono text-slate-500">{offer?.id || '—'}</td>
+                  <td className="px-4 py-3 text-xs text-slate-500">
+                    {offer?.validityStart ? `${fmtDate(offer.validityStart)} – ${fmtDate(offer.validityEnd)}` : '—'}
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex justify-end gap-1.5">
+                      {isFirst && (
                         <button onClick={() => onNav('edit_product', { catalogId, editResourceId: r.id })}
                           className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold border border-white/[0.08] text-slate-300 hover:text-white hover:border-white/20 transition-colors whitespace-nowrap">
                           <Pencil size={11} /> {t('Edit product')}
                         </button>
-                        {offer ? (
+                      )}
+                      {offer ? (
+                        <>
                           <button onClick={() => onNav('edit_offer', { catalogId, editOfferId: offer.id })}
                             className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold border border-white/[0.08] text-slate-300 hover:text-white hover:border-white/20 transition-colors whitespace-nowrap">
                             <Tag size={11} /> {t('Edit offer')}
                           </button>
-                        ) : (
-                          <button onClick={() => onNav('add_offer', { catalogId, preselectedResourceId: r.id })}
-                            className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold border border-blue-500/30 text-blue-400 hover:bg-blue-500/10 transition-colors whitespace-nowrap">
-                            <Plus size={11} /> {t('Add offer')}
+                          <button onClick={() => handleRemoveOffer(offer.id)}
+                            className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors whitespace-nowrap">
+                            <Trash2 size={11} /> {t('Remove offer')}
                           </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                )
-              })}
+                        </>
+                      ) : (
+                        <button onClick={() => onNav('add_offer', { catalogId, preselectedResourceId: r.id })}
+                          className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold border border-blue-500/30 text-blue-400 hover:bg-blue-500/10 transition-colors whitespace-nowrap">
+                          <Plus size={11} /> {t('Add offer')}
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
               {!resources.length && (
                 <tr><td colSpan={6} className="px-4 py-12 text-center text-slate-500">
                   {t('No products yet.')}{' '}
@@ -3692,13 +3796,14 @@ function OfferForm({ off, oSet, offOpen, setOffOpen, catalogId, lockId, showReso
   const labelCls = 'block text-[11px] uppercase tracking-widest text-slate-500 font-semibold mb-1'
   const inputCls = 'w-full px-3 py-2 rounded-lg text-sm text-white placeholder-slate-600 border border-white/[0.08] bg-slate-900 focus:outline-none focus:border-blue-500/50 transition-colors'
 
-  const { data: catResData } = useApi(showResourcePicker ? `/catalogs/${catalogId}/resources` : null, [catalogId, showResourcePicker])
+  const { data: catResData } = useApi(showResourcePicker && !lockId ? `/catalogs/${catalogId}/resources` : null, [catalogId, showResourcePicker, lockId])
   const existingResources = catResData?.items || []
 
   return (
     <>
-      {/* Resource picker for offer-only mode */}
-      {showResourcePicker && existingResources.length > 0 && (
+      {/* Resource picker for offer-only mode -- not shown while editing an
+          existing offer (lockId): its resource association stays fixed. */}
+      {showResourcePicker && !lockId && existingResources.length > 0 && (
         <div className="mb-4">
           <label className={labelCls}>{t('Link to Resource(s) *')}</label>
           <div className="space-y-1 max-h-48 overflow-y-auto">
@@ -3728,7 +3833,7 @@ function OfferForm({ off, oSet, offOpen, setOffOpen, catalogId, lockId, showReso
         <div><label className={labelCls}>{t('Offer Name *')}</label>
           <input className={inputCls} value={off.name} onChange={e => oSet('name', e.target.value)} placeholder={t('Flask 500ml Yellow')} required />
         </div>
-        {!showResourcePicker && (
+        {!showResourcePicker && !lockId && (
           <div className="col-span-full"><label className={labelCls}>{t('Resource IDs')} <span className="text-slate-600 font-normal">({t('comma-separated; leave blank to auto-link')})</span></label>
             <input className={inputCls} value={off.resource_ids} onChange={e => oSet('resource_ids', e.target.value)} placeholder="item-flask-mh500" />
           </div>

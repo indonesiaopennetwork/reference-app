@@ -120,6 +120,27 @@ func (h *Handler) HandleUpdateResource(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "updated"})
 }
 
+// HandleDeleteOffer (DELETE /catalogs/:id/offers/:oid) soft-deletes an offer.
+func (h *Handler) HandleDeleteOffer(c *gin.Context) {
+	catalogID, oid := c.Param("id"), c.Param("oid")
+	if !h.ownedCatalog(c, catalogID) {
+		return
+	}
+	tag, err := h.pool.Exec(c.Request.Context(), `
+		UPDATE offers SET deleted_at = NOW(), updated_at = NOW()
+		 WHERE id = $1 AND catalog_id = $2 AND bpp_id = $3 AND deleted_at IS NULL`,
+		oid, catalogID, h.cfg.BppID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "delete offer: " + err.Error()})
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "offer not found"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "deleted"})
+}
+
 // HandleGetOffer (GET /catalogs/:id/offers/:oid) returns one offer in its
 // publish shape, with its considerations (prices).
 func (h *Handler) HandleGetOffer(c *gin.Context) {
