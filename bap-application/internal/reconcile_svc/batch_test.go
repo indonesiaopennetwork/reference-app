@@ -89,13 +89,23 @@ func TestEarlyContractsDoNotCount(t *testing.T) {
 		want                   string
 	}{
 		{0, 0, 3, "PENDING"},  // all sent before their window
-		{2, 2, 1, "AGREED"},   // the others agreed; the early one waits
-		{1, 2, 1, "DISPUTED"}, // another one disputed
+		{1, 1, 2, "PENDING"},  // the due one matches, two early: nothing agreed
+		{1, 2, 1, "DISPUTED"}, // a due one disputed, one early
+		{0, 1, 2, "DISPUTED"},
 		{3, 3, 0, "AGREED"},
+		{2, 3, 0, "DISPUTED"},
 		{0, 0, 0, "DISPUTED"}, // nothing in the batch
 	} {
 		if got := batchOutcome(c.agreed, c.counted, c.early); got != c.want {
 			t.Errorf("batchOutcome(%d, %d, %d) = %s, want %s", c.agreed, c.counted, c.early, got, c.want)
+		}
+	}
+}
+
+func TestContractOutcomeFollowsTheBatch(t *testing.T) {
+	for batch, want := range map[string]string{"AGREED": "AGREED", "PENDING": "", "DISPUTED": "DISPUTED"} {
+		if got := contractOutcome(batch); got != want {
+			t.Errorf("contractOutcome(%s) = %q, want %q", batch, got, want)
 		}
 	}
 }

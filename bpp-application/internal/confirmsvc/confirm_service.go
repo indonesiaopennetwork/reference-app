@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -22,7 +21,6 @@ import (
 	"github.com/ion/winroom/bpp/internal/config"
 	"github.com/ion/winroom/bpp/internal/httpclient"
 	"github.com/ion/winroom/bpp/internal/settlement"
-	"github.com/ion/winroom/bpp/internal/stock"
 )
 
 // ConfirmService handles the full /beckn/confirm flow:
@@ -96,9 +94,6 @@ func (s *ConfirmService) ProcessConfirm(ctx context.Context, req *ConfirmRequest
 		return
 	}
 
-	// Decrement inventory stock for every resource committed in this order.
-	s.decrementStock(ctx, req)
-
 	// Build the on_confirm payload — echo the contract back with ACTIVE status and the contract id.
 	outboundMsgID := uuid.New()
 	confirmedContract := req.Message.Contract
@@ -132,38 +127,6 @@ func (s *ConfirmService) ProcessConfirm(ctx context.Context, req *ConfirmRequest
 
 	// POST on_confirm through ONIX BPP caller (so the request is signed) and log OUTBOUND.
 	s.callOnConfirm(ctx, txID, outboundMsgID, onConfirmReq)
-}
-
-// decrementStock moves each committed resource's ordered quantity from on-hand
-// to sold (cancellations return it via internal/cancellation). Errors are
-// logged but never fatal — a stock bookkeeping failure must not block the
-// order confirmation.
-func (s *ConfirmService) decrementStock(ctx context.Context, req *ConfirmRequest) {
-	bppID := s.cfg.BppID
-
-	units := map[string]float64{}
-	for _, c := range req.Message.Contract.Commitments {
-		for _, r := range c.Resources {
-			qty := 1.0
-			if r.Quantity != nil && r.Quantity.UnitQuantity > 0 {
-				qty = r.Quantity.UnitQuantity
-			}
-			units[r.ID] += qty
-		}
-		if len(c.Resources) == 0 && c.Offer != nil {
-			for _, rid := range c.Offer.ResourceIDs {
-				units[rid]++
-			}
-		}
-	}
-
-	for resourceID, qty := range units {
-		if err := stock.Adjust(ctx, s.pool, bppID, resourceID, -int(math.Round(qty))); err != nil {
-			s.lh.WithModule("confirmsvc").Warn().Error(err).Log("stock decrement failed for resource " + resourceID)
-		} else {
-			log.Printf("[stock] sold %v of resource=%s bpp=%s", qty, resourceID, bppID)
-		}
-	}
 }
 
 // confirmContract transitions the DRAFT contract and its commitments to ACTIVE

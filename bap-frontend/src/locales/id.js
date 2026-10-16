@@ -308,6 +308,7 @@ export default {
   '1 contract': '1 kontrak',
   'Matched — batch disputed': 'Cocok — batch disanggah',
   'Sent before settlement window': 'Dikirim sebelum jendela penyelesaian',
+  'Matched — batch pending': 'Cocok — batch tertunda',
   'Not due yet': 'Belum jatuh tempo',
   'Seller: {amount}': 'Penjual: {amount}',
   'Your figure: {ours}': 'Angka Anda: {ours}',

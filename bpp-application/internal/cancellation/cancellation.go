@@ -104,7 +104,7 @@ type Result struct {
 	// RefundSettlement is the settlement added to the contract, nil when
 	// nothing is refunded.
 	RefundSettlement map[string]any
-	// RestoredUnits is the cancelled quantity per resource ID, for stock.
+	// RestoredUnits is the cancelled (or returned) quantity per resource ID.
 	RestoredUnits map[string]float64
 	// Closed maps each cancelled commitment ID to its ACTIVE replacement's ID
 	// ("" when nothing of it remains).

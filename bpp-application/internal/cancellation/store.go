@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,7 +12,7 @@ import (
 
 	dbsqlc "github.com/ion/winroom/bpp/db/sqlc"
 	"github.com/ion/winroom/bpp/internal/config"
-	"github.com/ion/winroom/bpp/internal/stock"
+	"github.com/ion/winroom/bpp/internal/settlement"
 )
 
 // ErrNotActive is returned when the contract is no longer ACTIVE (or, for
@@ -26,7 +25,7 @@ var ErrNotActive = errors.New("contract is not ACTIVE")
 func LatestContract(ctx context.Context, pool *pgxpool.Pool, txID uuid.UUID, contractAttributes json.RawMessage) (map[string]any, error) {
 	var c map[string]any
 	if len(contractAttributes) > 0 && json.Unmarshal(contractAttributes, &c) == nil && c["commitments"] != nil {
-		return normalizeSettlementBasis(c), nil
+		return settlement.CurrentContext(normalizeSettlementBasis(c)), nil
 	}
 	var payload []byte
 	if err := pool.QueryRow(ctx, `
@@ -43,7 +42,7 @@ func LatestContract(ctx context.Context, pool *pgxpool.Pool, txID uuid.UUID, con
 	if err := json.Unmarshal(payload, &msg); err != nil || msg.Message.Contract == nil {
 		return nil, fmt.Errorf("parse stored contract payload: %v", err)
 	}
-	return normalizeSettlementBasis(msg.Message.Contract), nil
+	return settlement.CurrentContext(normalizeSettlementBasis(msg.Message.Contract)), nil
 }
 
 // normalizeSettlementBasis renames a pre-ION settlementBasis (DELIVERY, ...)
@@ -169,12 +168,6 @@ func Execute(ctx context.Context, pool *pgxpool.Pool, bppID string, txID uuid.UU
 			 SELECT $3, contract_id, offer_id, offer_descriptor, offer_attributes, resource_ids
 			   FROM commitment_offers WHERE contract_id = $1 AND commitment_id = $2`, row.ID, oldID, replID); err != nil {
 			return nil, fmt.Errorf("copy offer for commitment %s: %w", replID, err)
-		}
-	}
-
-	for resourceID, units := range res.RestoredUnits {
-		if err := stock.Adjust(ctx, tx, bppID, resourceID, int(math.Round(units))); err != nil {
-			return nil, fmt.Errorf("restore stock for %s: %w", resourceID, err)
 		}
 	}
 

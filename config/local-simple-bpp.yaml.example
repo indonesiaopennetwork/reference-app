@@ -87,6 +87,9 @@ modules:
             extendedSchema_maxCacheSize: "100"
             extendedSchema_downloadTimeout: "30"
             extendedSchema_allowedDomains: "raw.githubusercontent.com,schema.ion.id,schema.beckn.io"
+            # Local copies of ION attribute packs, used instead of schema.ion.id's:
+            # ./schemas/<TypeName>/attributes.yaml (see schemas/README.md).
+            extendedSchema_localSchemaPath: "/app/schemas"
             # ION endpoints Beckn does not define (/reconcile, /on_reconcile),
             # merged into the action index from ion-specs main. Their ION @context
             # types (IONSettlementReconciliation, ...) are fetched from schema.ion.id.
@@ -160,6 +163,9 @@ modules:
             extendedSchema_maxCacheSize: "100"
             extendedSchema_downloadTimeout: "30"
             extendedSchema_allowedDomains: "raw.githubusercontent.com,schema.ion.id,schema.beckn.io"
+            # Local copies of ION attribute packs, used instead of schema.ion.id's:
+            # ./schemas/<TypeName>/attributes.yaml (see schemas/README.md).
+            extendedSchema_localSchemaPath: "/app/schemas"
             # ION endpoints Beckn does not define (/reconcile, /on_reconcile),
             # merged into the action index from ion-specs main. Their ION @context
             # types (IONSettlementReconciliation, ...) are fetched from schema.ion.id.

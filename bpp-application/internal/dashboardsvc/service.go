@@ -75,19 +75,18 @@ func (h *Handler) HandleStats(c *gin.Context) {
 		funnel[string(row.Action)] = row.MessageCount
 	}
 
-	// Stock summary — count out-of-stock and low-stock resources.
-	stockRows, err := q.ListResourceStock(ctx, sqlc.ListResourceStockParams{BppID: bppID, ProviderID: &providerID})
-	if err != nil {
-		// Non-fatal: stock table may not exist yet on older deployments.
-		stockRows = nil
-	}
+	// Availability summary: the seller's products published as out of stock
+	// or low stock (resourceAttributes.availability.status).
 	var outOfStock, lowStock int
-	for _, s := range stockRows {
-		if s.Quantity == 0 {
-			outOfStock++
-		} else if s.Quantity <= 5 {
-			lowStock++
-		}
+	if err := h.pool.QueryRow(ctx, `
+		SELECT COUNT(*) FILTER (WHERE r.resource_attributes->'availability'->>'status' = 'OUT_OF_STOCK'),
+		       COUNT(*) FILTER (WHERE r.resource_attributes->'availability'->>'status' = 'LOW_STOCK')
+		  FROM resources r
+		  JOIN catalogs c ON c.id = r.catalog_id AND c.bpp_id = r.bpp_id
+		 WHERE r.bpp_id = $1 AND c.provider_id = $2 AND r.deleted_at IS NULL AND c.deleted_at IS NULL`,
+		bppID, providerID).Scan(&outOfStock, &lowStock); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -286,59 +285,6 @@ func (h *Handler) HandleListMessages(c *gin.Context) {
 }
 
 // ---------------------------------------------------------------------------
-// GET /api/v1/inventory/stock
-// ---------------------------------------------------------------------------
-
-// HandleListStock returns the current inventory stock levels for all resources
-// belonging to this BPP, joined with their descriptor names.
-func (h *Handler) HandleListStock(c *gin.Context) {
-	q := sqlc.New(h.pool)
-	providerID := auth.ProviderIDFromContext(c)
-	rows, err := q.ListResourceStock(c.Request.Context(), sqlc.ListResourceStockParams{BppID: h.cfg.BppID, ProviderID: &providerID})
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	type stockItem struct {
-		ResourceID string `json:"resourceId"`
-		Name       string `json:"name"`
-		CatalogID  string `json:"catalogId"`
-		Quantity   int32  `json:"quantity"`
-		Sold       int32  `json:"sold"`
-		Available  int32  `json:"available"`
-		UpdatedAt  string `json:"updatedAt"`
-	}
-
-	items := make([]stockItem, 0, len(rows))
-	for _, r := range rows {
-		name := r.ResourceID
-		if r.DescriptorName != nil && *r.DescriptorName != "" {
-			name = *r.DescriptorName
-		}
-		catID := ""
-		if r.CatalogID != nil {
-			catID = *r.CatalogID
-		}
-		ts := ""
-		if r.UpdatedAt.Valid {
-			ts = r.UpdatedAt.Time.UTC().Format("2006-01-02T15:04:05Z")
-		}
-		items = append(items, stockItem{
-			ResourceID: r.ResourceID,
-			Name:       name,
-			CatalogID:  catID,
-			Quantity:   r.Quantity,
-			Sold:       r.Sold,
-			Available:  r.Quantity,
-			UpdatedAt:  ts,
-		})
-	}
-
-	c.JSON(http.StatusOK, gin.H{"items": items})
-}
-
-// ---------------------------------------------------------------------------
 // GET /api/v1/support-tickets
 // ---------------------------------------------------------------------------
 
@@ -496,7 +442,7 @@ func (h *Handler) HandleListRatings(c *gin.Context) {
 
 // autoDeliverAfter is how long an order stays Shipped before it is marked
 // Delivered (a stand-in for a real logistics partner's delivery event).
-const autoDeliverAfter = time.Minute
+const autoDeliverAfter = 10 * time.Second
 
 // RunAutoDelivery marks orders Delivered once they have been Shipped for
 // autoDeliverAfter, and completes delivered ones (completeDelivered), every

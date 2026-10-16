@@ -1,0 +1,963 @@
+{
+ "source": {
+  "resource": "releases/release1/schema/extension/trade/TradeResource/v1/attributes.yaml",
+  "categories": "docs/ION_Resource_Categories.md"
+ },
+ "crcField": "crc",
+ "categories": [
+  {
+   "code": "TRC-fashion",
+   "name": "Fashion & Accessories",
+   "status": "ACTIVE",
+   "description": "Clothing, footwear, bags, jewellery, watches, eyewear, and all wearable accessories. Includes menswear, womenswear, childrenswear, traditional dress (batik, kebaya), sportswear, and fashion accessories.",
+   "sections": [
+    {
+     "key": "fashion",
+     "label": "Fashion",
+     "help": "Fashion and apparel attributes for filtering, size guidance and regulatory compliance (fabricComposition under SNI). Besides gender and size, the pack carries the attributes Indonesian fashion sellers state for every product — garment type, the wastra (batik, tenun, songket, ...) and how it was made, motif, dye, fit, sleeve, neckline, occasion, garment measurements and care — so buyer apps can filter and compare on them. The region a motif or weave comes from is IONTradeResource.regionOfOrigin; colour is physical.appearance.color. Descriptor.longDesc remains the place for prose.",
+     "fields": [
+      {
+       "key": "gender",
+       "label": "Gender",
+       "kind": "select",
+       "options": [
+        "MALE",
+        "FEMALE",
+        "UNISEX",
+        "BOYS",
+        "GIRLS"
+       ]
+      },
+      {
+       "key": "size",
+       "label": "Size",
+       "kind": "text",
+       "example": "L"
+      },
+      {
+       "key": "sizeChart",
+       "label": "Size chart",
+       "kind": "text",
+       "format": "uri"
+      },
+      {
+       "key": "fabric",
+       "label": "Fabric",
+       "kind": "text",
+       "example": "Katun"
+      },
+      {
+       "key": "fabricComposition",
+       "label": "Fabric composition",
+       "kind": "text",
+       "example": "100% Katun"
+      },
+      {
+       "key": "garmentType",
+       "label": "Garment type",
+       "help": "What the item is. FABRIC is uncut cloth (kain) sold by the piece.",
+       "kind": "select",
+       "options": [
+        "SHIRT",
+        "BLOUSE",
+        "T_SHIRT",
+        "DRESS",
+        "SKIRT",
+        "TROUSERS",
+        "OUTERWEAR",
+        "JACKET",
+        "KEBAYA",
+        "KOKO_SHIRT",
+        "SARONG",
+        "FABRIC",
+        "SCARF",
+        "HIJAB",
+        "OTHER"
+       ]
+      },
+      {
+       "key": "textileType",
+       "label": "Textile type",
+       "help": "The textile or Indonesian wastra the item is made of. TENUN is woven cloth (e.g. tenun Troso), KARAWO is Gorontalo embroidery work.",
+       "kind": "select",
+       "options": [
+        "BATIK",
+        "TENUN",
+        "SONGKET",
+        "IKAT",
+        "LURIK",
+        "KARAWO",
+        "PLAIN",
+        "PRINTED",
+        "KNIT",
+        "OTHER"
+       ]
+      },
+      {
+       "key": "productionTechnique",
+       "label": "Production technique",
+       "help": "How the textile was made. BATIK_TULIS is hand-drawn with a canting, BATIK_CAP is stamped, BATIK_KOMBINASI mixes both, BATIK_PRINTING is printed and not batik in the strict sense. TENUN_ATBM is woven on a non-machine loom (alat tenun bukan mesin), TENUN_GEDOG on a backstrap loom.",
+       "kind": "select",
+       "options": [
+        "BATIK_TULIS",
+        "BATIK_CAP",
+        "BATIK_KOMBINASI",
+        "BATIK_PRINTING",
+        "TENUN_ATBM",
+        "TENUN_GEDOG",
+        "HAND_EMBROIDERY",
+        "MACHINE_EMBROIDERY",
+        "MACHINE_MADE",
+        "OTHER"
+       ]
+      },
+      {
+       "key": "motif",
+       "label": "Motif",
+       "help": "Name of the motif or pattern, e.g. Kawung, Mega Mendung, Punta Betawi.",
+       "kind": "text",
+       "example": "Parang Rusak"
+      },
+      {
+       "key": "dyeType",
+       "label": "Dye type",
+       "help": "Natural (plant-based) or synthetic dyes.",
+       "kind": "select",
+       "options": [
+        "NATURAL",
+        "SYNTHETIC",
+        "MIXED"
+       ]
+      },
+      {
+       "key": "handmade",
+       "label": "Handmade",
+       "help": "Made by hand (e.g. batik tulis, hand-woven tenun).",
+       "kind": "boolean"
+      },
+      {
+       "key": "lining",
+       "label": "Lining",
+       "help": "Inner lining (furing), if any.",
+       "kind": "text",
+       "example": "Trikot halus"
+      },
+      {
+       "key": "fit",
+       "label": "Fit",
+       "kind": "select",
+       "options": [
+        "SLIM",
+        "REGULAR",
+        "LOOSE",
+        "OVERSIZED",
+        "A_LINE"
+       ]
+      },
+      {
+       "key": "sleeveLength",
+       "label": "Sleeve length",
+       "kind": "select",
+       "options": [
+        "SLEEVELESS",
+        "SHORT",
+        "THREE_QUARTER",
+        "LONG"
+       ]
+      },
+      {
+       "key": "neckline",
+       "label": "Neckline",
+       "help": "Collar or neckline style.",
+       "kind": "text",
+       "example": "Kerah V"
+      },
+      {
+       "key": "occasion",
+       "label": "Occasion",
+       "kind": "multiselect",
+       "options": [
+        "CASUAL",
+        "OFFICE",
+        "FORMAL",
+        "PARTY",
+        "WEDDING",
+        "RELIGIOUS",
+        "TRADITIONAL_CEREMONY",
+        "SPORT"
+       ]
+      },
+      {
+       "key": "measurements",
+       "label": "Measurements",
+       "help": "Garment measurements in centimetres, for the size given in size.",
+       "kind": "group",
+       "fields": [
+        {
+         "key": "chestCm",
+         "label": "Chest (cm)",
+         "help": "Chest width (lingkar dada).",
+         "kind": "number",
+         "integer": false
+        },
+        {
+         "key": "waistCm",
+         "label": "Waist (cm)",
+         "help": "Waist (lingkar pinggang).",
+         "kind": "number",
+         "integer": false
+        },
+        {
+         "key": "hipCm",
+         "label": "Hip (cm)",
+         "help": "Hip (lingkar pinggul).",
+         "kind": "number",
+         "integer": false
+        },
+        {
+         "key": "lengthCm",
+         "label": "Length (cm)",
+         "help": "Body length (panjang badan).",
+         "kind": "number",
+         "integer": false
+        },
+        {
+         "key": "shoulderCm",
+         "label": "Shoulder (cm)",
+         "help": "Shoulder width (lebar bahu).",
+         "kind": "number",
+         "integer": false
+        },
+        {
+         "key": "sleeveLengthCm",
+         "label": "Sleeve length (cm)",
+         "help": "Sleeve length (panjang lengan).",
+         "kind": "number",
+         "integer": false
+        }
+       ]
+      },
+      {
+       "key": "careInstructions",
+       "label": "Care instructions",
+       "help": "Washing and care. Natural-dye batik is usually hand-washed and dried in the shade.",
+       "kind": "multiselect",
+       "options": [
+        "HAND_WASH",
+        "MACHINE_WASH_COLD",
+        "DRY_CLEAN_ONLY",
+        "DO_NOT_BLEACH",
+        "DRY_IN_SHADE",
+        "IRON_LOW",
+        "DO_NOT_WRING"
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "code": "TRC-electronics",
+   "name": "Electronics & Gadgets",
+   "status": "ACTIVE",
+   "description": "Consumer electronics, mobile phones, laptops, tablets, cameras, audio equipment, gaming devices, wearables, smart home devices, and electronic accessories. Cameras & Optics sit as a sub-category here — not a separate top-level — reflecting how Indonesian sellers actually classify on Tokopedia and Shopee.",
+   "sections": [
+    {
+     "key": "electronics",
+     "label": "Electronics",
+     "help": "Consumer electronics technical specifications for filtering, comparison and regulatory compliance (energyRating, wattage, Indonesian SDPPI certification and TKDN local content). Besides OS and connectivity, the pack carries the specifications buyers compare on — device type, model, processor, memory, storage, display, battery, power and plug, ingress rating — and the warranty provider (an official Indonesian warranty matters to buyers). Warranty duration and terms are IONTradeResource.warranty; colour is physical.appearance.color. Datasheets still belong in Descriptor.docs[].",
+     "fields": [
+      {
+       "key": "osType",
+       "label": "OS type",
+       "kind": "select",
+       "options": [
+        "IOS",
+        "ANDROID",
+        "WINDOWS",
+        "MACOS",
+        "LINUX",
+        "TIZEN",
+        "WEBOS",
+        "OTHER"
+       ]
+      },
+      {
+       "key": "connectivity",
+       "label": "Connectivity",
+       "kind": "multiselect",
+       "options": [
+        "WIFI",
+        "BLUETOOTH",
+        "NFC",
+        "USB_C",
+        "USB_A",
+        "HDMI",
+        "ETHERNET",
+        "LIGHTNING",
+        "MMWAVE_5G",
+        "SUB6_5G",
+        "4G_LTE",
+        "3G",
+        "IR_BLASTER",
+        "OTHER"
+       ]
+      },
+      {
+       "key": "wattage",
+       "label": "Wattage",
+       "kind": "quantity",
+       "example": {
+        "unitQuantity": 45,
+        "unitText": "W"
+       }
+      },
+      {
+       "key": "voltage",
+       "label": "Voltage",
+       "kind": "quantity",
+       "example": {
+        "minQuantity": 100,
+        "maxQuantity": 240,
+        "unitText": "V"
+       }
+      },
+      {
+       "key": "energyRating",
+       "label": "Energy rating",
+       "help": "Energy efficiency star rating.",
+       "kind": "number",
+       "integer": true
+      },
+      {
+       "key": "deviceType",
+       "label": "Device type",
+       "kind": "select",
+       "options": [
+        "SMARTPHONE",
+        "TABLET",
+        "LAPTOP",
+        "DESKTOP",
+        "AUDIO",
+        "TELEVISION",
+        "CAMERA",
+        "WEARABLE",
+        "HOME_APPLIANCE",
+        "KITCHEN_APPLIANCE",
+        "COMPUTER_PERIPHERAL",
+        "ACCESSORY",
+        "OTHER"
+       ]
+      },
+      {
+       "key": "modelNumber",
+       "label": "Model number",
+       "help": "Manufacturer model number.",
+       "kind": "text",
+       "example": "SM-A556E"
+      },
+      {
+       "key": "processor",
+       "label": "Processor",
+       "kind": "text",
+       "example": "Exynos 1480"
+      },
+      {
+       "key": "ram",
+       "label": "RAM",
+       "help": "Memory (RAM).",
+       "kind": "quantity",
+       "example": {
+        "unitQuantity": 8,
+        "unitText": "GB"
+       }
+      },
+      {
+       "key": "storage",
+       "label": "Storage",
+       "help": "Built-in storage.",
+       "kind": "quantity",
+       "example": {
+        "unitQuantity": 256,
+        "unitText": "GB"
+       }
+      },
+      {
+       "key": "screenSizeInch",
+       "label": "Screen size (inch)",
+       "help": "Diagonal screen size in inches.",
+       "kind": "number",
+       "integer": false,
+       "example": 6.6
+      },
+      {
+       "key": "displayType",
+       "label": "Display type",
+       "kind": "text",
+       "example": "Super AMOLED"
+      },
+      {
+       "key": "batteryCapacity",
+       "label": "Battery capacity",
+       "kind": "quantity",
+       "example": {
+        "unitQuantity": 5000,
+        "unitText": "mAh"
+       }
+      },
+      {
+       "key": "powerSource",
+       "label": "Power source",
+       "kind": "select",
+       "options": [
+        "MAINS_220V",
+        "RECHARGEABLE_BATTERY",
+        "BATTERY",
+        "USB",
+        "SOLAR"
+       ]
+      },
+      {
+       "key": "plugType",
+       "label": "Plug type",
+       "help": "Mains plug. Indonesia uses type C and F (220 V, 50 Hz).",
+       "kind": "select",
+       "options": [
+        "TYPE_C",
+        "TYPE_F",
+        "NONE"
+       ]
+      },
+      {
+       "key": "ipRating",
+       "label": "IP rating",
+       "help": "Ingress protection rating (IEC 60529).",
+       "kind": "text",
+       "example": "IP67"
+      },
+      {
+       "key": "warrantyType",
+       "label": "Warranty type",
+       "help": "Who honours the warranty. OFFICIAL is the brand's Indonesian warranty (garansi resmi), DISTRIBUTOR a distributor's, STORE the seller's own.",
+       "kind": "select",
+       "options": [
+        "OFFICIAL",
+        "DISTRIBUTOR",
+        "STORE",
+        "INTERNATIONAL",
+        "NONE"
+       ]
+      },
+      {
+       "key": "sdppiCertificate",
+       "label": "SDPPI certificate",
+       "help": "SDPPI (Kominfo) certificate number of a device with a radio transmitter, required to sell such devices in Indonesia.",
+       "kind": "text",
+       "example": "12345/SDPPI/2026"
+      },
+      {
+       "key": "tkdnPercentage",
+       "label": "TKDN (%)",
+       "help": "Local content level (Tingkat Komponen Dalam Negeri) in percent, as certified; 4G/5G devices sold in Indonesia must meet the minimum.",
+       "kind": "number",
+       "integer": false,
+       "example": 35
+      },
+      {
+       "key": "inTheBox",
+       "label": "In the box",
+       "help": "What is in the box (isi kotak).",
+       "kind": "text",
+       "multiple": true,
+       "example": [
+        "Charger 25W",
+        "Kabel USB-C",
+        "Buku manual"
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "code": "TRC-food-bev",
+   "name": "Food, Beverages & Tobacco",
+   "status": "ACTIVE",
+   "description": "Packaged food, beverages (non-alcoholic and alcoholic), snacks, condiments, coffee, tea, cooking ingredients, tobacco products. Fresh produce is included but carries additional freshness attributes. Tobacco and alcohol require specific regulatory declarations. **Does not cover restaurant meals or food delivery — those are Hospitality (`HSC-restaurant-ordering`).**",
+   "sections": [
+    {
+     "key": "food",
+     "label": "Food",
+     "help": "Packaged food product attributes for filtering and regulatory compliance. Use for FMCG packaged food, grocery products, bottled beverages, packaged meal kits, snacks, and confectionery sold from warehouse stock. Do not use for restaurant or cloud kitchen menu items — those use MenuItem in the Hospitality sector (hospitality/menu-item/v1). Detailed nutritional information and ingredient lists belong in Descriptor.longDesc for agent readability.",
+     "fields": [
+      {
+       "key": "classification",
+       "label": "Classification",
+       "kind": "multiselect",
+       "options": [
+        "VEG",
+        "NON_VEG",
+        "EGG",
+        "HALAL",
+        "KOSHER",
+        "VEGAN",
+        "GLUTEN_FREE",
+        "HINDU",
+        "JAIN",
+        "DIABETIC",
+        "LOW_FAT",
+        "LOW_SALT",
+        "LOW_LACTOSE",
+        "OTHER"
+       ]
+      },
+      {
+       "key": "allergens",
+       "label": "Allergens",
+       "kind": "multiselect",
+       "options": [
+        "GLUTEN",
+        "NUTS",
+        "DAIRY",
+        "EGGS",
+        "SOY",
+        "SHELLFISH",
+        "FISH",
+        "SESAME",
+        "SULPHITES",
+        "CELERY",
+        "MUSTARD",
+        "LUPIN"
+       ]
+      },
+      {
+       "key": "cuisineType",
+       "label": "Cuisine type",
+       "kind": "text",
+       "example": "Padang"
+      },
+      {
+       "key": "spiceLevel",
+       "label": "Spice level",
+       "help": "Spiciness level of the food item. Free-text to accommodate regional descriptors (e.g. \"Pedas Sedang\", \"Level 3\", \"Extra Hot\").",
+       "kind": "text",
+       "example": "MEDIUM"
+      },
+      {
+       "key": "freshProduce",
+       "label": "Fresh produce",
+       "kind": "group",
+       "fields": [
+        {
+         "key": "netQuantityDeclaration",
+         "label": "Net quantity declaration",
+         "help": "Declared net quantity of the fresh produce.",
+         "kind": "quantity",
+         "example": {
+          "unitQuantity": 1,
+          "unitText": "kg"
+         }
+        },
+        {
+         "key": "harvestDate",
+         "label": "Harvest date",
+         "kind": "text",
+         "format": "date"
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "key": "agritech",
+     "label": "Agritech",
+     "help": "Agricultural and fresh produce attributes. Covers harvest dates, produce grade, pesticide declarations, and unit of measure for weight-sold products. Represent organic certification through regulatory.credentials.",
+     "fields": [
+      {
+       "key": "harvestDate",
+       "label": "Harvest date",
+       "kind": "text",
+       "format": "date"
+      },
+      {
+       "key": "produceGrade",
+       "label": "Produce grade",
+       "kind": "group",
+       "fields": [
+        {
+         "key": "scheme",
+         "label": "Scheme",
+         "help": "Grading standard or authority under which the grade is assigned.",
+         "kind": "text",
+         "required": true
+        },
+        {
+         "key": "value",
+         "label": "Value",
+         "kind": "text",
+         "example": "GRADE_A",
+         "required": true
+        }
+       ]
+      },
+      {
+       "key": "pesticideDeclaration",
+       "label": "Pesticide declaration",
+       "kind": "select",
+       "options": [
+        "PESTICIDE_FREE",
+        "LOW_PESTICIDE",
+        "STANDARD",
+        "ORGANIC_CERTIFIED"
+       ]
+      },
+      {
+       "key": "unitOfMeasure",
+       "label": "Unit of measure",
+       "help": "Declared net quantity of the fresh produce.",
+       "kind": "quantity",
+       "example": {
+        "unitQuantity": 1,
+        "unitText": "kg"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "code": "TRC-health-beauty",
+   "name": "Health & Beauty",
+   "status": "ACTIVE",
+   "description": "Skincare, haircare, cosmetics, personal care, OTC vitamins and supplements, consumer-grade medical devices, wellness products, hygiene items. Prescription medicines sit under Pharmacy & Health Retail (TRD-04) and carry stricter attribute requirements.",
+   "sections": [
+    {
+     "key": "beauty",
+     "label": "Beauty",
+     "help": "Beauty and personal care product attributes for filtering and regulatory compliance. concern and ingredient are descriptive fields — include them in Descriptor.longDesc for richer agent-readable content. Structured fields below are for filtering and compliance.",
+     "fields": [
+      {
+       "key": "conscious",
+       "label": "Conscious",
+       "kind": "multiselect",
+       "options": [
+        "NATURAL",
+        "ORGANIC",
+        "VEGAN",
+        "CRUELTY_FREE",
+        "HALAL_COSMETICS"
+       ]
+      },
+      {
+       "key": "preference",
+       "label": "Preference",
+       "kind": "multiselect",
+       "options": [
+        "HERBAL",
+        "AYURVEDIC",
+        "CHEMICAL_FREE",
+        "FRAGRANCE_FREE",
+        "ALCOHOL_FREE"
+       ]
+      },
+      {
+       "key": "formulation",
+       "label": "Formulation",
+       "kind": "select",
+       "options": [
+        "LIQUID",
+        "CREAM",
+        "GEL",
+        "POWDER",
+        "SERUM",
+        "BALM",
+        "SPRAY",
+        "FOAM",
+        "STICK",
+        "SHEET"
+       ]
+      },
+      {
+       "key": "skinType",
+       "label": "Skin type",
+       "kind": "multiselect",
+       "options": [
+        "ALL",
+        "NORMAL",
+        "OILY",
+        "DRY",
+        "COMBINATION",
+        "SENSITIVE"
+       ]
+      },
+      {
+       "key": "hairType",
+       "label": "Hair type",
+       "kind": "multiselect",
+       "options": [
+        "ALL",
+        "NORMAL",
+        "OILY",
+        "DRY",
+        "DAMAGED",
+        "CURLY",
+        "STRAIGHT"
+       ]
+      },
+      {
+       "key": "spf",
+       "label": "SPF",
+       "kind": "number",
+       "integer": true,
+       "example": 50
+      },
+      {
+       "key": "gender",
+       "label": "Gender",
+       "kind": "select",
+       "options": [
+        "MALE",
+        "FEMALE",
+        "UNISEX"
+       ]
+      }
+     ]
+    },
+    {
+     "key": "pharmacy",
+     "label": "Pharmacy",
+     "help": "Pharmaceutical and over-the-counter medicine attributes. Covers prescription requirements, dosage form, active ingredients, and cold chain requirements. Applicable to prescription drugs, OTC medicines, and medical devices sold through ION.",
+     "fields": [
+      {
+       "key": "prescriptionRequired",
+       "label": "Prescription required",
+       "kind": "boolean"
+      },
+      {
+       "key": "dosageForm",
+       "label": "Dosage form",
+       "help": "Pharmaceutical dosage form. Suggested values cover common forms; other values are permitted as pharmaceutical forms evolve.",
+       "kind": "text",
+       "example": "TABLET"
+      },
+      {
+       "key": "activeIngredients",
+       "label": "Active ingredients",
+       "kind": "list",
+       "fields": [
+        {
+         "key": "ingredient",
+         "label": "Ingredient",
+         "kind": "text",
+         "required": true
+        },
+        {
+         "key": "strength",
+         "label": "Strength",
+         "help": "Strength of this active ingredient.",
+         "kind": "quantity"
+        }
+       ]
+      },
+      {
+       "key": "coldChainRequired",
+       "label": "Cold chain required",
+       "kind": "boolean"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "code": "TRC-home-garden",
+   "name": "Home & Garden",
+   "status": "ACTIVE",
+   "description": "Household appliances, kitchen equipment, home décor, lighting, garden tools and supplies, cleaning products, storage and organisation, bedding and bath.",
+   "sections": []
+  },
+  {
+   "code": "TRC-furniture",
+   "name": "Furniture",
+   "status": "ACTIVE",
+   "description": "Indoor and outdoor furniture — sofas, beds, tables, chairs, wardrobes, shelving — flat-pack and assembled. Kept separate from Home & Garden because of different logistics (oversized/freight), different attributes (dimensions, material, assembly required), and different regulatory treatment (SNI for certain items).",
+   "sections": []
+  },
+  {
+   "code": "TRC-automotive",
+   "name": "Vehicles & Parts",
+   "status": "ACTIVE",
+   "description": "Motorcycles, cars, automotive parts and accessories, tyres, lubricants, helmets, and vehicle care products. Includes new, used, and aftermarket parts.",
+   "sections": []
+  },
+  {
+   "code": "TRC-sports",
+   "name": "Sporting Goods",
+   "status": "ACTIVE",
+   "description": "Sports equipment, fitness gear, outdoor and adventure equipment, bicycles, water sports, team sports, and sportswear accessories.",
+   "sections": []
+  },
+  {
+   "code": "TRC-toys-baby",
+   "name": "Toys, Games & Baby",
+   "status": "ACTIVE",
+   "description": "Toys, board games, puzzles, educational materials for children, baby clothing, feeding, nursery items, strollers, and baby care products. Merged because seller profiles and buyer journeys significantly overlap in the Indonesian market. Can be split by SWG if regulatory treatment diverges.",
+   "sections": []
+  },
+  {
+   "code": "TRC-media",
+   "name": "Books & Media",
+   "status": "ACTIVE",
+   "description": "Physical books, magazines, music CDs, DVDs, Blu-rays, and other physical media. Digital versions are under Digital Goods.",
+   "sections": []
+  },
+  {
+   "code": "TRC-digital",
+   "name": "Digital Goods",
+   "status": "ACTIVE",
+   "description": "Software licenses, mobile top-up (pulsa), data packages, PLN token, game credits, digital vouchers, gift cards, e-books, digital subscriptions — all delivered electronically with no physical logistics.",
+   "sections": [
+    {
+     "key": "digital",
+     "label": "Digital",
+     "help": "Digital goods attributes specific to Indonesian digital commerce. Required when resourceTangibility is DIGITAL_VOUCHER, DIGITAL_TOP_UP, or DIGITAL_SUBSCRIPTION. Covers Indonesian-specific digital product categories: mobile pulsa and data packages (Telkomsel, XL, Indosat, Tri, Smartfren), electricity tokens (PLN), water bills (PDAM), tax payments (PBB), BPJS health insurance payments, and e-wallet top-ups. Game voucher categories cover popular titles in the Indonesian market (Mobile Legends, Free Fire, Valorant, Genshin Impact).",
+     "fields": [
+      {
+       "key": "digitalCategory",
+       "label": "Digital category",
+       "kind": "select",
+       "options": [
+        "MOBILE_PULSA",
+        "MOBILE_DATA_PACKAGE",
+        "ELECTRICITY_TOKEN",
+        "WATER_BILL",
+        "INTERNET_BILL",
+        "PDAM_BILL",
+        "PBB_TAX",
+        "BPJS_PAYMENT",
+        "GIFT_CARD",
+        "GAME_VOUCHER",
+        "STREAMING_VOUCHER",
+        "FOOD_VOUCHER",
+        "EWALLET_TOP_UP",
+        "TRANSPORT_VOUCHER",
+        "EDUCATION_VOUCHER",
+        "OTHER"
+       ]
+      },
+      {
+       "key": "operatorOrIssuer",
+       "label": "Operator or issuer",
+       "help": "Issuing operator or brand. For MOBILE_PULSA: TELKOMSEL, XL, INDOSAT, TRI, SMARTFREN. For ELECTRICITY_TOKEN: PLN. For GAME_VOUCHER: Moonton, Garena, Riot, miHoYo etc.",
+       "kind": "text",
+       "example": "TELKOMSEL"
+      },
+      {
+       "key": "denomination",
+       "label": "Denomination",
+       "help": "Voucher or top-up denomination.",
+       "kind": "quantity",
+       "example": {
+        "unitQuantity": 50000,
+        "unitCode": "IDR"
+       }
+      },
+      {
+       "key": "deliveryMethod",
+       "label": "Delivery method",
+       "help": "PUSH_TO_TARGET: delivered directly to consumer account (pulsa to phone number, PLN token to meter number, in-game currency to game account). CODE_TO_BUYER: redemption code sent to buyer for later use. ACCOUNT_CREDIT: credited to buyer wallet or account. QR_VOUCHER: scannable QR redeemable at merchant point.",
+       "kind": "select",
+       "options": [
+        "PUSH_TO_TARGET",
+        "CODE_TO_BUYER",
+        "ACCOUNT_CREDIT",
+        "QR_VOUCHER"
+       ]
+      },
+      {
+       "key": "redemptionUrl",
+       "label": "Redemption URL",
+       "help": "URL for redemption (streaming service activation, game code page).",
+       "kind": "text",
+       "format": "uri"
+      },
+      {
+       "key": "expiryAfterPurchase",
+       "label": "Expiry after purchase",
+       "help": "ISO 8601 duration — how long the voucher is valid from purchase date.",
+       "kind": "text",
+       "example": "P30D"
+      },
+      {
+       "key": "refundable",
+       "label": "Refundable",
+       "help": "Whether the digital good is refundable. Most pulsa and top-up products are non-refundable once delivered to the target. Vouchers may be refundable if unredeemed.",
+       "kind": "boolean"
+      },
+      {
+       "key": "cancellable",
+       "label": "Cancellable",
+       "help": "Whether cancellation is possible before delivery is initiated.",
+       "kind": "boolean"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "code": "TRC-b2b",
+   "name": "Business & Industrial",
+   "status": "ACTIVE",
+   "description": "Raw materials, industrial equipment, office machinery, packaging materials, safety equipment, bulk commodities, B2B wholesale goods. Primarily serves TRD-06 (B2B Trade & Wholesale) and TRD-07 (Energy & Commodity) business categories.",
+   "sections": []
+  },
+  {
+   "code": "TRC-arts",
+   "name": "Arts, Crafts & Collectibles",
+   "status": "ACTIVE",
+   "description": "Art supplies, craft materials, handmade products, collectibles, antiques, musical instruments, hobby supplies, kerajinan tangan (Indonesian handicrafts).",
+   "sections": []
+  },
+  {
+   "code": "TRC-religious",
+   "name": "Religious & Ceremonial",
+   "status": "ACTIVE",
+   "description": "Prayer equipment (sajadah, tasbih, mukena), religious texts, ceremonial items, traditional ceremony supplies, items for Lebaran, Natal, Imlek, and other religious observances. Significant category given Indonesia's diverse religious landscape.",
+   "sections": []
+  },
+  {
+   "code": "TRC-luggage",
+   "name": "Luggage & Bags",
+   "status": "ACTIVE",
+   "description": "Suitcases, travel bags, backpacks, laptop bags, school bags, and travel accessories. Kept separate from Fashion & Accessories because of different attributes (volume, wheel type, lock type) and different buyer intent (travel utility vs fashion).",
+   "sections": []
+  },
+  {
+   "code": "TRC-pets",
+   "name": "Animals & Pet Supplies",
+   "status": "INACTIVE",
+   "description": "Pet food, accessories, grooming, and care products. Recognised but low volume at launch — no attribute schema enforcement yet. Sellers may publish but validation is not applied.",
+   "sections": []
+  },
+  {
+   "code": "TRC-hardware",
+   "name": "Hardware & Tools",
+   "status": "INACTIVE",
+   "description": "Hand tools, power tools, building materials, plumbing and electrical supplies. Low volume as a distinct top-level at launch — sellers may use Business & Industrial in the interim.",
+   "sections": []
+  },
+  {
+   "code": "TRC-office",
+   "name": "Office Supplies",
+   "status": "INACTIVE",
+   "description": "Stationery, office equipment, paper products, writing instruments. Low volume at launch — sellers may use Business & Industrial.",
+   "sections": []
+  },
+  {
+   "code": "TRC-mature",
+   "name": "Mature",
+   "status": "GOVERNED",
+   "description": "Adult content and products. Blocked pending ION Council policy decision on whether and how adult commerce is permitted, age verification requirements, and BAP rendering obligations.",
+   "sections": []
+  }
+ ]
+}

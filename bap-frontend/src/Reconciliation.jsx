@@ -43,6 +43,9 @@ const isDisputed = c => c.reconciliation_status === 'DISPUTED' && !c.last_result
 // Sent by the seller before its settlement window: answered accord false; it
 // waits until it is due (no reconciliation status).
 const sentEarly = c => !c.reconciliation_status && c.last_result?.code === 'SETTLEMENT_WINDOW_NOT_REACHED';
+// Matched, but its batch was PENDING (another order wasn't due): not agreed,
+// sent again with the rest.
+const matchedPending = c => !c.reconciliation_status && c.last_result?.accord === true;
 const diffOf = (c, field) => c.reconciliation_status === 'DISPUTED' && c.last_result?.diffs?.find(d => d.field === field);
 
 function DiffNote({ d }) {
@@ -246,6 +249,7 @@ function BppCard({ v, onSend, sending, visible }) {
                         {isDisputed(c) && <span className="ml-1.5 text-rose-300 font-semibold">· {t('Disputed')}</span>}
                         {c.reconciliation_status === 'DISPUTED' && !isDisputed(c) && <span className="ml-1.5 text-slate-500">· {t('Matched — batch disputed')}</span>}
                         {sentEarly(c) && <span className="ml-1.5 text-amber-300 font-semibold" title={c.last_result.reason}>· {t('Sent before settlement window')}</span>}
+                        {matchedPending(c) && <span className="ml-1.5 text-slate-500">· {t('Matched — batch pending')}</span>}
                         {sentEarly(c) && <div className="mt-0.5 text-[10px] text-amber-300/80 max-w-[18rem]">{c.last_result.reason}</div>}
                         {isDisputed(c) && !c.last_result?.diffs?.length && c.last_result?.reason && <div className="mt-0.5 text-[10px] text-rose-300/80 max-w-[18rem]">{c.last_result.reason}</div>}
                       </td>
