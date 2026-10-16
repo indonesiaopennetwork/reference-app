@@ -164,8 +164,9 @@ func registerProviderCatalogRoutes(svc *service.Service, g *gin.RouterGroup, poo
 // handler's use of auth.ProviderIDFromContext.
 func registerDashboardRoutes(v1 *gin.RouterGroup, pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.Logger, verifier *auth.Verifier) {
 	h := dashboardsvc.NewHandler(pool, cfg, lh)
-	// Shipped → Delivered after a minute, swept from the database (survives restarts).
-	go h.RunAutoDelivery(context.Background(), 10*time.Second)
+	// Shipped → Delivered after 10 seconds, swept from the database every
+	// 2 seconds (survives restarts).
+	go h.RunAutoDelivery(context.Background(), 2*time.Second)
 
 	dash := v1.Group("")
 	dash.Use(auth.RequireSeller(verifier, pool))
@@ -179,7 +180,6 @@ func registerDashboardRoutes(v1 *gin.RouterGroup, pool *pgxpool.Pool, cfg *confi
 	inv := dash.Group("/inventory")
 	inv.GET("/resources", h.HandleListResources)
 	inv.GET("/offers", h.HandleListOffers)
-	inv.GET("/stock", h.HandleListStock)
 	inv.GET("/items", h.HandleInventoryItems)
 
 	dash.GET("/messages", h.HandleListMessages)

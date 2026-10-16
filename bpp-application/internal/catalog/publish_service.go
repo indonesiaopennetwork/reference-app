@@ -337,16 +337,6 @@ func replaceResources(ctx context.Context, q *dbsqlc.Queries, bppID, catalogID s
 		}); err != nil {
 			return fmt.Errorf("insert resource %s: %w", res.ID, err)
 		}
-
-		// Upsert stock: even if StockQuantity == 0 we write a record so the
-		// dashboard can see the resource; a zero means "untracked / unlimited".
-		if err := q.UpsertResourceStock(ctx, dbsqlc.UpsertResourceStockParams{
-			ResourceID: res.ID,
-			BppID:      bppID,
-			Quantity:   res.StockQuantity,
-		}); err != nil {
-			return fmt.Errorf("upsert stock for resource %s: %w", res.ID, err)
-		}
 	}
 	return nil
 }

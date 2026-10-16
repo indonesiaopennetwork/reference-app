@@ -14,6 +14,8 @@ import { captureTokenFromUrl, getToken, getIdToken, clearToken, redirectToLogin,
 import Tour from './Tour.jsx'
 import { useReconSelection, inDateRange } from './reconSelection.js'
 import UserProfileMenu from './UserProfileMenu.jsx'
+import { CrcSelect, CrcAttributes, crcByCode, crcResourceAttributes, crcFormValues, CRC_FIELD, CustomAttributes, customAttributes, customFormRows, CUSTOM_ATTRIBUTES_FIELD } from './CrcFields.jsx'
+import { CRC_AUTOFILL } from './crcSamples.js'
 import { useI18n, rich, LanguageToggle, tNow, localeNow } from './i18n.jsx'
 
 const API_BASE = `${basePath}api/v1`
@@ -569,19 +571,19 @@ function OverviewPage({ onNav }) {
       {!sLoad && (stats?.out_of_stock > 0 || stats?.low_stock > 0) && (
         <div className="mb-5 flex flex-wrap gap-3">
           {stats?.out_of_stock > 0 && (
-            <button onClick={() => onNav('inventory', { initialTab: 'stock' })}
+            <button onClick={() => onNav('inventory', { initialTab: 'availability' })}
               className="flex items-center gap-2 text-sm font-semibold px-4 py-2 rounded-xl transition-all hover:opacity-90"
               style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)', color: '#ef4444' }}>
               <AlertCircle size={14} />
-              {t(stats.out_of_stock === 1 ? '{count} resource out of stock — view stock' : '{count} resources out of stock — view stock', { count: stats.out_of_stock })}
+              {t(stats.out_of_stock === 1 ? '{count} product out of stock — view availability' : '{count} products out of stock — view availability', { count: stats.out_of_stock })}
             </button>
           )}
           {stats?.low_stock > 0 && (
-            <button onClick={() => onNav('inventory', { initialTab: 'stock' })}
+            <button onClick={() => onNav('inventory', { initialTab: 'availability' })}
               className="flex items-center gap-2 text-sm font-semibold px-4 py-2 rounded-xl transition-all hover:opacity-90"
               style={{ background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.25)', color: '#f59e0b' }}>
               <AlertCircle size={14} />
-              {t(stats.low_stock === 1 ? '{count} resource running low — view stock' : '{count} resources running low — view stock', { count: stats.low_stock })}
+              {t(stats.low_stock === 1 ? '{count} product low on stock — view availability' : '{count} products low on stock — view availability', { count: stats.low_stock })}
             </button>
           )}
         </div>
@@ -596,7 +598,7 @@ function OverviewPage({ onNav }) {
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
         <StatCard label={t('Active Offers')} value={stats?.offer_count} icon={Tag} gradient="linear-gradient(135deg,#e6006e,#7c3aed)" loading={sLoad} onClick={() => onNav('inventory', { initialTab: 'offers' })} />
-        <StatCard label={t('Out of Stock')} value={stats?.out_of_stock ?? 0} icon={Ban} gradient="linear-gradient(135deg,#ef4444,#b91c1c)" loading={sLoad} onClick={() => onNav('inventory', { initialTab: 'stock' })} />
+        <StatCard label={t('Out of Stock')} value={stats?.out_of_stock ?? 0} icon={Ban} gradient="linear-gradient(135deg,#ef4444,#b91c1c)" loading={sLoad} onClick={() => onNav('inventory', { initialTab: 'availability' })} />
         <StatCard label={t('Support Tickets')} value={totalTickets} icon={Ticket} gradient="linear-gradient(135deg,#8b5cf6,#6d28d9)" loading={totalTickets === null} onClick={() => onNav('support')} />
         <StatCard label={t('Ratings')} value={totalRatings} icon={Star} gradient="linear-gradient(135deg,#f59e0b,#b45309)" loading={totalRatings === null} onClick={() => onNav('ratings')} />
       </div>
@@ -963,12 +965,7 @@ function ResourcesTab() {
   const [page, setPage] = useState(1)
   const limit = 20
   const { data, loading, error, reload } = useApi(`/inventory/resources?page=${page}&limit=${limit}`, [page])
-  const { data: stockData } = useApi('/inventory/stock')
   const total = data?.total ?? 0
-
-  // Build a quick lookup: resourceId -> stock item
-  const stockMap = {}
-  for (const s of (stockData?.items ?? [])) stockMap[s.resourceId] = s
 
   return (
     <div>
@@ -982,14 +979,12 @@ function ResourcesTab() {
                 <th className="text-left px-5 py-3">{t('Name')}</th>
                 <th className="text-left px-5 py-3">{t('Description')}</th>
                 <th className="text-left px-5 py-3">{t('Catalog')}</th>
-                <th className="text-center px-5 py-3">{t('In Stock')}</th>
-                <th className="text-center px-5 py-3">{t('Sold')}</th>
+                <th className="text-center px-5 py-3">{t('Availability')}</th>
                 <th className="text-left px-5 py-3">{t('Added')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/[0.04]">
               {(data?.items ?? []).map(r => {
-                const s = stockMap[r.id]
                 return (
                   <tr key={r.id} className="hover:bg-white/[0.025] transition-colors">
                     <td className="px-5 py-3 font-mono text-[11px] text-slate-500 max-w-[140px] truncate" title={r.id}>{r.id}</td>
@@ -999,19 +994,14 @@ function ResourcesTab() {
                       <span className="text-[11px] bg-white/[0.06] border border-white/[0.08] px-2 py-0.5 rounded-full text-slate-400">{r.catalog_id}</span>
                     </td>
                     <td className="px-5 py-3 text-center">
-                      {s
-                        ? <StockBadge qty={s.quantity} />
-                        : <span className="text-xs text-slate-600">—</span>}
-                    </td>
-                    <td className="px-5 py-3 text-center text-xs text-slate-400 font-semibold">
-                      {s ? s.sold : '—'}
+                      <AvailabilityBadge status={r.resource_attributes?.availability?.status} />
                     </td>
                     <td className="px-5 py-3 text-slate-500 text-xs">{fmtDateShort(r.created_at?.Time || r.created_at)}</td>
                   </tr>
                 )
               })}
               {!data?.items?.length && (
-                <tr><td colSpan={7} className="px-5 py-12 text-center text-slate-500">{t('No resources published yet')}</td></tr>
+                <tr><td colSpan={6} className="px-5 py-12 text-center text-slate-500">{t('No resources published yet')}</td></tr>
               )}
             </tbody>
           </table>
@@ -1023,97 +1013,93 @@ function ResourcesTab() {
   )
 }
 
-// Stock badge: green if > 5, yellow if 1-5, red if 0
-function StockBadge({ qty }) {
+// A product's published availability (resourceAttributes.availability.status;
+// see AVAILABILITY_STATUSES). The BPP keeps no stock count.
+const AVAILABILITY_STYLE = {
+  IN_STOCK: ['#10b981', 'rgba(16,185,129,0.1)', 'rgba(16,185,129,0.2)'],
+  LOW_STOCK: ['#f59e0b', 'rgba(245,158,11,0.1)', 'rgba(245,158,11,0.2)'],
+  OUT_OF_STOCK: ['#ef4444', 'rgba(239,68,68,0.1)', 'rgba(239,68,68,0.2)'],
+  PREORDER: ['#38bdf8', 'rgba(56,189,248,0.1)', 'rgba(56,189,248,0.2)'],
+  DISCONTINUED: ['#94a3b8', 'rgba(148,163,184,0.1)', 'rgba(148,163,184,0.2)'],
+}
+function AvailabilityBadge({ status }) {
   const { t } = useI18n()
-  if (qty === 0) return (
-    <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ color: '#ef4444', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)' }}>
-      {t('Out of Stock')}
-    </span>
-  )
-  if (qty <= 5) return (
-    <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ color: '#f59e0b', background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.2)' }}>
-      {t('Low: {qty}', { qty })}
-    </span>
-  )
+  const label = AVAILABILITY_STATUSES.find(([v]) => v === status)?.[1]
+  if (!label) return <span className="text-xs text-slate-600">—</span>
+  const [color, background, border] = AVAILABILITY_STYLE[status]
   return (
-    <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ color: '#10b981', background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.2)' }}>
-      {qty}
+    <span className="text-xs font-bold px-2 py-0.5 rounded-full whitespace-nowrap" style={{ color, background, border: `1px solid ${border}` }}>
+      {t(label)}
     </span>
   )
 }
 
-function StockTab() {
+// Availability tab: how many products have each availability status, and
+// every product with its status.
+function AvailabilityTab() {
   const { t } = useI18n()
-  const { data, loading, error, reload } = useApi('/inventory/stock')
+  const [page, setPage] = useState(1)
+  const limit = 20
+  const { data, loading, error, reload } = useApi(`/inventory/items?page=${page}&limit=${limit}`, [page])
   const items = data?.items ?? []
-
-  const totalStock = items.reduce((s, r) => s + r.quantity, 0)
-  const totalSold = items.reduce((s, r) => s + r.sold, 0)
-  const outOfStock = items.filter(r => r.quantity === 0).length
+  const total = data?.total ?? 0
+  // Counts over all products (the API counts them), not just this page.
+  const count = st => data?.availability?.[st] ?? 0
 
   return (
     <div>
       {error && <div className="mb-3"><ErrorBox message={error} onRetry={reload} /></div>}
 
-      {/* Quick stat bar */}
-      <div className="mt-4 grid grid-cols-3 gap-3 mb-4">
-        {[
-          { label: t('Total Items'), value: items.length, color: '#00b8e6' },
-          { label: t('Units In Stock'), value: totalStock, color: '#10b981' },
-          { label: t('Units Sold'), value: totalSold, color: '#e6006e' },
-        ].map(({ label, value, color }) => (
-          <div key={label} className="rounded-xl p-4 border border-white/[0.07]" style={{ background: '#111827' }}>
-            <p className="text-[11px] uppercase tracking-widest font-semibold text-slate-500 mb-1">{label}</p>
-            <p className="text-2xl font-bold" style={{ color }}>{loading ? '…' : value}</p>
+      <div className="mt-4 grid grid-cols-2 sm:grid-cols-5 gap-3 mb-4">
+        {AVAILABILITY_STATUSES.map(([st, label]) => (
+          <div key={st} className="rounded-xl p-4 border border-white/[0.07]" style={{ background: '#111827' }}>
+            <p className="text-[11px] uppercase tracking-widest font-semibold text-slate-500 mb-1">{t(label)}</p>
+            <p className="text-2xl font-bold" style={{ color: AVAILABILITY_STYLE[st][0] }}>{loading ? '…' : count(st)}</p>
           </div>
         ))}
       </div>
 
-      {outOfStock > 0 && (
+      {count('OUT_OF_STOCK') > 0 && (
         <div className="mb-4 px-4 py-3 rounded-xl text-sm font-semibold flex items-center gap-2"
           style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', color: '#ef4444' }}>
           <AlertCircle size={14} />
-          {t(outOfStock === 1 ? '{count} resource is out of stock' : '{count} resources are out of stock', { count: outOfStock })}
+          {t(count('OUT_OF_STOCK') === 1 ? '{count} product is out of stock' : '{count} products are out of stock', { count: count('OUT_OF_STOCK') })}
         </div>
       )}
 
       <Card>
-        {loading ? <LoadingSpinner label={t('Loading stock…')} /> : (
+        {loading ? <LoadingSpinner label={t('Loading products…')} /> : (
           <div className="overflow-x-auto"><table className="w-full text-sm min-w-[500px]">
             <thead>
               <tr className="text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-white/[0.06]">
                 <th className="text-left px-5 py-3">{t('Resource')}</th>
                 <th className="text-left px-5 py-3">{t('Catalog')}</th>
-                <th className="text-center px-5 py-3">{t('In Stock')}</th>
-                <th className="text-center px-5 py-3">{t('Sold')}</th>
-                <th className="text-left px-5 py-3">{t('Last Updated')}</th>
+                <th className="text-center px-5 py-3">{t('Availability')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/[0.04]">
               {items.map(r => (
-                <tr key={r.resourceId} className="hover:bg-white/[0.025] transition-colors">
+                <tr key={`${r.catalogId}/${r.id}`} className="hover:bg-white/[0.025] transition-colors">
                   <td className="px-5 py-3">
                     <p className="text-slate-200 font-semibold text-sm">{r.name}</p>
-                    <p className="text-[11px] font-mono text-slate-600 mt-0.5" title={r.resourceId}>{r.resourceId}</p>
+                    <p className="text-[11px] font-mono text-slate-600 mt-0.5" title={r.id}>{r.id}</p>
                   </td>
                   <td className="px-5 py-3">
-                    <span className="text-[11px] bg-white/[0.06] border border-white/[0.08] px-2 py-0.5 rounded-full text-slate-400">{r.catalogId || '—'}</span>
+                    <span className="text-[11px] bg-white/[0.06] border border-white/[0.08] px-2 py-0.5 rounded-full text-slate-400">{r.catalogName || r.catalogId || '—'}</span>
                   </td>
-                  <td className="px-5 py-3 text-center"><StockBadge qty={r.quantity} /></td>
-                  <td className="px-5 py-3 text-center text-sm font-bold text-slate-400">{r.sold}</td>
-                  <td className="px-5 py-3 text-xs text-slate-500">{fmtDate(r.updatedAt)}</td>
+                  <td className="px-5 py-3 text-center"><AvailabilityBadge status={r.availability} /></td>
                 </tr>
               ))}
               {!items.length && (
-                <tr><td colSpan={5} className="px-5 py-12 text-center text-slate-500">
-                  {t('No stock data yet — publish a catalog with stock quantities to start tracking')}
+                <tr><td colSpan={3} className="px-5 py-12 text-center text-slate-500">
+                  {t('No products yet — set each product\u2019s availability when you add it')}
                 </td></tr>
               )}
             </tbody>
           </table>
           </div>
         )}
+        <Pagination page={page} totalPages={Math.max(1, Math.ceil(total / limit))} onPage={setPage} total={total} limit={limit} />
       </Card>
     </div>
   )
@@ -1246,7 +1232,7 @@ function InventoryProductsTab() {
                   <div className="overflow-x-auto"><table className="w-full text-sm min-w-[500px]">
                     <thead>
                       <tr>
-                        {['Resource', 'Description', 'Stock', 'Sold'].map(h => (
+                        {['Resource', 'Description', 'Availability'].map(h => (
                           <th key={h} className="px-4 py-2 text-left text-[10px] uppercase tracking-widest text-slate-600 font-semibold">{t(h)}</th>
                         ))}
                       </tr>
@@ -1259,12 +1245,7 @@ function InventoryProductsTab() {
                             <p className="text-[11px] font-mono text-slate-600">{r.id}</p>
                           </td>
                           <td className="px-4 py-2.5 text-xs text-slate-500 max-w-48 truncate">{r.shortDesc || '—'}</td>
-                          <td className="px-4 py-2.5">
-                            <span className={`text-sm font-bold ${r.stock === 0 ? 'text-red-400' : r.stock <= 5 ? 'text-amber-400' : 'text-emerald-400'}`}>
-                              {r.stock}
-                            </span>
-                          </td>
-                          <td className="px-4 py-2.5 text-slate-500 text-sm">{r.sold}</td>
+                          <td className="px-4 py-2.5"><AvailabilityBadge status={r.availability} /></td>
                         </tr>
                       ))}
                     </tbody>
@@ -1287,21 +1268,21 @@ function InventoryPage({ initialTab = 'products' }) {
   return (
     <div>
       <PageHeader breadcrumb={t('Inventory')} title={t('Your Inventory')}
-        subtitle={t('Products by provider & catalog, with stock levels')} />
+        subtitle={t('Products by provider & catalog, with their availability')} />
       <div className="flex gap-1 p-1 rounded-xl w-fit max-w-full overflow-x-auto" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}>
-        {['products', 'resources', 'offers', 'stock'].map(k => (
+        {['products', 'resources', 'offers', 'availability'].map(k => (
           <button key={k} onClick={() => setTab(k)}
             className={`shrink-0 whitespace-nowrap px-3 sm:px-5 py-2 rounded-lg text-sm font-semibold transition-all ${tab !== k ? 'text-slate-400 hover:text-slate-200' : 'text-white shadow-lg'
               }`}
             style={tab === k ? { background: BRAND } : {}}>
-            {k === 'products' ? `🏪 ${t('By Catalog')}` : k === 'resources' ? `📦 ${t('Resources')}` : k === 'offers' ? `🏷️ ${t('Offers')}` : `📊 ${t('Stock')}`}
+            {k === 'products' ? `🏪 ${t('By Catalog')}` : k === 'resources' ? `📦 ${t('Resources')}` : k === 'offers' ? `🏷️ ${t('Offers')}` : `📊 ${t('Availability')}`}
           </button>
         ))}
       </div>
       {tab === 'products' ? <InventoryProductsTab />
         : tab === 'resources' ? <ResourcesTab />
           : tab === 'offers' ? <OffersTab />
-            : <StockTab />}
+            : <AvailabilityTab />}
     </div>
   )
 }
@@ -1312,8 +1293,10 @@ const EMPTY_RESOURCE = () => ({
   id: '', name: '', short_desc: '', long_desc: '', stock_quantity: '',
   product_highlights: '', specifications: '',
   media_url: '',
+  // availability: the signal published instead of a stock count
+  availability: 'IN_STOCK', max_order_qty: '',
   // identity
-  brand: '', origin_country: 'IN',
+  brand: '', origin_country: 'ID',
   // physical
   weight_value: '', weight_unit: 'G',
   volume_value: '', volume_unit: 'ML',
@@ -1537,16 +1520,27 @@ const AUTO_FILL_POOL = [
   },
 ]
 
+const TRADE_RESOURCE_CONTEXT = 'https://schema.ion.id/release1/schema/extension/trade/TradeResource/v1/context.jsonld'
+
+// A product's availability signal (IONTradeResource availability.status).
+// A stock count is never published -- only one of these.
+const AVAILABILITY_STATUSES = [
+  ['IN_STOCK', 'In stock'], ['LOW_STOCK', 'Low stock'], ['OUT_OF_STOCK', 'Out of stock'],
+  ['PREORDER', 'Pre-order'], ['DISCONTINUED', 'Discontinued'],
+]
+
 // Build resourceAttributes JSON-LD object from flat form fields.
 function buildResourceAttrs(r) {
   const hasIdentity = r.brand || r.origin_country
   const hasPhysical = r.weight_value || r.volume_value || r.dim_length || r.color || r.material || r.finish
   const hasPkg = r.mfr_name || r.common_name || r.net_qty_value
-  if (!hasIdentity && !hasPhysical && !hasPkg && !r.product_highlights && !r.specifications) return undefined
 
+  // Every product publishes its availability, so there are always attributes.
+  const maxQty = Number(r.max_order_qty)
   const attrs = {
-    '@context': 'https://schema.ion.id/release1/schema/extension/trade/TradeResource/v1/context.jsonld',
+    '@context': TRADE_RESOURCE_CONTEXT,
     '@type': 'ion:IONTradeResource',
+    availability: { status: r.availability || 'IN_STOCK', ...(Number.isInteger(maxQty) && maxQty >= 1 ? { maxOrderQty: maxQty } : {}) },
   }
   if (r.product_highlights) attrs.productHighlights = r.product_highlights
   if (r.specifications) attrs.specifications = r.specifications
@@ -1592,6 +1586,8 @@ function resourceToForm(r) {
     id: r.id, name: r.descriptor?.name || '', short_desc: r.descriptor?.shortDesc || '', long_desc: r.descriptor?.longDesc || '',
     media_url: r.descriptor?.mediaFile?.[0]?.uri || '',
     stock_quantity: r.stockQuantity ? String(r.stockQuantity) : '',
+    availability: a.availability?.status || 'IN_STOCK',
+    max_order_qty: a.availability?.maxOrderQty ? String(a.availability.maxOrderQty) : '',
     product_highlights: a.productHighlights || '', specifications: a.specifications || '',
     brand: id.brand || '', origin_country: id.originCountry || '',
     weight_value: s(ph.weight?.unitQuantity), weight_unit: ph.weight?.unitCode || 'G',
@@ -2692,6 +2688,9 @@ const isDisputed = r => r.reconciliation_status === 'DISPUTED' && !r.last_result
 // Sent before its settlement window: the buyer app answered accord false and
 // the contract waits until it is due (no reconciliation status).
 const sentEarly = r => !r.reconciliation_status && r.last_result?.code === 'SETTLEMENT_WINDOW_NOT_REACHED'
+// Matched, but its batch was PENDING (another order wasn't due): not agreed,
+// sent again with the rest.
+const matchedPending = r => !r.reconciliation_status && r.last_result?.accord === true
 const diffOf = (r, field) => r.reconciliation_status === 'DISPUTED' && r.last_result?.diffs?.find(d => d.field === field)
 
 function DiffNote({ d }) {
@@ -2749,6 +2748,7 @@ function ReconContractsTable({ rows, now, select }) {
                 {isDisputed(r) && <span className="ml-1.5 text-[11px] font-semibold text-rose-300">{t('Disputed')}</span>}
                 {r.reconciliation_status === 'DISPUTED' && !isDisputed(r) && <span className="ml-1.5 text-[11px] text-slate-500">{t('Matched — batch disputed')}</span>}
                 {sentEarly(r) && <span className="ml-1.5 text-[11px] font-semibold text-amber-300" title={r.last_result.reason}>{t('Sent before settlement window')}</span>}
+                {matchedPending(r) && <span className="ml-1.5 text-[11px] text-slate-500">{t('Matched — batch pending')}</span>}
                 {sentEarly(r) && <div className="mt-0.5 text-[10px] text-amber-300/80 whitespace-normal max-w-[18rem]">{r.last_result.reason}</div>}
                 {isDisputed(r) && !r.last_result?.diffs?.length && r.last_result?.reason && <div className="mt-0.5 text-[10px] text-rose-300/80 whitespace-normal max-w-[18rem]">{r.last_result.reason}</div>}
                 {r.refunded_after_payout > 0 && <span className="ml-1.5 text-[11px] text-slate-500" title={t('Refunded by you after payout — outside reconciliation')}>{t('+{amount} refunded after payout', { amount: rupiah(r.refunded_after_payout) })}</span>}
@@ -3204,7 +3204,7 @@ function CatalogsPage({ onNav }) {
           <div className="overflow-x-auto"><table className="w-full text-sm min-w-[500px]">
             <thead>
               <tr className="border-b border-white/[0.06]">
-                {['Catalog', 'Provider', 'Products', 'Status', 'Validity', 'Actions'].map(h => (
+                {['Catalog', 'Category (CRC)', 'Provider', 'Products', 'Status', 'Validity', 'Actions'].map(h => (
                   <th key={h} className="px-4 py-3 text-left text-[10px] uppercase tracking-widest text-slate-500 font-semibold">{t(h)}</th>
                 ))}
               </tr>
@@ -3215,6 +3215,14 @@ function CatalogsPage({ onNav }) {
                   <td className="px-4 py-3">
                     <p className="font-semibold text-white">{cat.name}</p>
                     <p className="text-[11px] text-slate-500 font-mono mt-0.5">{cat.id}</p>
+                  </td>
+                  <td className="px-4 py-3">
+                    {cat.crc ? (
+                      <div title={crcByCode(cat.crc)?.description}>
+                        <p className="text-xs text-slate-200">{crcByCode(cat.crc)?.name || cat.crc}</p>
+                        <p className="text-[11px] text-slate-500 font-mono mt-0.5">{cat.crc}</p>
+                      </div>
+                    ) : <span className="text-slate-600 text-xs">—</span>}
                   </td>
                   <td className="px-4 py-3 text-slate-400 text-xs">{cat.providerId}</td>
                   <td className="px-4 py-3">
@@ -3256,7 +3264,7 @@ function CatalogsPage({ onNav }) {
                 </tr>
               ))}
               {!items.length && (
-                <tr><td colSpan={6} className="px-4 py-12 text-center text-slate-500">
+                <tr><td colSpan={7} className="px-4 py-12 text-center text-slate-500">
                   {t('No catalogs yet.')} <button onClick={() => onNav('create_catalog')} className="text-blue-400 hover:underline ml-1">{t('Create one →')}</button>
                 </td></tr>
               )}
@@ -3297,7 +3305,7 @@ function CreateCatalogPage({ onNav }) {
   const [form, setForm] = useState({
     id: '', name: '', short_desc: '',
     provider_id: '', provider_name: '',
-    validity_start: '', validity_end: '',
+    validity_start: '', validity_end: '', crc: '',
   })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
@@ -3319,11 +3327,12 @@ function CreateCatalogPage({ onNav }) {
     const now = new Date()
     const start = now.toISOString().slice(0, 16)
     const end = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 16)
-    setForm({
+    setForm(f => ({
+      crc: f.crc,
       ...seed,
       ...(ownProvider ? { provider_id: ownProvider.id, provider_name: ownProvider.name } : {}),
       id: `${seed.id}-${suffix}`, validity_start: start, validity_end: end,
-    })
+    }))
   }
 
   const handleSubmit = async (e) => {
@@ -3344,6 +3353,7 @@ function CreateCatalogPage({ onNav }) {
           ...(form.validity_start && form.validity_end ? {
             validity: { startDate: new Date(form.validity_start).toISOString(), endDate: new Date(form.validity_end).toISOString() }
           } : {}),
+          ...(form.crc ? { crc: form.crc } : {}),
         }),
       })
       onNav('catalog_detail', { catalogId: form.id })
@@ -3385,6 +3395,9 @@ function CreateCatalogPage({ onNav }) {
             </div>
             <div className="col-span-2"><label className={labelCls}>{t('Short Description')}</label>
               <input className={inputCls} value={form.short_desc} onChange={e => set('short_desc', e.target.value)} placeholder={t('Camping and hiking gear for adventurers')} />
+            </div>
+            <div className="col-span-2"><label className={labelCls}>{t('Product Category (ION CRC)')}</label>
+              <CrcSelect value={form.crc} onChange={v => set('crc', v)} inputCls={inputCls} t={t} />
             </div>
           </div>
 
@@ -3490,6 +3503,11 @@ function CatalogDetailPage({ onNav, catalogId }) {
             <>
               <div className="flex items-center gap-3">
                 <h1 className="text-2xl font-bold text-white tracking-tight">{cat.name || catalogId}</h1>
+                {cat.crc && (
+                  <span title={t('Product Category (ION CRC)')} className="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold bg-blue-500/15 text-blue-300">
+                    {crcByCode(cat.crc)?.name || cat.crc} · {cat.crc}
+                  </span>
+                )}
                 {cat.isPublished ? (
                   <span data-tour="published-badge" className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-400">
                     <CheckCircle2 size={10} /> {t('Published')}
@@ -3663,6 +3681,8 @@ const PRODUCT_AUTOFILL_POOL = [
     off: { id: 'offer-teh-botol', name: 'Teh Botol Sosro', price: '5000', currency: 'IDR', cod_available: true, returns_allowed: false, cancel_allowed: true, cancel_window: 'PT30M', cancel_event: 'BEFORE_PACKING', replace_allowed: false, max_distance: '15', timing_days: ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'], timing_start: '07:00', timing_end: '22:00', offer_context: 'https://schema.ion.id/release1/schema/extension/trade/TradeOffer/v1/context.jsonld' }
   },
 ]
+// Next sample per CRC for the Add Product page's Auto-fill (CRC_AUTOFILL).
+const _crcFillIdx = {}
 let _productFillIdx = 0
 
 // ── Shared offer form component ────────────────────────────────────────────
@@ -3861,35 +3881,86 @@ function AddProductPage({ onNav, catalogId, editResourceId }) {
   const editing = !!editResourceId
   const [loadingItem, setLoadingItem] = useState(editing)
 
+  // The product's ION category (CRC): the catalog's, or -- for a catalog
+  // without one -- chosen here; an edited product keeps its own.
+  const { data: catalogData } = useApi(`/catalogs/${catalogId}`, [catalogId])
+  const catalogCrc = catalogData?.catalog?.crc || ''
+  const [crcCode, setCrcCode] = useState('')
+  const [crcValues, setCrcValues] = useState({})
+  const [customRows, setCustomRows] = useState([])
+  const [storedAttrs, setStoredAttrs] = useState(null)
+  useEffect(() => {
+    if (!crcCode && catalogCrc && !editing) setCrcCode(catalogCrc)
+  }, [catalogCrc, crcCode, editing])
+  useEffect(() => {
+    if (!storedAttrs) return
+    const code = storedAttrs[CRC_FIELD] || catalogCrc
+    if (code) { setCrcCode(code); setCrcValues(crcFormValues(code, storedAttrs)) }
+  }, [storedAttrs, catalogCrc])
+  const crcLocked = !!catalogCrc || !!storedAttrs?.[CRC_FIELD]
+  const crc = crcByCode(crcCode)
+
   // Edit mode: load the stored resource into the form.
   useEffect(() => {
     if (!editing) return
     apiFetch(`/catalogs/${catalogId}/resources/${encodeURIComponent(editResourceId)}`)
-      .then(d => setRes(resourceToForm(d.resource)))
+      .then(d => {
+        const attrs = d.resource?.resourceAttributes || {}
+        setRes(resourceToForm(d.resource)); setStoredAttrs(attrs); setCustomRows(customFormRows(attrs))
+      })
       .catch(e => setError(e.message))
       .finally(() => setLoadingItem(false))
   }, [editing, catalogId, editResourceId])
 
+  // Auto-fill: the CRC's sample products (with their category and custom
+  // attributes) when it has some, otherwise the general samples.
   const handleAutoFill = () => {
+    const uid = id => `${id}-${Date.now().toString(36)}`
+    const samples = CRC_AUTOFILL[crcCode]
+    if (samples?.length) {
+      const seed = samples[(_crcFillIdx[crcCode] = (_crcFillIdx[crcCode] ?? -1) + 1) % samples.length]
+      setRes({ ...EMPTY_RESOURCE(), ...seed.res, id: uid(seed.res.id) })
+      setCrcValues(structuredClone(seed.crc || {}))
+      setCustomRows(structuredClone(seed.custom || []))
+      setResOpen({ phys: true, pkg: true }); setError(null)
+      return
+    }
     const seed = PRODUCT_AUTOFILL_POOL[_productFillIdx % PRODUCT_AUTOFILL_POOL.length]
     _productFillIdx++
-    const uid = id => `${id}-${Date.now().toString(36)}`
     setRes({ ...EMPTY_RESOURCE(), ...seed.res, id: uid(seed.res.id) })
+    setCrcValues({}); setCustomRows([])
     setResOpen({}); setError(null)
   }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (!res.id || !res.name) { setError(t('Resource ID and Name are required.')); return }
+    let crcAttrs, custom
+    try {
+      crcAttrs = crcResourceAttributes(crcCode, crcValues)
+    } catch (err) {
+      setError(t('Fill in the required fields: {fields}', { fields: err.message }))
+      return
+    }
+    try {
+      custom = customAttributes(customRows)
+    } catch (err) {
+      setError(t('Additional attributes need both a name and a value (row {rows}).', { rows: err.message }))
+      return
+    }
+    if (custom.length) crcAttrs = { ...crcAttrs, [CUSTOM_ATTRIBUTES_FIELD]: custom }
     setLoading(true); setError(null)
 
-    const resourceAttrs = buildResourceAttrs(res)
+    // Common attributes, plus the CRC and its category attributes.
+    const common = buildResourceAttrs(res)
+    const resourceAttrs = common || Object.keys(crcAttrs).length
+      ? { ...(common || { '@context': TRADE_RESOURCE_CONTEXT, '@type': 'ion:IONTradeResource' }), ...crcAttrs }
+      : undefined
     const mediaFile = res.media_url ? [{ uri: res.media_url, mimeType: 'image/jpeg' }] : []
 
     const resource = {
       id: res.id,
       descriptor: { name: res.name, shortDesc: res.short_desc, longDesc: res.long_desc, mediaFile },
-      stockQuantity: res.stock_quantity ? Number(res.stock_quantity) : 0,
       ...(resourceAttrs ? { resourceAttributes: resourceAttrs } : {}),
     }
     try {
@@ -3945,6 +4016,14 @@ function AddProductPage({ onNav, catalogId, editResourceId }) {
         <Card className="p-4 sm:p-6" data-tour="product-form">
           <p className="text-xs uppercase tracking-widest text-slate-500 font-bold pb-3 border-b border-white/[0.06] mb-4">📦 {t('Resource Details')}</p>
 
+          <div className="mb-4">
+            <label className={labelCls}>{t('Product Category (ION CRC)')}</label>
+            {crcLocked
+              ? <p className="text-sm text-white">{crc ? `${crc.name} (${crc.code})` : crcCode}
+                  <span className="ml-2 text-[11px] text-slate-500">{storedAttrs?.[CRC_FIELD] ? t('as published') : t("from the catalog")}</span></p>
+              : <CrcSelect value={crcCode} onChange={v => { setCrcCode(v); setCrcValues({}) }} inputCls={inputCls} t={t} />}
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div><label className={labelCls}>{t('Resource ID *')}</label>
               <input className={inputCls + (editing ? ' opacity-60 cursor-not-allowed' : '')} value={res.id} readOnly={editing}
@@ -3972,8 +4051,15 @@ function AddProductPage({ onNav, catalogId, editResourceId }) {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
-            <div><label className={labelCls}>{t('Stock Quantity')} <span className="text-slate-600 font-normal">({t('blank = unlimited')})</span></label>
-              <input className={inputCls} type="number" min="0" value={res.stock_quantity} onChange={e => rSet('stock_quantity', e.target.value)} placeholder="50" />
+            <div><label className={labelCls}>{t('Availability')}</label>
+              <div className="flex gap-2">
+                <select className={inputCls} value={res.availability} onChange={e => rSet('availability', e.target.value)}>
+                  {AVAILABILITY_STATUSES.map(([v, l]) => <option key={v} value={v} className="bg-slate-900">{t(l)}</option>)}
+                </select>
+                <input className={`${inputCls.replace('w-full', 'w-28')} shrink-0`} type="number" min="1" step="1" value={res.max_order_qty}
+                  onChange={e => rSet('max_order_qty', e.target.value)} placeholder={t('Max/order')} title={t('Most units one order may contain (optional)')} />
+              </div>
+              <p className="mt-1 text-[10px] text-slate-600">{t('Only this status is published, never a stock count.')}</p>
             </div>
             <div><label className={labelCls}>{t('Image URL')}</label>
               <input className={inputCls} value={res.media_url} onChange={e => rSet('media_url', e.target.value)} placeholder="https://example.com/product.jpg" />
@@ -4022,6 +4108,34 @@ function AddProductPage({ onNav, catalogId, editResourceId }) {
             </div>
           )}
 
+          {/* Category attributes (from the CRC) */}
+          {crc && crc.sections.length > 0 && (
+            <>
+              <button type="button" onClick={() => setResOpen(s => ({ ...s, crc: !(s.crc ?? true) }))}
+                className="mt-4 w-full flex items-center justify-between text-xs font-semibold text-slate-400 hover:text-slate-200 transition-colors pt-3 border-t border-white/[0.06]">
+                <span>🗂️ {t('{category} attributes', { category: crc.name })}</span>
+                <ChevronRightIcon size={13} className={`transition-transform ${(resOpen.crc ?? true) ? 'rotate-90' : ''}`} />
+              </button>
+              {(resOpen.crc ?? true) && (
+                <div className="mt-3">
+                  <CrcAttributes code={crcCode} values={crcValues} onChange={setCrcValues} labelCls={labelCls} inputCls={inputCls} t={t} />
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Seller-defined attributes */}
+          <button type="button" onClick={() => setResOpen(s => ({ ...s, custom: !(s.custom ?? customRows.length > 0) }))}
+            className="mt-4 w-full flex items-center justify-between text-xs font-semibold text-slate-400 hover:text-slate-200 transition-colors pt-3 border-t border-white/[0.06]">
+            <span>➕ {t('Additional attributes')}{customRows.length ? ` (${customRows.length})` : ''}</span>
+            <ChevronRightIcon size={13} className={`transition-transform ${(resOpen.custom ?? customRows.length > 0) ? 'rotate-90' : ''}`} />
+          </button>
+          {(resOpen.custom ?? customRows.length > 0) && (
+            <div className="mt-3">
+              <CustomAttributes rows={customRows} onChange={setCustomRows} inputCls={inputCls} t={t} />
+            </div>
+          )}
+
           {/* Packaged Goods */}
           <button type="button" onClick={() => setResOpen(s => ({ ...s, pkg: !s.pkg }))}
             className="mt-4 w-full flex items-center justify-between text-xs font-semibold text-slate-400 hover:text-slate-200 transition-colors pt-3 border-t border-white/[0.06]">
@@ -4044,13 +4158,14 @@ function AddProductPage({ onNav, catalogId, editResourceId }) {
               <div><label className={labelCls}>{t('Common / Generic Name')}</label>
                 <input className={inputCls} value={res.common_name} onChange={e => rSet('common_name', e.target.value)} placeholder={t('Vacuum Flask')} />
               </div>
-              <div><label className={labelCls}>{t('Net Quantity')}</label>
+              <div><label className={labelCls} title={t('How much product is inside one pack, as printed on the label (berat bersih / isi bersih), e.g. 250 G of coffee, 600 ML of water, 4 PCS of tablets. For a shirt or a phone: 1 PCS.')}>{t('Net contents per pack')}</label>
                 <div className="flex gap-2">
                   <input className={inputCls} type="number" value={res.net_qty_value} onChange={e => rSet('net_qty_value', e.target.value)} placeholder="500" />
                   <select className={`${inputCls.replace('w-full', 'w-24')} shrink-0`} value={res.net_qty_unit} onChange={e => rSet('net_qty_unit', e.target.value)}>
                     {['ML', 'L', 'G', 'KG', 'PCS'].map(u => <option key={u} className="bg-slate-900">{u}</option>)}
                   </select>
                 </div>
+                <p className="mt-1 text-[10px] text-slate-600">{t('Amount inside one pack (berat / isi bersih), e.g. 250 G, 600 ML; 1 PCS for a shirt or phone.')}</p>
               </div>
             </div>
           )}

@@ -70,6 +70,7 @@ func (h *Handler) HandleListCatalogs(c *gin.Context) {
 		    c.descriptor_short_desc,
 		    c.provider_id,
 		    c.catalog_type,
+		    c.crc,
 		    c.validity_start,
 		    c.validity_end,
 		    c.created_at,
@@ -86,7 +87,7 @@ func (h *Handler) HandleListCatalogs(c *gin.Context) {
 		                 OR c.descriptor_name ILIKE '%' || $3 || '%'
 		                 OR c.provider_id     ILIKE '%' || $3 || '%')
 		GROUP BY c.id, c.descriptor_name, c.descriptor_short_desc, c.provider_id,
-		         c.catalog_type, c.validity_start, c.validity_end, c.created_at, c.network_published_at
+		         c.catalog_type, c.crc, c.validity_start, c.validity_end, c.created_at, c.network_published_at
 		ORDER BY c.created_at DESC
 		LIMIT $4 OFFSET $5`
 
@@ -103,6 +104,7 @@ func (h *Handler) HandleListCatalogs(c *gin.Context) {
 		ShortDesc          string  `json:"shortDesc"`
 		ProviderID         string  `json:"providerId"`
 		CatalogType        *string `json:"catalogType"`
+		CRC                *string `json:"crc"`
 		ValidityStart      *string `json:"validityStart"`
 		ValidityEnd        *string `json:"validityEnd"`
 		CreatedAt          string  `json:"createdAt"`
@@ -121,7 +123,7 @@ func (h *Handler) HandleListCatalogs(c *gin.Context) {
 		var ca pgtype.Timestamptz
 		var rc, oc int64
 
-		if err := rows.Scan(&row.ID, &row.Name, &sd, &row.ProviderID, &catType,
+		if err := rows.Scan(&row.ID, &row.Name, &sd, &row.ProviderID, &catType, &row.CRC,
 			&vs, &ve, &ca, &npAt, &rc, &oc); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -206,6 +208,11 @@ type CreateCatalogRequest struct {
 		StartDate string `json:"startDate"`
 		EndDate   string `json:"endDate"`
 	} `json:"validity"`
+	// CRC is the catalog's ION Catalogue Resource Category (e.g.
+	// TRC-fashion; ion-specs docs/ION_Resource_Categories.md), optional.
+	// The seller app publishes its products with resourceAttributes.crc set
+	// to it. Left unchanged when empty.
+	CRC string `json:"crc"`
 }
 
 func (h *Handler) HandleCreateCatalog(c *gin.Context) {
@@ -273,6 +280,12 @@ func (h *Handler) HandleCreateCatalog(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "upsert catalog: " + err.Error()})
 		return
 	}
+	if _, err := h.pool.Exec(ctx,
+		`UPDATE catalogs SET crc = COALESCE(NULLIF($3, ''), crc) WHERE id = $1 AND bpp_id = $2`,
+		req.ID, h.cfg.BppID, strings.TrimSpace(req.CRC)); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "save catalog CRC: " + err.Error()})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{"status": "ok", "id": req.ID})
 }
@@ -293,6 +306,7 @@ func (h *Handler) HandleGetCatalog(c *gin.Context) {
 		ProviderID         string  `json:"providerId"`
 		ProviderName       string  `json:"providerName"`
 		CatalogType        *string `json:"catalogType"`
+		CRC                *string `json:"crc"`
 		ValidityStart      *string `json:"validityStart"`
 		ValidityEnd        *string `json:"validityEnd"`
 		CreatedAt          string  `json:"createdAt"`
@@ -305,14 +319,14 @@ func (h *Handler) HandleGetCatalog(c *gin.Context) {
 	err := h.pool.QueryRow(ctx, `
 		SELECT c.id, c.descriptor_name, c.descriptor_short_desc, c.provider_id,
 		       COALESCE(p.descriptor_name, c.provider_id),
-		       c.catalog_type, c.validity_start, c.validity_end, c.created_at,
+		       c.catalog_type, c.crc, c.validity_start, c.validity_end, c.created_at,
 		       c.network_published_at
 		FROM catalogs c
 		LEFT JOIN providers p ON p.id = c.provider_id AND p.bpp_id = c.bpp_id
 		WHERE c.id = $1 AND c.bpp_id = $2 AND c.provider_id = $3 AND c.deleted_at IS NULL`,
 		catalogID, h.cfg.BppID, auth.ProviderIDFromContext(c),
 	).Scan(&cat.ID, &cat.Name, &sd, &cat.ProviderID, &cat.ProviderName,
-		&catType, &vs, &ve, &ca, &npAt)
+		&catType, &cat.CRC, &vs, &ve, &ca, &npAt)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "catalog not found"})
 		return
@@ -477,16 +491,6 @@ func (h *Handler) HandleAddProduct(c *gin.Context) {
 		ResourceAttributesType:    strPtr(attrsType),
 	}); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "insert resource: " + err.Error()})
-		return
-	}
-
-	// Upsert stock.
-	if err := q.UpsertResourceStock(ctx, dbsqlc.UpsertResourceStockParams{
-		ResourceID: req.Resource.ID,
-		BppID:      bppID,
-		Quantity:   req.Resource.StockQuantity,
-	}); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "upsert stock: " + err.Error()})
 		return
 	}
 
@@ -890,12 +894,11 @@ func (h *Handler) HandleInventoryItems(c *gin.Context) {
 		SELECT r.id, r.descriptor_name, COALESCE(r.descriptor_short_desc,''),
 		       r.catalog_id, c.descriptor_name AS catalog_name,
 		       c.provider_id, COALESCE(p.descriptor_name, c.provider_id),
-		       COALESCE(rs.quantity, 0), COALESCE(rs.sold, 0),
+		       COALESCE(r.resource_attributes->'availability'->>'status', ''),
 		       r.created_at
 		FROM resources r
 		JOIN catalogs c ON c.id = r.catalog_id AND c.bpp_id = r.bpp_id
 		LEFT JOIN providers p ON p.id = c.provider_id AND p.bpp_id = r.bpp_id
-		LEFT JOIN resource_stock rs ON rs.resource_id = r.id AND rs.bpp_id = r.bpp_id
 		WHERE r.bpp_id = $1 AND r.deleted_at IS NULL
 		  AND ($2 = '' OR r.catalog_id = $2)
 		  AND ($3 = '' OR c.provider_id = $3)
@@ -918,8 +921,8 @@ func (h *Handler) HandleInventoryItems(c *gin.Context) {
 		CatalogName  string `json:"catalogName"`
 		ProviderID   string `json:"providerId"`
 		ProviderName string `json:"providerName"`
-		Stock        int32  `json:"stock"`
-		Sold         int32  `json:"sold"`
+		// Availability is the published availability.status (IN_STOCK, ...).
+		Availability string `json:"availability"`
 		CreatedAt    string `json:"createdAt"`
 	}
 
@@ -930,7 +933,7 @@ func (h *Handler) HandleInventoryItems(c *gin.Context) {
 		if err := rows.Scan(&item.ID, &item.Name, &item.ShortDesc,
 			&item.CatalogID, &item.CatalogName,
 			&item.ProviderID, &item.ProviderName,
-			&item.Stock, &item.Sold, &ca); err != nil {
+			&item.Availability, &ca); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
@@ -940,7 +943,32 @@ func (h *Handler) HandleInventoryItems(c *gin.Context) {
 		items = append(items, item)
 	}
 
-	c.JSON(http.StatusOK, gin.H{"items": items, "total": total, "page": page, "limit": limit})
+	// Products per availability status, over everything the filters match
+	// (not only this page). A product without one counts as "".
+	counts := map[string]int64{}
+	crows, err := h.pool.Query(ctx, `
+		SELECT COALESCE(r.resource_attributes->'availability'->>'status', ''), COUNT(*)
+		FROM resources r
+		JOIN catalogs c ON c.id = r.catalog_id AND c.bpp_id = r.bpp_id
+		WHERE r.bpp_id = $1 AND r.deleted_at IS NULL
+		  AND ($2 = '' OR r.catalog_id = $2)
+		  AND ($3 = '' OR c.provider_id = $3)
+		  AND ($4 = '' OR r.descriptor_name ILIKE '%' || $4 || '%' OR r.id ILIKE '%' || $4 || '%')
+		GROUP BY 1`, h.cfg.BppID, catalogFilter, providerFilter, search)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	for crows.Next() {
+		var st string
+		var n int64
+		if crows.Scan(&st, &n) == nil {
+			counts[st] = n
+		}
+	}
+	crows.Close()
+
+	c.JSON(http.StatusOK, gin.H{"items": items, "total": total, "page": page, "limit": limit, "availability": counts})
 }
 
 // ---------------------------------------------------------------------------

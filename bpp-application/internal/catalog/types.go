@@ -41,7 +41,7 @@ type BecknPublishMessage struct {
 
 // ---------------------------------------------------------------------------
 // CDS-safe types — mirrors Catalog/Resource/Offer but strips BPP-internal
-// fields (e.g. StockQuantity) that are not part of the Beckn catalog spec
+// fields (e.g. PublishDirectives) that are not part of the Beckn catalog spec
 // and would cause the CDS to reject the payload.
 // ---------------------------------------------------------------------------
 
@@ -57,15 +57,15 @@ type CDSCatalog struct {
 	Validity   *TimePeriod   `json:"validity,omitempty"`
 }
 
-// CDSResource is identical to Resource but without the StockQuantity field,
-// which is a BPP-internal inventory concept unknown to the CDS.
+// CDSResource is a Resource as the CDS receives it. A resource publishes its
+// availability (resourceAttributes.availability.status), never a stock count.
 type CDSResource struct {
 	ID                 string          `json:"id"`
 	Descriptor         Descriptor      `json:"descriptor"`
 	ResourceAttributes json.RawMessage `json:"resourceAttributes,omitempty"`
 }
 
-// ToCDSCatalog strips BPP-internal fields (StockQuantity, PublishDirectives)
+// ToCDSCatalog strips BPP-internal fields (PublishDirectives)
 // from a Catalog before forwarding to the CDS. Exported for use by dashboardsvc.
 func ToCDSCatalog(cat Catalog) CDSCatalog {
 	cdsResources := make([]CDSResource, len(cat.Resources))
@@ -249,9 +249,6 @@ type Resource struct {
 	ID                 string          `json:"id"`
 	Descriptor         Descriptor      `json:"descriptor"`
 	ResourceAttributes json.RawMessage `json:"resourceAttributes,omitempty"`
-	// StockQuantity is the initial on-hand stock set by the provider at publish time.
-	// Zero means untracked (backwards-compatible with existing payloads).
-	StockQuantity int32 `json:"stockQuantity,omitempty"`
 }
 
 type Offer struct {

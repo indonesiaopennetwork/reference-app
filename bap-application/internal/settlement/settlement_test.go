@@ -142,3 +142,25 @@ func TestAnUnknownMethodIsDropped(t *testing.T) {
 		t.Errorf("PaymentDetails dropped QRIS: %v", p)
 	}
 }
+
+func TestALegacyContextIsReplaced(t *testing.T) {
+	legacy := "https://schema.ion.id/release1/schema/core/reconcile/v1/context.jsonld"
+	contract := map[string]any{"settlements": []any{
+		map[string]any{"id": "settlement-1", "settlementAttributes": map[string]any{"@context": legacy, "@type": Type}},
+		map[string]any{"id": "refund-1", "settlementAttributes": map[string]any{
+			"@context": "https://schema.ion.id/release1/schema/extension/trade/TradeSettlement/v1/context.jsonld",
+			"@type":    "ion:IONTradeSettlement", "refund": map[string]any{"amount": 10.0}}},
+	}}
+	CurrentContext(contract)
+	if got := asMap(asMap(slice(contract["settlements"])[0])["settlementAttributes"])["@context"]; got != Context {
+		t.Errorf("payment settlement @context = %v, want %v", got, Context)
+	}
+	if got := asMap(asMap(slice(contract["settlements"])[1])["settlementAttributes"])["@context"]; got == Context {
+		t.Error("a refund settlement's own @context must be kept")
+	}
+	// Normalize does it too for an object that is already the current type.
+	contract = map[string]any{"settlements": []any{map[string]any{"id": "s", "settlementAttributes": map[string]any{"@context": legacy, "@type": Type}}}}
+	if a := Normalize(contract); a["@context"] != Context {
+		t.Errorf("Normalize kept %v", a["@context"])
+	}
+}

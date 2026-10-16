@@ -31,6 +31,25 @@ const (
 	Type    = "ion:IONSettlementReconciliation"
 )
 
+// legacyContexts are earlier @context URLs of the settlement object, no
+// longer served (ion-specs moved the pack from core/reconcile/v1 to
+// common/Settlement/v1). A validator that fetches one fails the message.
+var legacyContexts = map[string]bool{
+	"https://schema.ion.id/release1/schema/core/reconcile/v1/context.jsonld": true,
+}
+
+// CurrentContext points every settlement object of the contract that still
+// carries a legacy @context at Context, so an order stored before the move
+// validates when it is sent again. It returns the contract.
+func CurrentContext(contract map[string]any) map[string]any {
+	for _, raw := range slice(contract["settlements"]) {
+		if a := asMap(asMap(raw)["settlementAttributes"]); a != nil && legacyContexts[str(a["@context"])] {
+			a["@context"] = Context
+		}
+	}
+	return contract
+}
+
 // paymentFields are the payment details the object carries (the IONPayment
 // definitions).
 var paymentFields = []string{"method", "paymentRail", "paymentGatewayProvider", "methodDetail", "timing", "status", "paidAt", "gatewayRef"}
@@ -75,6 +94,7 @@ func Normalize(contract map[string]any) map[string]any {
 		st["settlementAttributes"] = a
 	}
 	if str(a["@type"]) == Type {
+		CurrentContext(contract)
 		return a
 	}
 	a["@context"], a["@type"] = Context, Type

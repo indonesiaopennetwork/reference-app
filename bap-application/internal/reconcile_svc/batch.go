@@ -17,22 +17,29 @@ func batchStatus(agreed, total int) string {
 	return "DISPUTED"
 }
 
-// batchOutcome is a batch's reconciliationStatus. Contracts sent before
-// their settlement window (early) don't count: the batch is AGREED when
-// every other contract is agreed, DISPUTED when one isn't, and PENDING when
-// every contract was early.
+// batchOutcome is a batch's reconciliationStatus, still all or nothing:
+// DISPUTED when a contract that was due isn't agreed (counted: the due ones,
+// agreed: those agreed), else PENDING when any contract was sent before its
+// settlement window (early), else AGREED -- every contract due and agreed.
 func batchOutcome(agreed, counted, early int) string {
-	if counted == 0 && early > 0 {
+	switch {
+	case agreed < counted:
+		return "DISPUTED"
+	case early > 0:
 		return "PENDING"
 	}
 	return batchStatus(agreed, counted)
 }
 
 // contractOutcome is a contract's reconciliation status once its batch is
-// answered: AGREED only when the whole batch is.
+// answered: AGREED only when the whole batch is; none (it keeps only the
+// batch id, and is sent again) when the batch is PENDING; else DISPUTED.
 func contractOutcome(batch string) string {
-	if batch == "AGREED" {
+	switch batch {
+	case "AGREED":
 		return "AGREED"
+	case "PENDING":
+		return ""
 	}
 	return "DISPUTED"
 }

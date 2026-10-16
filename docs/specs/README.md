@@ -71,10 +71,10 @@ cancellation plus the window.
 
 A contract sent before it is due on the answering side is answered
 `accord: false` with the dispute code `SETTLEMENT_WINDOW_NOT_REACHED` and the
-reason (when it falls due, or that the order isn't delivered yet). It doesn't
-count towards the batch's outcome: the batch is `AGREED` or `DISPUTED` on the
-other contracts, and `PENDING` when every contract was sent early. Both sides
-leave an early contract to be reconciled once due.
+reason (when it falls due, or that the order isn't delivered yet). The batch
+is then `PENDING` -- unless another contract in it is disputed, which makes it
+`DISPUTED` -- and no contract in it is agreed, not even the ones that match:
+all of them are sent again, the early ones once due.
 The BAP always checks this against the real settlement window;
 `RECONCILE_WAIT_FOR_SETTLEMENT_WINDOW=false` only lets a participant send
 early.
@@ -105,9 +105,10 @@ whose `settlementAttributes` is an `IONSettlementReconciliation`:
 | `dueDate` / `dispute` | answer only: when `accord` is `true` / `false` |
 
 A batch is agreed as a whole or not at all. The answer's
-`reconciliationStatus` is `AGREED` only when every contract that is due has
-`accord: true`; then all of them are paid out. Otherwise it is `DISPUTED` and
-no contract in it is agreed, or `PENDING` when no contract was due. On the reconciliation pages the operator ticks
+`reconciliationStatus` is `AGREED` only when every contract in it is due and
+has `accord: true`; then all of them are paid out. Otherwise no contract in it
+is agreed, and it is `DISPUTED` (a contract that was due is disputed) or
+`PENDING` (the others match, but a contract was sent before its window). On the reconciliation pages the operator ticks
 what the next `/reconcile` carries -- any contracts that are due or disputed,
 for one counterparty at a time, filtered by the contracts' creation date --
 and they go out as a new batch; a disputed contract moves to it from its old

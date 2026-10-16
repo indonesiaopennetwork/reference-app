@@ -41,7 +41,7 @@ func (h *Handler) editableCatalog(c *gin.Context, catalogID string) bool {
 }
 
 // HandleGetResource (GET /catalogs/:id/resources/:rid) returns one resource
-// in its publish shape, with its current stock.
+// in its publish shape.
 func (h *Handler) HandleGetResource(c *gin.Context) {
 	catalogID, rid := c.Param("id"), c.Param("rid")
 	if !h.ownedCatalog(c, catalogID) {
@@ -50,14 +50,12 @@ func (h *Handler) HandleGetResource(c *gin.Context) {
 	var r catalog.Resource
 	var name, code, short, long *string
 	var media, attrs json.RawMessage
-	var stock *int32
 	err := h.pool.QueryRow(c.Request.Context(), `
 		SELECT r.id, r.descriptor_name, r.descriptor_code, r.descriptor_short_desc, r.descriptor_long_desc,
-		       r.descriptor_media_files, r.resource_attributes, s.quantity
+		       r.descriptor_media_files, r.resource_attributes
 		  FROM resources r
-		  LEFT JOIN resource_stock s ON s.resource_id = r.id AND s.bpp_id = r.bpp_id
 		 WHERE r.id = $1 AND r.catalog_id = $2 AND r.bpp_id = $3 AND r.deleted_at IS NULL`,
-		rid, catalogID, h.cfg.BppID).Scan(&r.ID, &name, &code, &short, &long, &media, &attrs, &stock)
+		rid, catalogID, h.cfg.BppID).Scan(&r.ID, &name, &code, &short, &long, &media, &attrs)
 	if errors.Is(err, pgx.ErrNoRows) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "resource not found"})
 		return
@@ -68,14 +66,12 @@ func (h *Handler) HandleGetResource(c *gin.Context) {
 	r.Descriptor = catalog.Descriptor{Name: strVal(name), Code: strVal(code), ShortDesc: strVal(short), LongDesc: strVal(long)}
 	_ = json.Unmarshal(media, &r.Descriptor.MediaFile)
 	r.ResourceAttributes = attrs
-	if stock != nil {
-		r.StockQuantity = *stock
-	}
 	c.JSON(http.StatusOK, gin.H{"resource": r})
 }
 
 // HandleUpdateResource (PUT /catalogs/:id/resources/:rid) replaces a
-// resource's descriptor, attributes and stock. The id can't change.
+// resource's descriptor and attributes (its availability among them). The id
+// can't change.
 func (h *Handler) HandleUpdateResource(c *gin.Context) {
 	catalogID, rid := c.Param("id"), c.Param("rid")
 	var req catalog.Resource
@@ -115,13 +111,6 @@ func (h *Handler) HandleUpdateResource(c *gin.Context) {
 	}
 	if tag.RowsAffected() == 0 {
 		c.JSON(http.StatusNotFound, gin.H{"error": "resource not found"})
-		return
-	}
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO resource_stock (resource_id, bpp_id, quantity) VALUES ($1, $2, $3)
-		ON CONFLICT (resource_id, bpp_id) DO UPDATE SET quantity = EXCLUDED.quantity, updated_at = NOW()`,
-		rid, h.cfg.BppID, req.StockQuantity); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "update stock: " + err.Error()})
 		return
 	}
 	if err := tx.Commit(ctx); err != nil {
