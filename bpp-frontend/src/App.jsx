@@ -1035,6 +1035,65 @@ function AvailabilityBadge({ status }) {
   )
 }
 
+// The product image at url, or a placeholder while there is none or it fails
+// to load. compact is the small thumbnail under the Image URL field.
+function ProductImage({ url, compact = false }) {
+  const { t } = useI18n()
+  const [failed, setFailed] = useState(false)
+  useEffect(() => setFailed(false), [url])
+  const size = compact ? 'h-24 w-24' : 'aspect-square w-full'
+  if (!url || failed) {
+    return (
+      <div className={`${size} rounded-xl border border-dashed border-white/[0.10] flex flex-col items-center justify-center gap-2 text-slate-600`}>
+        <Package size={compact ? 20 : 32} />
+        {!compact && <p className="text-xs text-center px-4">{url ? t('The image could not be loaded — check the URL') : t('Enter an Image URL to see it here')}</p>}
+      </div>
+    )
+  }
+  return <img src={url} alt="" onError={() => setFailed(true)} className={`${size} rounded-xl object-cover border border-white/[0.08] bg-white/[0.02]`} />
+}
+
+// A product's images: the selected one large, with arrows and a row of
+// thumbnails to pick from. compact shows only the thumbnails.
+function ProductGallery({ urls, compact = false }) {
+  const { t } = useI18n()
+  const [index, setIndex] = useState(0)
+  const current = Math.min(index, Math.max(urls.length - 1, 0))
+  const step = d => setIndex((current + d + urls.length) % urls.length)
+  const thumbs = urls.length > (compact ? 0 : 1) && (
+    <div className="flex flex-wrap gap-2">
+      {urls.map((u, i) => (
+        <button key={u} type="button" onClick={() => setIndex(i)} title={i === 0 ? t('Main image') : t('Image {n}', { n: i + 1 })}
+          className={`rounded-lg overflow-hidden border-2 transition-colors ${i === current ? 'border-emerald-400' : 'border-transparent opacity-70 hover:opacity-100'}`}>
+          <img src={u} alt="" className="h-12 w-12 object-cover bg-white/[0.02]" onError={e => { e.currentTarget.style.visibility = 'hidden' }} />
+        </button>
+      ))}
+    </div>
+  )
+  if (compact) return thumbs || null
+  return (
+    <div className="space-y-2">
+      <div className="relative">
+        <ProductImage url={urls[current]} />
+        {urls.length > 1 && (
+          <>
+            <button type="button" onClick={() => step(-1)} title={t('Previous image')}
+              className="absolute left-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-black/50 text-white hover:bg-black/70 transition-colors">
+              <ChevronLeft size={16} />
+            </button>
+            <button type="button" onClick={() => step(1)} title={t('Next image')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-black/50 text-white hover:bg-black/70 transition-colors">
+              <ChevronRightIcon size={16} />
+            </button>
+            <span className="absolute bottom-2 right-2 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-black/60 text-white">{current + 1} / {urls.length}</span>
+          </>
+        )}
+      </div>
+      {thumbs}
+    </div>
+  )
+}
+
 // Availability tab: how many products have each availability status, and
 // every product with its status.
 function AvailabilityTab() {
@@ -1291,11 +1350,11 @@ function InventoryPage({ initialTab = 'products' }) {
 // ─── Publish ──────────────────────────────────────────────────────────────────
 
 const EMPTY_RESOURCE = () => ({
-  id: '', name: '', short_desc: '', long_desc: '', stock_quantity: '',
+  id: '', name: '', short_desc: '', long_desc: '',
   product_highlights: '', specifications: '',
-  media_url: '',
+  media_url: '', more_media: [],
   // availability: the signal published instead of a stock count
-  availability: 'IN_STOCK', max_order_qty: '',
+  availability: 'IN_STOCK',
   // identity
   brand: '', origin_country: 'ID',
   // physical
@@ -1412,7 +1471,7 @@ const AUTO_FILL_POOL = [
       short_desc: 'Aneka biskuit renyah dalam kaleng ikonik (Assorted crispy biscuits in iconic tin)',
       long_desc: 'Koleksi biskuit klasik Khong Guan dengan berbagai rasa: vanila, cokelat, dan keju. Hadir dalam kaleng dekoratif yang bisa digunakan kembali. (Classic Khong Guan biscuit collection with vanilla, chocolate, and cheese varieties in a reusable decorative tin.)',
       media_url: 'https://images.unsplash.com/photo-1558961363-fa8fdf82db35?w=800&q=80',
-      stock_quantity: '200', brand: 'Khong Guan', origin_country: 'ID',
+      brand: 'Khong Guan', origin_country: 'ID',
       weight_value: '1600', weight_unit: 'G', color: 'Red', material: 'Tin', finish: 'Glossy',
       mfr_type: 'MANUFACTURER', mfr_name: 'Khong Guan Biscuit Factory Pte Ltd', mfr_address: 'Jakarta, DKI Jakarta, ID',
       common_name: 'Biskuit Assorted (Assorted Biscuits)', net_qty_value: '1600', net_qty_unit: 'G',
@@ -1435,7 +1494,7 @@ const AUTO_FILL_POOL = [
       short_desc: 'Keripik kentang gurih rasa sapi panggang (Crunchy potato chips with BBQ beef flavor)',
       long_desc: 'Chitato hadir dengan rasa Sapi Panggang yang kaya dan bumbu khas Indonesia. Dibuat dari kentang pilihan yang diproses dengan teknologi modern untuk tekstur renyah sempurna. (Chitato with rich BBQ Beef flavor and distinctive Indonesian seasoning, made from selected potatoes for perfect crunch.)',
       media_url: 'https://images.unsplash.com/photo-1621939514649-280e2ee25f60?w=800&q=80',
-      stock_quantity: '1000', brand: 'Chitato', origin_country: 'ID',
+      brand: 'Chitato', origin_country: 'ID',
       weight_value: '68', weight_unit: 'G', color: 'Red', material: 'Plastic', finish: 'Glossy',
       mfr_type: 'MANUFACTURER', mfr_name: 'PT Indofood CBP Sukses Makmur Tbk', mfr_address: 'Jakarta, DKI Jakarta, ID',
       common_name: 'Keripik Kentang (Potato Chips)', net_qty_value: '68', net_qty_unit: 'G',
@@ -1459,7 +1518,7 @@ const AUTO_FILL_POOL = [
       short_desc: 'Kue lapis klasik Belanda-Indonesia dengan lapisan sempurna (Classic Dutch-Indonesian layered cake)',
       long_desc: 'Lapis Legit adalah kue tradisional warisan Belanda-Indonesia yang dibuat dengan lebih dari 18 lapisan tipis. Setiap lapisan dipanggang satu per satu menggunakan rempah pilihan seperti kayu manis, cengkeh, dan kapulaga. (Lapis Legit is a traditional Dutch-Indonesian heritage cake with over 18 thin layers, each baked individually using selected spices like cinnamon, cloves, and cardamom.)',
       media_url: 'https://images.unsplash.com/photo-1578985545062-69928b1d9587?w=800&q=80',
-      stock_quantity: '50', brand: 'Dapur Lapis', origin_country: 'ID',
+      brand: 'Dapur Lapis', origin_country: 'ID',
       weight_value: '700', weight_unit: 'G', color: 'Brown', material: 'Paper Box', finish: 'Matte',
       mfr_type: 'MANUFACTURER', mfr_name: 'CV Dapur Lapis Nusantara', mfr_address: 'Bandung, Jawa Barat, ID',
       common_name: 'Kue Lapis Legit (Spekkoek Cake)', net_qty_value: '700', net_qty_unit: 'G',
@@ -1483,7 +1542,7 @@ const AUTO_FILL_POOL = [
       short_desc: 'Kue kering butter premium dalam kaleng cantik (Premium butter cookies in a beautiful tin)',
       long_desc: 'Monde Butter Cookies hadir dalam kaleng premium dengan pilihan cookies berbentuk bunga, pretzel, dan cinnamon. Dibuat dari butter pilihan berkualitas tinggi dengan tekstur yang lumer di mulut. (Monde Butter Cookies in premium tin with flower-shaped, pretzel, and cinnamon cookie varieties. Made from high-quality selected butter with a melt-in-your-mouth texture.)',
       media_url: 'https://images.unsplash.com/photo-1548365328-8c6db3220e4c?w=800&q=80',
-      stock_quantity: '150', brand: 'Monde', origin_country: 'ID',
+      brand: 'Monde', origin_country: 'ID',
       weight_value: '454', weight_unit: 'G', color: 'Blue', material: 'Tin', finish: 'Glossy',
       mfr_type: 'MANUFACTURER', mfr_name: 'PT Monde Mahkota Biskuit', mfr_address: 'Jakarta, DKI Jakarta, ID',
       common_name: 'Kue Kering Butter (Butter Cookies)', net_qty_value: '454', net_qty_unit: 'G',
@@ -1506,7 +1565,7 @@ const AUTO_FILL_POOL = [
       short_desc: 'Brownies kukus lembut khas Bandung dengan cokelat premium (Soft steamed Bandung-style brownies)',
       long_desc: 'Brownies Kukus Amanda adalah ikon kuliner Bandung yang terkenal. Dibuat dengan cokelat premium, teksturnya sangat lembut dan basah. Tersedia dalam varian original, keju, dan tiramisu. (Amanda Steamed Brownies are a famous Bandung culinary icon. Made with premium chocolate, extremely soft and moist. Available in original, cheese, and tiramisu variants.)',
       media_url: 'https://images.unsplash.com/photo-1606313564200-e75d5e30476c?w=800&q=80',
-      stock_quantity: '60', brand: 'Amanda', origin_country: 'ID',
+      brand: 'Amanda', origin_country: 'ID',
       weight_value: '800', weight_unit: 'G', color: 'Brown', material: 'Cardboard', finish: 'Matte',
       mfr_type: 'MANUFACTURER', mfr_name: 'CV Amanda Brownies', mfr_address: 'Bandung, Jawa Barat, ID',
       common_name: 'Brownies Kukus (Steamed Brownies)', net_qty_value: '800', net_qty_unit: 'G',
@@ -1537,11 +1596,10 @@ function buildResourceAttrs(r) {
   const hasPkg = r.mfr_name || r.common_name || r.net_qty_value
 
   // Every product publishes its availability, so there are always attributes.
-  const maxQty = Number(r.max_order_qty)
   const attrs = {
     '@context': TRADE_RESOURCE_CONTEXT,
     '@type': 'ion:IONTradeResource',
-    availability: { status: r.availability || 'IN_STOCK', ...(Number.isInteger(maxQty) && maxQty >= 1 ? { maxOrderQty: maxQty } : {}) },
+    availability: { status: r.availability || 'IN_STOCK' },
   }
   if (r.product_highlights) attrs.productHighlights = r.product_highlights
   if (r.specifications) attrs.specifications = r.specifications
@@ -1575,6 +1633,23 @@ function buildResourceAttrs(r) {
 // Build offerAttributes JSON-LD from flat form fields.
 // Returns undefined when no meaningful attributes are set so the field is
 // omitted from the payload entirely (avoids sending a broken @context to CDS).
+// Most images one product may have: the main image plus the extra ones.
+const MAX_PRODUCT_IMAGES = 8
+
+// The form's image URLs (main image first), trimmed, without blanks or repeats.
+function productImageUrls(r) {
+  return [...new Set([r.media_url, ...(r.more_media || [])].map(u => (u || '').trim()).filter(Boolean))]
+}
+
+// descriptor.mediaFile for the form's images.
+function productMediaFiles(r) {
+  const mime = u => {
+    const ext = u.split(/[?#]/)[0].split('.').pop().toLowerCase()
+    return { png: 'image/png', webp: 'image/webp', gif: 'image/gif', svg: 'image/svg+xml', avif: 'image/avif' }[ext] || 'image/jpeg'
+  }
+  return productImageUrls(r).map(uri => ({ uri, mimeType: mime(uri) }))
+}
+
 // Reverse of buildResourceAttrs + the publish descriptor: a stored resource
 // (GET /catalogs/:id/resources/:rid) back into the Add Product form's fields.
 function resourceToForm(r) {
@@ -1586,9 +1661,8 @@ function resourceToForm(r) {
     ...EMPTY_RESOURCE(),
     id: r.id, name: r.descriptor?.name || '', short_desc: r.descriptor?.shortDesc || '', long_desc: r.descriptor?.longDesc || '',
     media_url: r.descriptor?.mediaFile?.[0]?.uri || '',
-    stock_quantity: r.stockQuantity ? String(r.stockQuantity) : '',
+    more_media: (r.descriptor?.mediaFile || []).slice(1).map(m => m.uri).filter(Boolean),
     availability: a.availability?.status || 'IN_STOCK',
-    max_order_qty: a.availability?.maxOrderQty ? String(a.availability.maxOrderQty) : '',
     product_highlights: a.productHighlights || '', specifications: a.specifications || '',
     brand: id.brand || '', origin_country: id.originCountry || '',
     weight_value: s(ph.weight?.unitQuantity), weight_unit: ph.weight?.unitCode || 'G',
@@ -1739,7 +1813,8 @@ function PublishPage({ onNav }) {
         provider: { id: form.provider_id, descriptor: { name: form.provider_name } },
         ...(catStart ? { validity: { startDate: catStart, endDate: catEnd } } : {}),
         resources: form.resources.map(r => {
-          const mediaFile = r.media_url ? [{ uri: r.media_url, mimeType: 'image/jpeg' }] : undefined
+          const media = productMediaFiles(r)
+          const mediaFile = media.length ? media : undefined
           const attrs = buildResourceAttrs(r)
           return {
             id: r.id,
@@ -1748,7 +1823,6 @@ function PublishPage({ onNav }) {
               ...(mediaFile ? { mediaFile } : {}),
             },
             ...(attrs ? { resourceAttributes: attrs } : {}),
-            ...(r.stock_quantity !== '' && !isNaN(Number(r.stock_quantity)) ? { stockQuantity: Number(r.stock_quantity) } : {}),
           }
         }),
         offers: form.offers.map(o => {
@@ -1912,8 +1986,10 @@ function PublishPage({ onNav }) {
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
-                    <div><label className={labelCls}>{t('Stock Quantity')} <span className="text-slate-600 font-normal">({t('blank = unlimited')})</span></label>
-                      <input className={inputCls} type="number" min="0" value={r.stock_quantity} onChange={e => setResourceField(i, 'stock_quantity', e.target.value)} placeholder={t('e.g. 50')} />
+                    <div><label className={labelCls}>{t('Availability')}</label>
+                      <select className={inputCls} value={r.availability} onChange={e => setResourceField(i, 'availability', e.target.value)}>
+                        {AVAILABILITY_STATUSES.map(([v, l]) => <option key={v} value={v} className="bg-slate-900">{t(l)}</option>)}
+                      </select>
                     </div>
                     <div><label className={labelCls}>{t('Image URL')} <span className="text-slate-600 font-normal">({t('optional')})</span></label>
                       <input className={inputCls} value={r.media_url} onChange={e => setResourceField(i, 'media_url', e.target.value)} placeholder="https://example.com/product.jpg" />
@@ -2270,12 +2346,7 @@ function PublishPage({ onNav }) {
                           {r.material && <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.06] text-slate-400">{r.material}</span>}
                         </div>
                       </div>
-                      <span className="shrink-0 text-xs px-2 py-0.5 rounded-full border"
-                        style={r.stock_quantity !== '' && !isNaN(Number(r.stock_quantity))
-                          ? { color: '#00b8e6', borderColor: 'rgba(0,184,230,0.25)', background: 'rgba(0,184,230,0.08)' }
-                          : { color: '#64748b', borderColor: 'rgba(255,255,255,0.08)' }}>
-                        {r.stock_quantity !== '' && !isNaN(Number(r.stock_quantity)) ? t('Qty: {qty}', { qty: r.stock_quantity }) : `∞ ${t('Unlimited')}`}
-                      </span>
+                      <span className="shrink-0"><AvailabilityBadge status={r.availability} /></span>
                     </div>
                   ))}
                 </div>
@@ -3703,7 +3774,8 @@ function CatalogDetailPage({ onNav, catalogId }) {
                         {r.mediaFiles && r.mediaFiles !== '[]' && r.mediaFiles !== 'null' && (() => {
                           try {
                             const mf = typeof r.mediaFiles === 'string' ? JSON.parse(r.mediaFiles) : r.mediaFiles
-                            const url = Array.isArray(mf) ? mf[0]?.url : mf?.url
+                            const first = Array.isArray(mf) ? mf[0] : mf
+                            const url = first?.uri || first?.url
                             if (url) return <img src={url} alt="" className="w-10 h-10 rounded-lg object-cover border border-white/10 shrink-0" />
                           } catch { return null }
                           return null
@@ -3773,15 +3845,15 @@ const DAYS_OF_WEEK = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN']
 
 const PRODUCT_AUTOFILL_POOL = [
   {
-    res: { id: 'item-keripik-singkong', name: 'Keripik Singkong Balado (Spicy Cassava Chips)', short_desc: 'Crispy cassava chips with balado seasoning', long_desc: 'Keripik singkong renyah dengan bumbu balado khas Minang yang pedas manis. (Crispy cassava chips with authentic Minang sweet and spicy balado seasoning.)', product_highlights: '- Terbuat dari singkong segar pilihan (Made from fresh selected cassava)\n- Bumbu balado asli minang (Authentic Minang balado seasoning)\n- Tanpa pengawet buatan (No artificial preservatives)', specifications: '- Berat Bersih (Net Weight): 150g\n- Kemasan (Packaging): Plastik Ziplock (Ziplock Plastic)\n- Bahan Utama (Main Ingredient): Singkong, Cabai (Cassava, Chili)', stock_quantity: '50', media_url: 'https://images.unsplash.com/photo-1621939514649-280e2ee25f60?w=400', brand: 'Chitato', origin_country: 'ID', weight_value: '150', weight_unit: 'G', color: 'Golden', material: 'Cassava' },
+    res: { id: 'item-keripik-singkong', name: 'Keripik Singkong Balado (Spicy Cassava Chips)', short_desc: 'Crispy cassava chips with balado seasoning', long_desc: 'Keripik singkong renyah dengan bumbu balado khas Minang yang pedas manis. (Crispy cassava chips with authentic Minang sweet and spicy balado seasoning.)', product_highlights: '- Terbuat dari singkong segar pilihan (Made from fresh selected cassava)\n- Bumbu balado asli minang (Authentic Minang balado seasoning)\n- Tanpa pengawet buatan (No artificial preservatives)', specifications: '- Berat Bersih (Net Weight): 150g\n- Kemasan (Packaging): Plastik Ziplock (Ziplock Plastic)\n- Bahan Utama (Main Ingredient): Singkong, Cabai (Cassava, Chili)', media_url: 'https://images.unsplash.com/photo-1621939514649-280e2ee25f60?w=400', brand: 'Chitato', origin_country: 'ID', weight_value: '150', weight_unit: 'G', color: 'Golden', material: 'Cassava' },
     off: { id: 'offer-keripik-singkong', name: 'Keripik Singkong Balado', price: '25000', currency: 'IDR', cod_available: true, returns_allowed: true, returns_window: 'P7D', returns_method: 'SELLER_PICKUP', returns_fee_type: 'PERCENTAGE', returns_fee_value: '10', cancel_allowed: true, cancel_window: 'PT2H', cancel_event: 'BEFORE_PACKING', replace_allowed: false, max_distance: '20', timing_days: ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'], timing_start: '09:00', timing_end: '21:00', offer_context: 'https://schema.ion.id/release1/schema/extension/trade/TradeOffer/v1/context.jsonld' }
   },
   {
-    res: { id: 'item-bolu-pisang', name: 'Bolu Pisang Cokelat (Chocolate Banana Cake)', short_desc: 'Soft banana cake with chocolate chips', long_desc: 'Bolu pisang panggang yang lembut dipadukan dengan taburan cokelat lezat di atasnya. (Soft baked banana cake topped with delicious chocolate chips.)', product_highlights: '- Dibuat dengan pisang ambon segar (Made with fresh Ambon bananas)\n- Tekstur lembut dan lumer di mulut (Soft texture that melts in the mouth)\n- Taburan cokelat premium (Premium chocolate chips)', specifications: '- Berat Bersih (Net Weight): 400g\n- Kemasan (Packaging): Kardus Makanan (Food Box)\n- Bahan Utama (Main Ingredient): Tepung, Pisang, Cokelat (Flour, Banana, Chocolate)', stock_quantity: '30', media_url: 'https://images.unsplash.com/photo-1578985545062-69928b1d9587?w=400', brand: 'HomeMade', origin_country: 'ID', weight_value: '400', weight_unit: 'G', color: 'Brown', material: 'Flour' },
+    res: { id: 'item-bolu-pisang', name: 'Bolu Pisang Cokelat (Chocolate Banana Cake)', short_desc: 'Soft banana cake with chocolate chips', long_desc: 'Bolu pisang panggang yang lembut dipadukan dengan taburan cokelat lezat di atasnya. (Soft baked banana cake topped with delicious chocolate chips.)', product_highlights: '- Dibuat dengan pisang ambon segar (Made with fresh Ambon bananas)\n- Tekstur lembut dan lumer di mulut (Soft texture that melts in the mouth)\n- Taburan cokelat premium (Premium chocolate chips)', specifications: '- Berat Bersih (Net Weight): 400g\n- Kemasan (Packaging): Kardus Makanan (Food Box)\n- Bahan Utama (Main Ingredient): Tepung, Pisang, Cokelat (Flour, Banana, Chocolate)', media_url: 'https://images.unsplash.com/photo-1578985545062-69928b1d9587?w=400', brand: 'HomeMade', origin_country: 'ID', weight_value: '400', weight_unit: 'G', color: 'Brown', material: 'Flour' },
     off: { id: 'offer-bolu-pisang', name: 'Bolu Pisang Cokelat', price: '45000', currency: 'IDR', cod_available: true, returns_allowed: false, cancel_allowed: true, cancel_window: 'PT1H', cancel_event: 'BEFORE_PACKING', replace_allowed: false, max_distance: '10', timing_days: ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'], timing_start: '08:00', timing_end: '18:00', offer_context: 'https://schema.ion.id/release1/schema/extension/trade/TradeOffer/v1/context.jsonld' }
   },
   {
-    res: { id: 'item-teh-botol', name: 'Teh Botol Sosro (Bottled Jasmine Tea)', short_desc: 'Ready-to-drink jasmine tea', long_desc: 'Minuman teh melati siap saji legendaris Indonesia yang menyegarkan dahaga. (Legendary Indonesian ready-to-drink jasmine tea that is very refreshing.)', product_highlights: '- Terbuat dari daun teh melati asli (Made from real jasmine tea leaves)\n- Proses penyeduhan higienis (Hygienic brewing process)\n- Menyegarkan dahaga (Refreshing thirst quencher)', specifications: '- Isi Bersih (Net Volume): 350ml\n- Kemasan (Packaging): Botol Plastik PET (PET Plastic Bottle)\n- Bahan Utama (Main Ingredient): Air, Ekstrak Teh (Water, Tea Extract)', stock_quantity: '200', media_url: 'https://images.unsplash.com/photo-1556679343-c7306c1976bc?w=400', brand: 'Sosro', origin_country: 'ID', weight_value: '350', weight_unit: 'ML', color: 'Amber', material: 'PET Bottle' },
+    res: { id: 'item-teh-botol', name: 'Teh Botol Sosro (Bottled Jasmine Tea)', short_desc: 'Ready-to-drink jasmine tea', long_desc: 'Minuman teh melati siap saji legendaris Indonesia yang menyegarkan dahaga. (Legendary Indonesian ready-to-drink jasmine tea that is very refreshing.)', product_highlights: '- Terbuat dari daun teh melati asli (Made from real jasmine tea leaves)\n- Proses penyeduhan higienis (Hygienic brewing process)\n- Menyegarkan dahaga (Refreshing thirst quencher)', specifications: '- Isi Bersih (Net Volume): 350ml\n- Kemasan (Packaging): Botol Plastik PET (PET Plastic Bottle)\n- Bahan Utama (Main Ingredient): Air, Ekstrak Teh (Water, Tea Extract)', media_url: 'https://images.unsplash.com/photo-1556679343-c7306c1976bc?w=400', brand: 'Sosro', origin_country: 'ID', weight_value: '350', weight_unit: 'ML', color: 'Amber', material: 'PET Bottle' },
     off: { id: 'offer-teh-botol', name: 'Teh Botol Sosro', price: '5000', currency: 'IDR', cod_available: true, returns_allowed: false, cancel_allowed: true, cancel_window: 'PT30M', cancel_event: 'BEFORE_PACKING', replace_allowed: false, max_distance: '15', timing_days: ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'], timing_start: '07:00', timing_end: '22:00', offer_context: 'https://schema.ion.id/release1/schema/extension/trade/TradeOffer/v1/context.jsonld' }
   },
 ]
@@ -4061,7 +4133,7 @@ function AddProductPage({ onNav, catalogId, editResourceId }) {
     const resourceAttrs = common || Object.keys(crcAttrs).length
       ? { ...(common || { '@context': TRADE_RESOURCE_CONTEXT, '@type': 'ion:IONTradeResource' }), ...crcAttrs }
       : undefined
-    const mediaFile = res.media_url ? [{ uri: res.media_url, mimeType: 'image/jpeg' }] : []
+    const mediaFile = productMediaFiles(res)
 
     const resource = {
       id: res.id,
@@ -4097,7 +4169,8 @@ function AddProductPage({ onNav, catalogId, editResourceId }) {
   }
 
   return (
-    <div className="max-w-2xl space-y-6">
+    <div className="xl:flex xl:items-start xl:gap-6">
+    <div className="max-w-2xl flex-1 min-w-0 space-y-6">
       <div className="flex items-center gap-3">
         <button onClick={() => onNav('catalog_detail', { catalogId })} className="p-2 rounded-lg border border-white/[0.08] text-slate-400 hover:text-white transition-colors">
           <ArrowLeft size={16} />
@@ -4157,18 +4230,38 @@ function AddProductPage({ onNav, catalogId, editResourceId }) {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
             <div><label className={labelCls}>{t('Availability')}</label>
-              <div className="flex gap-2">
-                <select className={inputCls} value={res.availability} onChange={e => rSet('availability', e.target.value)}>
-                  {AVAILABILITY_STATUSES.map(([v, l]) => <option key={v} value={v} className="bg-slate-900">{t(l)}</option>)}
-                </select>
-                <input className={`${inputCls.replace('w-full', 'w-28')} shrink-0`} type="number" min="1" step="1" value={res.max_order_qty}
-                  onChange={e => rSet('max_order_qty', e.target.value)} placeholder={t('Max/order')} title={t('Most units one order may contain (optional)')} />
-              </div>
+              <select className={inputCls} value={res.availability} onChange={e => rSet('availability', e.target.value)}>
+                {AVAILABILITY_STATUSES.map(([v, l]) => <option key={v} value={v} className="bg-slate-900">{t(l)}</option>)}
+              </select>
               <p className="mt-1 text-[10px] text-slate-600">{t('Only this status is published, never a stock count.')}</p>
             </div>
-            <div><label className={labelCls}>{t('Image URL')}</label>
+            <div><label className={labelCls}>{t('Main Image URL')}</label>
               <input className={inputCls} value={res.media_url} onChange={e => rSet('media_url', e.target.value)} placeholder="https://example.com/product.jpg" />
             </div>
+          </div>
+
+          <div className="mt-3">
+            <label className={labelCls}>{t('More images')}</label>
+            <div className="space-y-2">
+              {res.more_media.map((url, i) => (
+                <div key={i} className="flex gap-2">
+                  <input className={inputCls} value={url} placeholder="https://example.com/product-side.jpg"
+                    onChange={e => rSet('more_media', res.more_media.map((u, j) => (j === i ? e.target.value : u)))} />
+                  <button type="button" title={t('Remove image')} onClick={() => rSet('more_media', res.more_media.filter((_, j) => j !== i))}
+                    className="p-2 rounded-lg border border-white/[0.08] text-slate-500 hover:text-red-400 transition-colors shrink-0">
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              ))}
+              {1 + res.more_media.length < MAX_PRODUCT_IMAGES && (
+                <button type="button" onClick={() => rSet('more_media', [...res.more_media, ''])}
+                  className="flex items-center gap-1.5 text-xs font-semibold text-slate-400 hover:text-white transition-colors">
+                  <Plus size={13} /> {t('Add image')}
+                </button>
+              )}
+            </div>
+            <p className="mt-1 text-[10px] text-slate-600">{t('Up to {n} images. The main image is shown first to buyers.', { n: MAX_PRODUCT_IMAGES })}</p>
+            {productImageUrls(res).length > 0 && <div className="mt-3 xl:hidden"><ProductGallery urls={productImageUrls(res)} compact /></div>}
           </div>
 
           {/* Identity & Physical */}
@@ -4288,6 +4381,23 @@ function AddProductPage({ onNav, catalogId, editResourceId }) {
           </button>
         </div>
       </form>
+    </div>
+
+    {/* Live preview of the product image, in the space beside the form on wide screens */}
+    {!loadingItem && (
+      <aside className="hidden xl:block w-80 shrink-0 sticky top-6">
+        <Card className="p-4 space-y-3">
+          <p className="text-xs uppercase tracking-widest text-slate-500 font-bold">🖼️ {t('Preview')}</p>
+          <ProductGallery urls={productImageUrls(res)} />
+          <div className="space-y-1">
+            <p className="text-sm font-semibold text-white break-words">{res.name || <span className="text-slate-600">{t('Product name')}</span>}</p>
+            {res.short_desc && <p className="text-xs text-slate-400 break-words">{res.short_desc}</p>}
+            {res.brand && <p className="text-[11px] text-slate-500">{res.brand}</p>}
+          </div>
+          <AvailabilityBadge status={res.availability} />
+        </Card>
+      </aside>
+    )}
     </div>
   )
 }
