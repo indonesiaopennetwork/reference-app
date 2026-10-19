@@ -69,15 +69,21 @@ func TestAgreedFeeAmountIsTheCommission(t *testing.T) {
 	if f.Commission != 1500 || f.NetPayable != 99900-44950-1500 {
 		t.Errorf("commission=%v net=%v, want the agreed 1500", f.Commission, f.NetPayable)
 	}
-	if got := asMap(f.bag()["finderFee"])["feeAmount"]; got != 1500.0 {
-		t.Errorf("bag finderFee.feeAmount = %v", got)
+	// The reconcile bag states the commission; the terms are not part of it.
+	bag := f.bag()
+	if got := asMap(bag["commission"])["value"]; got != 1500.0 {
+		t.Errorf("bag commission = %v", got)
 	}
-	// Without feeAmount (agreed before it existed) the fee is computed, and the
-	// bag still states it.
+	for _, k := range []string{"finderFee", "settlementBasis", "settlementWindow"} {
+		if _, has := bag[k]; has {
+			t.Errorf("bag carries %s", k)
+		}
+	}
+	// Without feeAmount (agreed before it existed) the fee is computed.
 	delete(asMap(asMap(c["contractAttributes"])["finderFee"]), "feeAmount")
 	f, _ = contractFigures(c, Terms{})
-	if f.Commission != 1350 || asMap(f.bag()["finderFee"])["feeAmount"] != 1350.0 {
-		t.Errorf("computed commission=%v bag=%v", f.Commission, f.bag()["finderFee"])
+	if f.Commission != 1350 || asMap(f.bag()["commission"])["value"] != 1350.0 {
+		t.Errorf("computed commission=%v bag=%v", f.Commission, f.bag()["commission"])
 	}
 	if _, has := asMap(asMap(c["contractAttributes"])["finderFee"])["feeAmount"]; has {
 		t.Error("building the bag must not change the stored contract")
@@ -211,5 +217,43 @@ func TestSnapshotCarriesMinimalCommitments(t *testing.T) {
 	st := asMap(slice(snap["settlements"])[0])
 	if str(st["id"]) != "settlement-a" || str(asMap(st["settlementAttributes"])["@type"]) != reconcileType {
 		t.Errorf("settlement = %v", st)
+	}
+}
+
+// offerTermsContract is testContract with its terms on two offers instead:
+// O1 pays out PT2M after delivery, O2 P1D after confirmation (payment).
+func offerTermsContract(t *testing.T) map[string]any {
+	t.Helper()
+	c := testContract(t)
+	delete(c, "contractAttributes")
+	policy := func(basis, window string) map[string]any {
+		return map[string]any{"policies": map[string]any{"settlement": map[string]any{"settlementBasis": basis, "settlementWindow": window}}}
+	}
+	cms := c["commitments"].([]any)
+	asMap(asMap(cms[0])["offer"])["offerAttributes"] = policy("AFTER_DELIVERY", "PT2M")
+	second := map[string]any{"id": "L2", "status": map[string]any{"descriptor": map[string]any{"code": "ACTIVE"}},
+		"resources": []any{map[string]any{"id": "R2"}},
+		"offer":     map[string]any{"id": "O2", "offerAttributes": policy("ON_CONFIRMATION", "P1D")}}
+	c["commitments"] = append(cms, second)
+	return c
+}
+
+func TestTheLatestOfferTermDecidesTheDueDate(t *testing.T) {
+	s := testService()
+	paid := time.Date(2026, 9, 29, 10, 0, 0, 0, time.UTC)
+	delivered := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+
+	d := DueContract{contract: offerTermsContract(t)}
+	s.assess(&d, &delivered, nil, delivered.Add(time.Hour))
+	// O1 is due at delivery + 2m, O2 at payment + 1d: the later one applies.
+	if d.DueAt == nil || !d.DueAt.Equal(paid.Add(24*time.Hour)) || d.Basis != "ON_CONFIRMATION" || d.Window != "P1D" || d.Due {
+		t.Errorf("dueAt=%v basis=%s window=%s due=%v, want payment + P1D, not yet due", d.DueAt, d.Basis, d.Window, d.Due)
+	}
+
+	// Before delivery O1's due date isn't known, so neither is the contract's.
+	d = DueContract{contract: offerTermsContract(t)}
+	s.assess(&d, nil, nil, paid.Add(48*time.Hour))
+	if d.Due || d.DueAt != nil || d.BasisEvent != "awaiting delivery" {
+		t.Errorf("undelivered: due=%v dueAt=%v event=%s", d.Due, d.DueAt, d.BasisEvent)
 	}
 }

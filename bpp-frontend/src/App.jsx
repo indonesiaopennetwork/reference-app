@@ -1397,6 +1397,87 @@ function buildPriceBreakup(o) {
 }
 
 // Tax regime / category / rate inputs for an offer, with a live total preview.
+// Payout terms an offer may set (IONTradeOffer policies.settlement).
+const SETTLEMENT_BASES = [
+  ['AFTER_DELIVERY', 'After delivery'],
+  ['AFTER_SHIPMENT', 'After shipment'],
+  ['ON_CONFIRMATION', 'On order confirmation'],
+  ['AFTER_RETURN_WINDOW', 'After the return window closes'],
+]
+const SETTLEMENT_WINDOWS = [
+  ['PT2M', '2 minutes (testing)'], ['PT1H', '1 hour'], ['P1D', '1 day'], ['P3D', '3 days'],
+  ['P7D', '7 days'], ['P14D', '14 days'], ['P30D', '30 days'],
+]
+
+// The commission (finder fee) the seller pays the buyer app, as the offer
+// consideration's commission (IONTradeConsideration): PERCENT of the item
+// value without tax (ITEM_TOTAL) or with tax (ORDER_TOTAL), or a fixed AMOUNT
+// per unit sold.
+function buildCommission(o) {
+  const value = Number(o.commission_value) || 0
+  return o.commission_type === 'AMOUNT'
+    ? { type: 'AMOUNT', value }
+    : { type: 'PERCENT', value, appliesTo: o.commission_applies_to || 'ITEM_TOTAL' }
+}
+
+// The offer's payout term, policies.settlement.
+function buildSettlementPolicy(o) {
+  return { settlementBasis: o.settlement_basis || 'AFTER_DELIVERY', settlementWindow: o.settlement_window || 'P1D' }
+}
+
+// Commission and payout term fields of an offer form, with what the
+// commission comes to per unit at the offer's price.
+function SettlementTermsFields({ offer, onChange, labelCls, inputCls }) {
+  const { t } = useI18n()
+  const percent = offer.commission_type !== 'AMOUNT'
+  const price = Number(offer.price) || 0
+  const base = percent && offer.commission_applies_to === 'ORDER_TOTAL' && offer.price ? buildPriceBreakup(offer).totalAmount : price
+  const perUnit = percent ? base * (Number(offer.commission_value) || 0) / 100 : Number(offer.commission_value) || 0
+  const windows = SETTLEMENT_WINDOWS.some(([v]) => v === offer.settlement_window) || !offer.settlement_window
+    ? SETTLEMENT_WINDOWS : [...SETTLEMENT_WINDOWS, [offer.settlement_window, offer.settlement_window]]
+  return (
+    <div className="col-span-full p-3 rounded-lg bg-slate-800/50 border border-white/[0.06] space-y-2" data-tour="offer-settlement">
+      <p className="text-xs font-semibold text-slate-300">💸 {t('Settlement terms')}</p>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div><label className={labelCls}>{t('Commission to buyer app')}</label>
+          <select className={inputCls} value={offer.commission_type} onChange={e => onChange('commission_type', e.target.value)}>
+            <option value="PERCENT" className="bg-slate-900">{t('Percent')}</option>
+            <option value="AMOUNT" className="bg-slate-900">{t('Fixed amount per unit')}</option>
+          </select>
+        </div>
+        <div><label className={labelCls}>{percent ? t('Commission (%)') : t('Commission ({currency})', { currency: offer.currency || 'IDR' })}</label>
+          <input className={inputCls} type="number" min="0" max={percent ? 100 : undefined} step="0.01" required
+            value={offer.commission_value} onChange={e => onChange('commission_value', e.target.value)} placeholder={percent ? '3' : '1000'} />
+        </div>
+        {percent && (
+          <div><label className={labelCls}>{t('Commission on')}</label>
+            <select className={inputCls} value={offer.commission_applies_to} onChange={e => onChange('commission_applies_to', e.target.value)}>
+              <option value="ITEM_TOTAL" className="bg-slate-900">{t('Item price (without tax)')}</option>
+              <option value="ORDER_TOTAL" className="bg-slate-900">{t('Price with tax')}</option>
+            </select>
+          </div>
+        )}
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div><label className={labelCls}>{t('Payout starts')}</label>
+          <select className={inputCls} value={offer.settlement_basis} onChange={e => onChange('settlement_basis', e.target.value)}>
+            {SETTLEMENT_BASES.map(([v, l]) => <option key={v} value={v} className="bg-slate-900">{t(l)}</option>)}
+          </select>
+        </div>
+        <div><label className={labelCls}>{t('Paid out within')}</label>
+          <select className={inputCls} value={offer.settlement_window} onChange={e => onChange('settlement_window', e.target.value)}>
+            {windows.map(([v, l]) => <option key={v} value={v} className="bg-slate-900">{t(l)}</option>)}
+          </select>
+        </div>
+      </div>
+      <p className="text-[10px] text-slate-600">
+        {price > 0 ? t('Commission ≈ {currency} {amount} per unit at this price, deducted from your payout.', { currency: offer.currency || 'IDR', amount: Math.round(perUnit * 100) / 100 }) + ' ' : ''}
+        {t('The payout is due this long after the event; with several offers in one order, the latest due date applies.')}
+      </p>
+    </div>
+  )
+}
+
 function OfferTaxFields({ offer, onChange, labelCls, inputCls }) {
   const { t } = useI18n()
   const exempt = offer.tax_regime === 'EXEMPT'
@@ -1445,6 +1526,10 @@ const EMPTY_OFFER = () => ({
   returns_fee_type: '', returns_fee_value: '',
   cancel_allowed: true, cancel_window: 'PT2H', cancel_event: 'BEFORE_PACKING',
   replace_allowed: true, replace_window: 'P7D', replace_method: 'SELLER_PICKUP', replace_subject_avail: true,
+  // settlement terms: the commission paid to the buyer app (on the price
+  // consideration) and the payout term (policies.settlement)
+  commission_type: 'PERCENT', commission_value: '3', commission_applies_to: 'ITEM_TOTAL',
+  settlement_basis: 'AFTER_DELIVERY', settlement_window: 'P1D',
   // payment & serviceability
   cod_available: true,
   max_distance: '15', distance_unit: 'KM',
@@ -1478,6 +1563,7 @@ const AUTO_FILL_POOL = [
     }],
     offers: [{
       ...EMPTY_OFFER(),
+      commission_type: 'PERCENT', commission_value: '3', commission_applies_to: 'ITEM_TOTAL', settlement_basis: 'AFTER_DELIVERY', settlement_window: 'P1D',
       id: 'offer-biscuit-khong-guan-001', name: 'Biskuit Kaleng Khong Guan (Khong Guan Assorted Biscuits Tin)',
       short_desc: 'Aneka biskuit renyah dalam kaleng ikonik', resource_ids: 'res-biscuit-khong-guan-001',
       price: '185000', currency: 'IDR', validity_start: '2026-04-11', validity_end: '2027-04-11',
@@ -1501,6 +1587,7 @@ const AUTO_FILL_POOL = [
     }],
     offers: [{
       ...EMPTY_OFFER(),
+      commission_type: 'PERCENT', commission_value: '4', commission_applies_to: 'ORDER_TOTAL', settlement_basis: 'AFTER_DELIVERY', settlement_window: 'P3D',
       id: 'offer-chips-chitato-sapi-003', name: 'Keripik Chitato Rasa Sapi Panggang (Chitato Beef BBQ Potato Chips)',
       short_desc: 'Keripik kentang gurih rasa sapi panggang', resource_ids: 'res-chips-chitato-sapi-003',
       price: '12000', currency: 'IDR', validity_start: '2026-04-11', validity_end: '2027-04-11',
@@ -1525,6 +1612,7 @@ const AUTO_FILL_POOL = [
     }],
     offers: [{
       ...EMPTY_OFFER(),
+      commission_type: 'AMOUNT', commission_value: '5000', settlement_basis: 'AFTER_RETURN_WINDOW', settlement_window: 'P1D',
       id: 'offer-cake-lapis-legit-005', name: 'Kue Lapis Legit Premium (Premium Spekkoek Layered Cake)',
       short_desc: 'Kue lapis klasik Belanda-Indonesia', resource_ids: 'res-cake-lapis-legit-005',
       price: '185000', currency: 'IDR', validity_start: '2026-04-11', validity_end: '2027-04-11',
@@ -1549,6 +1637,7 @@ const AUTO_FILL_POOL = [
     }],
     offers: [{
       ...EMPTY_OFFER(),
+      commission_type: 'PERCENT', commission_value: '2.5', commission_applies_to: 'ITEM_TOTAL', settlement_basis: 'ON_CONFIRMATION', settlement_window: 'P7D',
       id: 'offer-biscuit-monde-butter-007', name: 'Biskuit Monde Butter Cookies (Monde Butter Cookies)',
       short_desc: 'Kue kering butter premium dalam kaleng cantik', resource_ids: 'res-biscuit-monde-butter-007',
       price: '120000', currency: 'IDR', validity_start: '2026-04-11', validity_end: '2027-04-11',
@@ -1572,6 +1661,7 @@ const AUTO_FILL_POOL = [
     }],
     offers: [{
       ...EMPTY_OFFER(),
+      commission_type: 'AMOUNT', commission_value: '2000', settlement_basis: 'AFTER_SHIPMENT', settlement_window: 'P3D',
       id: 'offer-cake-brownies-amanda-009', name: 'Brownies Kukus Amanda Cokelat (Amanda Steamed Chocolate Brownies)',
       short_desc: 'Brownies kukus lembut khas Bandung dengan cokelat premium', resource_ids: 'res-cake-brownies-amanda-009',
       price: '95000', currency: 'IDR', validity_start: '2026-04-11', validity_end: '2027-04-11',
@@ -1682,6 +1772,7 @@ function offerToForm(o) {
   const pol = a.policies || {}, ret = pol.returns || {}, can = pol.cancellation || {}, rep = pol.replacement || {}
   const svc = a.serviceability || {}, timing = svc.timing?.[0] || {}
   const ca = o.considerations?.[0]?.considerationAttributes || {}
+  const commission = ca.commission || {}, payout = pol.settlement || {}
   const base = (ca.breakup || []).find(b => b.type === 'BASE_PRICE')
   const tax = (ca.breakup || []).find(b => b.type === 'TAX')
   const local = iso => { if (!iso) return ''; const d = new Date(iso); return isNaN(d) ? '' : new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16) }
@@ -1702,6 +1793,11 @@ function offerToForm(o) {
     cancel_allowed: !!can.allowed, cancel_window: can.window || blank.cancel_window, cancel_event: can.cutoffEvent || blank.cancel_event,
     replace_allowed: !!rep.allowed, replace_window: rep.window || blank.replace_window, replace_method: rep.method || blank.replace_method,
     replace_subject_avail: rep.subjectToAvailability ?? blank.replace_subject_avail,
+    commission_type: commission.type || blank.commission_type,
+    commission_value: commission.value != null ? String(commission.value) : blank.commission_value,
+    commission_applies_to: commission.appliesTo || blank.commission_applies_to,
+    settlement_basis: payout.settlementBasis || blank.settlement_basis,
+    settlement_window: payout.settlementWindow || blank.settlement_window,
     cod_available: !!a.paymentConstraints?.codAvailable,
     max_distance: svc.distanceConstraint?.maxDistance != null ? String(svc.distanceConstraint.maxDistance) : '',
     distance_unit: svc.distanceConstraint?.unit || 'KM',
@@ -1713,15 +1809,16 @@ function buildOfferAttrs(o) {
   const hasPolicies = o.returns_allowed || o.cancel_allowed || o.replace_allowed
   const hasPayment = o.cod_available
   const hasServiceability = o.max_distance || (o.timing_days && o.timing_days.length > 0)
-  const hasContext = o.offer_context
 
-  if (!hasPolicies && !hasPayment && !hasServiceability && !hasContext) return undefined
-
-  const attrs = { '@type': 'ion:IONTradeOffer' }
-  if (hasContext) attrs['@context'] = o.offer_context
+  // Every offer states its payout term (policies.settlement).
+  const attrs = {
+    '@context': o.offer_context || EMPTY_OFFER().offer_context, '@type': 'ion:IONTradeOffer',
+    policies: { settlement: buildSettlementPolicy(o) },
+  }
 
   if (hasPolicies) {
     attrs.policies = {
+      ...attrs.policies,
       returns: {
         allowed: !!o.returns_allowed,
         ...(o.returns_allowed ? { window: o.returns_window, method: o.returns_method } : {}),
@@ -1841,6 +1938,7 @@ function PublishPage({ onNav }) {
                   currency: o.currency,
                   ...buildPriceBreakup(o),
                   paymentMethods: o.cod_available ? ['PREPAID', 'COD', 'DIGITAL_WALLET'] : ['PREPAID', 'DIGITAL_WALLET'],
+                  commission: buildCommission(o),
                 }
               }]
             } : {}),
@@ -2155,6 +2253,7 @@ function PublishPage({ onNav }) {
                     <div><label className={labelCls}>{t('Validity End')}</label>
                       <input type="datetime-local" className={inputCls} value={o.validity_end} onChange={e => setOfferField(i, 'validity_end', e.target.value)} />
                     </div>
+                    <SettlementTermsFields offer={o} onChange={(k, v) => setOfferField(i, k, v)} labelCls={labelCls} inputCls={inputCls} />
                   </div>
 
                   {/* Policies — collapsible */}
@@ -2949,7 +3048,7 @@ function ReconciliationPage() {
   return (
     <div>
       <PageHeader breadcrumb={t('Settlement')} title={t('Reconciliation')}
-        subtitle={terms ? t('Payout terms: {basis} + {window}', { basis: terms.settlement_basis, window: terms.settlement_window }) : t('Settle with buyer apps')}
+        subtitle={terms ? t('Default payout terms: {basis} + {window} (each offer can set its own)', { basis: terms.settlement_basis, window: terms.settlement_window }) : t('Settle with buyer apps')}
         action={
           <button onClick={reload}
             className="shrink-0 whitespace-nowrap flex items-center gap-1.5 text-xs text-slate-400 hover:text-white transition-colors px-3 py-1.5 rounded-lg border border-white/[0.07]">
@@ -3846,15 +3945,15 @@ const DAYS_OF_WEEK = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN']
 const PRODUCT_AUTOFILL_POOL = [
   {
     res: { id: 'item-keripik-singkong', name: 'Keripik Singkong Balado (Spicy Cassava Chips)', short_desc: 'Crispy cassava chips with balado seasoning', long_desc: 'Keripik singkong renyah dengan bumbu balado khas Minang yang pedas manis. (Crispy cassava chips with authentic Minang sweet and spicy balado seasoning.)', product_highlights: '- Terbuat dari singkong segar pilihan (Made from fresh selected cassava)\n- Bumbu balado asli minang (Authentic Minang balado seasoning)\n- Tanpa pengawet buatan (No artificial preservatives)', specifications: '- Berat Bersih (Net Weight): 150g\n- Kemasan (Packaging): Plastik Ziplock (Ziplock Plastic)\n- Bahan Utama (Main Ingredient): Singkong, Cabai (Cassava, Chili)', media_url: 'https://images.unsplash.com/photo-1621939514649-280e2ee25f60?w=400', brand: 'Chitato', origin_country: 'ID', weight_value: '150', weight_unit: 'G', color: 'Golden', material: 'Cassava' },
-    off: { id: 'offer-keripik-singkong', name: 'Keripik Singkong Balado', price: '25000', currency: 'IDR', cod_available: true, returns_allowed: true, returns_window: 'P7D', returns_method: 'SELLER_PICKUP', returns_fee_type: 'PERCENTAGE', returns_fee_value: '10', cancel_allowed: true, cancel_window: 'PT2H', cancel_event: 'BEFORE_PACKING', replace_allowed: false, max_distance: '20', timing_days: ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'], timing_start: '09:00', timing_end: '21:00', offer_context: 'https://schema.ion.id/release1/schema/extension/trade/TradeOffer/v1/context.jsonld' }
+    off: { id: 'offer-keripik-singkong', commission_type: 'PERCENT', commission_value: '5', commission_applies_to: 'ITEM_TOTAL', settlement_basis: 'AFTER_DELIVERY', settlement_window: 'P3D', name: 'Keripik Singkong Balado', price: '25000', currency: 'IDR', cod_available: true, returns_allowed: true, returns_window: 'P7D', returns_method: 'SELLER_PICKUP', returns_fee_type: 'PERCENTAGE', returns_fee_value: '10', cancel_allowed: true, cancel_window: 'PT2H', cancel_event: 'BEFORE_PACKING', replace_allowed: false, max_distance: '20', timing_days: ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'], timing_start: '09:00', timing_end: '21:00', offer_context: 'https://schema.ion.id/release1/schema/extension/trade/TradeOffer/v1/context.jsonld' }
   },
   {
     res: { id: 'item-bolu-pisang', name: 'Bolu Pisang Cokelat (Chocolate Banana Cake)', short_desc: 'Soft banana cake with chocolate chips', long_desc: 'Bolu pisang panggang yang lembut dipadukan dengan taburan cokelat lezat di atasnya. (Soft baked banana cake topped with delicious chocolate chips.)', product_highlights: '- Dibuat dengan pisang ambon segar (Made with fresh Ambon bananas)\n- Tekstur lembut dan lumer di mulut (Soft texture that melts in the mouth)\n- Taburan cokelat premium (Premium chocolate chips)', specifications: '- Berat Bersih (Net Weight): 400g\n- Kemasan (Packaging): Kardus Makanan (Food Box)\n- Bahan Utama (Main Ingredient): Tepung, Pisang, Cokelat (Flour, Banana, Chocolate)', media_url: 'https://images.unsplash.com/photo-1578985545062-69928b1d9587?w=400', brand: 'HomeMade', origin_country: 'ID', weight_value: '400', weight_unit: 'G', color: 'Brown', material: 'Flour' },
-    off: { id: 'offer-bolu-pisang', name: 'Bolu Pisang Cokelat', price: '45000', currency: 'IDR', cod_available: true, returns_allowed: false, cancel_allowed: true, cancel_window: 'PT1H', cancel_event: 'BEFORE_PACKING', replace_allowed: false, max_distance: '10', timing_days: ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'], timing_start: '08:00', timing_end: '18:00', offer_context: 'https://schema.ion.id/release1/schema/extension/trade/TradeOffer/v1/context.jsonld' }
+    off: { id: 'offer-bolu-pisang', commission_type: 'AMOUNT', commission_value: '1500', settlement_basis: 'ON_CONFIRMATION', settlement_window: 'P1D', name: 'Bolu Pisang Cokelat', price: '45000', currency: 'IDR', cod_available: true, returns_allowed: false, cancel_allowed: true, cancel_window: 'PT1H', cancel_event: 'BEFORE_PACKING', replace_allowed: false, max_distance: '10', timing_days: ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'], timing_start: '08:00', timing_end: '18:00', offer_context: 'https://schema.ion.id/release1/schema/extension/trade/TradeOffer/v1/context.jsonld' }
   },
   {
     res: { id: 'item-teh-botol', name: 'Teh Botol Sosro (Bottled Jasmine Tea)', short_desc: 'Ready-to-drink jasmine tea', long_desc: 'Minuman teh melati siap saji legendaris Indonesia yang menyegarkan dahaga. (Legendary Indonesian ready-to-drink jasmine tea that is very refreshing.)', product_highlights: '- Terbuat dari daun teh melati asli (Made from real jasmine tea leaves)\n- Proses penyeduhan higienis (Hygienic brewing process)\n- Menyegarkan dahaga (Refreshing thirst quencher)', specifications: '- Isi Bersih (Net Volume): 350ml\n- Kemasan (Packaging): Botol Plastik PET (PET Plastic Bottle)\n- Bahan Utama (Main Ingredient): Air, Ekstrak Teh (Water, Tea Extract)', media_url: 'https://images.unsplash.com/photo-1556679343-c7306c1976bc?w=400', brand: 'Sosro', origin_country: 'ID', weight_value: '350', weight_unit: 'ML', color: 'Amber', material: 'PET Bottle' },
-    off: { id: 'offer-teh-botol', name: 'Teh Botol Sosro', price: '5000', currency: 'IDR', cod_available: true, returns_allowed: false, cancel_allowed: true, cancel_window: 'PT30M', cancel_event: 'BEFORE_PACKING', replace_allowed: false, max_distance: '15', timing_days: ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'], timing_start: '07:00', timing_end: '22:00', offer_context: 'https://schema.ion.id/release1/schema/extension/trade/TradeOffer/v1/context.jsonld' }
+    off: { id: 'offer-teh-botol', commission_type: 'PERCENT', commission_value: '2', commission_applies_to: 'ORDER_TOTAL', settlement_basis: 'AFTER_DELIVERY', settlement_window: 'P1D', name: 'Teh Botol Sosro', price: '5000', currency: 'IDR', cod_available: true, returns_allowed: false, cancel_allowed: true, cancel_window: 'PT30M', cancel_event: 'BEFORE_PACKING', replace_allowed: false, max_distance: '15', timing_days: ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'], timing_start: '07:00', timing_end: '22:00', offer_context: 'https://schema.ion.id/release1/schema/extension/trade/TradeOffer/v1/context.jsonld' }
   },
 ]
 // Next sample per CRC for the Add Product page's Auto-fill (CRC_AUTOFILL).
@@ -3928,6 +4027,7 @@ function OfferForm({ off, oSet, offOpen, setOffOpen, catalogId, lockId, showReso
         <div><label className={labelCls}>{t('Short Description')}</label>
           <input className={inputCls} value={off.short_desc} onChange={e => oSet('short_desc', e.target.value)} placeholder={t('Best seller flask')} />
         </div>
+        <SettlementTermsFields offer={off} onChange={oSet} labelCls={labelCls} inputCls={inputCls} />
       </div>
 
       {/* Policies collapsible */}
@@ -4465,6 +4565,7 @@ function AddOfferPage({ onNav, catalogId, preselectedResourceId, editOfferId }) 
             currency: off.currency,
             ...buildPriceBreakup(off),
             paymentMethods: off.cod_available ? ['PREPAID', 'COD', 'DIGITAL_WALLET'] : ['PREPAID', 'DIGITAL_WALLET'],
+            commission: buildCommission(off),
           },
         }],
       } : {}),

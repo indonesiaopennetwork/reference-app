@@ -34,13 +34,23 @@ type Config struct {
 	// If empty, the service derives it from BppURI by replacing /bpp/receiver with /bpp/caller.
 	BppCallerURL string
 
-	// SettlementBasis / SettlementWindow are this seller's payout terms, set
-	// in on_init as settlementBasis / settlementWindow on the settlement
-	// object (package settlement): the event that starts the payout (ON_CONFIRMATION
+	// SettlementBasis / SettlementWindow are this seller's default payout
+	// terms, for an offer published without its own policies.settlement
+	// (package offerterms): the event that starts the payout (ON_CONFIRMATION
 	// | AFTER_SHIPMENT | AFTER_DELIVERY | AFTER_RETURN_WINDOW) and the ISO 8601
-	// duration after it within which the PJP pays out.
+	// duration after it within which the PJP pays out. Env: SETTLEMENT_BASIS,
+	// SETTLEMENT_WINDOW.
 	SettlementBasis  string
 	SettlementWindow string
+
+	// Commission* is this seller's default commission (finder fee) paid to
+	// the buyer app, for an offer published without its own: CommissionType
+	// PERCENT (of CommissionAppliesTo: ITEM_TOTAL | ORDER_TOTAL) or AMOUNT
+	// (per unit sold). Env: COMMISSION_TYPE, COMMISSION_VALUE,
+	// COMMISSION_APPLIES_TO.
+	CommissionType      string
+	CommissionValue     float64
+	CommissionAppliesTo string
 
 	// ReconcileBeforeWindow lets every open paid contract be sent to
 	// /reconcile right away, without waiting for its settlement window to
@@ -126,6 +136,9 @@ func Load() (*Config, error) {
 		SettlementBasis:  NormalizeSettlementBasis(getEnv("SETTLEMENT_BASIS", "AFTER_DELIVERY")),
 		SettlementWindow: getEnv("SETTLEMENT_WINDOW", "P1D"),
 
+		CommissionType:      strings.ToUpper(getEnv("COMMISSION_TYPE", "PERCENT")),
+		CommissionAppliesTo: strings.ToUpper(getEnv("COMMISSION_APPLIES_TO", "ITEM_TOTAL")),
+
 		ReconcileBeforeWindow:   strings.EqualFold(os.Getenv("RECONCILE_WAIT_FOR_SETTLEMENT_WINDOW"), "false"),
 		SettlementBankCode:      getEnv("SETTLEMENT_BANK_CODE", "BCA"),
 		SettlementAccountNumber: getEnv("SETTLEMENT_ACCOUNT_NUMBER", "8730000000001"),
@@ -146,6 +159,17 @@ func Load() (*Config, error) {
 	}
 	if cfg.SettlementAccountName == "" {
 		cfg.SettlementAccountName = cfg.BppID
+	}
+	commission, err := strconv.ParseFloat(getEnv("COMMISSION_VALUE", "3"), 64)
+	if err != nil || commission < 0 || (cfg.CommissionType == "PERCENT" && commission > 100) {
+		return nil, fmt.Errorf("COMMISSION_VALUE must be a number from 0 (and at most 100 for PERCENT), got %q", os.Getenv("COMMISSION_VALUE"))
+	}
+	cfg.CommissionValue = commission
+	if cfg.CommissionType != "PERCENT" && cfg.CommissionType != "AMOUNT" {
+		return nil, fmt.Errorf("COMMISSION_TYPE must be PERCENT or AMOUNT, got %q", cfg.CommissionType)
+	}
+	if cfg.CommissionAppliesTo != "ITEM_TOTAL" && cfg.CommissionAppliesTo != "ORDER_TOTAL" {
+		return nil, fmt.Errorf("COMMISSION_APPLIES_TO must be ITEM_TOTAL or ORDER_TOTAL, got %q", cfg.CommissionAppliesTo)
 	}
 
 	if err := cfg.validate(); err != nil {

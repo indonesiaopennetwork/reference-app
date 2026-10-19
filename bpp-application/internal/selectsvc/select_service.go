@@ -21,6 +21,8 @@ import (
 	dbsqlc "github.com/ion/winroom/bpp/db/sqlc"
 	"github.com/ion/winroom/bpp/internal/config"
 	"github.com/ion/winroom/bpp/internal/httpclient"
+	"github.com/ion/winroom/bpp/internal/offerterms"
+	"github.com/ion/winroom/bpp/internal/settlement"
 )
 
 // SelectService handles the full /beckn/select flow:
@@ -151,6 +153,15 @@ func (s *SelectService) enrichContract(ctx context.Context, req *SelectRequest) 
 				ConsiderationAttributes: attrsJSON,
 			},
 		}
+	}
+
+	// The seller's terms on each offer (with this BPP's defaults where an
+	// offer was published without them), and the commission the quote comes
+	// to on the price.
+	if err := offerterms.ApplyTo(ctx, q, bppID, offerterms.FromConfig(s.cfg), &contract, func(m map[string]any) {
+		settlement.Refresh(m)
+	}); err != nil {
+		s.lh.WithModule("selectsvc").Warn().Error(err).Log("settlement terms not applied to the quote")
 	}
 
 	return contract

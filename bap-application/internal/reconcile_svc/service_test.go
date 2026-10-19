@@ -112,18 +112,36 @@ func TestReplyReplacesTheSettlement(t *testing.T) {
 	}
 }
 
-func TestCheckFinderFee(t *testing.T) {
+func TestCheckCommission(t *testing.T) {
+	// An order placed before the commission moved to the offer: its finderFee.
 	c := testContract(t)
-	if _, _, ok := CheckFinderFee(c); ok {
+	if _, _, ok := CheckCommission(c); ok {
 		t.Error("no feeAmount stated: nothing to check")
 	}
 	fee := asMap(asMap(c["contractAttributes"])["finderFee"])
 	fee["feeAmount"] = 1350.0 // 3% of the 45,000 still ordered
-	if stated, computed, ok := CheckFinderFee(c); !ok || stated != computed {
+	if stated, computed, ok := CheckCommission(c); !ok || stated != computed {
 		t.Errorf("stated=%v computed=%v ok=%v, want a match", stated, computed, ok)
 	}
 	fee["feeAmount"] = 2700.0
-	if stated, computed, _ := CheckFinderFee(c); stated == computed || computed != 1350 {
+	if stated, computed, _ := CheckCommission(c); stated == computed || computed != 1350 {
 		t.Errorf("stated=%v computed=%v, want a mismatch against 1350", stated, computed)
+	}
+
+	// The seller's commission on the offer: 5% of one unit at 45,000.
+	c = testContract(t)
+	delete(c, "contractAttributes")
+	cm := asMap(slice(c["commitments"])[0])
+	cm["commitmentAttributes"] = map[string]any{"price": map[string]any{"value": 45000.0}}
+	asMap(cm["offer"])["considerations"] = []any{map[string]any{"id": "p", "considerationAttributes": map[string]any{
+		"commission": map[string]any{"type": "PERCENT", "value": 5.0, "appliesTo": "ITEM_TOTAL"}}}}
+	price := asMap(asMap(slice(c["consideration"])[1])["considerationAttributes"])
+	price["commission"] = map[string]any{"type": "PERCENT", "value": 5.0, "appliesTo": "ITEM_TOTAL", "amount": 2250.0}
+	if stated, computed, ok := CheckCommission(c); !ok || stated != 2250 || computed != 2250 {
+		t.Errorf("stated=%v computed=%v ok=%v, want 2250 both", stated, computed, ok)
+	}
+	asMap(price["commission"])["amount"] = 9000.0
+	if stated, computed, _ := CheckCommission(c); stated == computed {
+		t.Errorf("stated=%v computed=%v, want a mismatch", stated, computed)
 	}
 }

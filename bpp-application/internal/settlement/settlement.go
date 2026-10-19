@@ -1,19 +1,39 @@
-// Package settlement is an order's settlement object: ION Release 1
-// IONSettlementReconciliation (common/Settlement/v1), carried as the
-// settlementAttributes of the contract's payment settlement from init to
-// reconciliation. It holds the settlement terms, both participants' payout
+// Package settlement is an order's settlement terms and figures.
+//
+// The terms are the seller's, published on each offer and carried on the
+// order's commitments:
+//
+//   - the commission (finder fee) the seller pays the buyer app:
+//     offer.considerations[].considerationAttributes.commission (ION
+//     IONTradeConsideration) -- PERCENT of the offer's item value
+//     (ITEM_TOTAL, excluding tax) or of its total (ORDER_TOTAL), or a fixed
+//     AMOUNT per unit sold;
+//   - the payout terms: offer.offerAttributes.policies.settlement (ION
+//     IONTradeOffer) -- settlementBasis and settlementWindow. With several
+//     offers, the term giving the latest due date applies.
+//
+// The contract's price consideration carries the commission the order comes
+// to (commission.amount), set by the BPP in on_select / on_init and
+// recomputed after cancellations and returns (Refresh).
+//
+// The settlement object is ION Release 1 IONSettlementReconciliation
+// (common/Settlement/v1), the settlementAttributes of the contract's payment
+// settlement from init to reconciliation: both participants' payout
 // accounts, the payment, and the figures:
 //
-//	init       BAP   finderFee terms, its payout account, the payment method,
-//	                 status PENDING, estimated figures
-//	on_init    BPP   settlementBasis / settlementWindow, finderFee.feeAmount,
-//	                 its payout account, the figures on its final price
+//	init       BAP   its payout account, the payment method, status PENDING,
+//	                 estimated figures
+//	on_init    BPP   its payout account, the figures on its final price
 //	confirm    BAP   status PAID, paidAt, gatewayRef; orderAmount is the
 //	                 amount paid
 //	on_cancel, on_update
 //	           BPP   the figures follow cancellations and returns
 //	reconcile, on_reconcile
 //	           both  each participant's own figures for the payout
+//
+// Orders placed before the terms moved to the offer carry them on the
+// settlement object (finderFee, settlementBasis, settlementWindow) or in
+// contractAttributes; those are still read (LegacyTerms).
 //
 // Until reconciliation the figures are estimates. Refunds are separate
 // settlements (ION TradeSettlement with a refund), not part of this object.
@@ -61,8 +81,209 @@ var methods = map[string]bool{
 	"DIRECT_DEBIT": true, "CREDIT_FACILITY": true, "ESCROW": true,
 }
 
-// termFields are the settlement terms the object carries.
+// termFields are the settlement terms an order placed before they moved to
+// the offer carries on the settlement object.
 var termFields = []string{"settlementBasis", "settlementWindow", "finderFee"}
+
+// Term is a payout term: the payout falls due Window (an ISO 8601 duration)
+// after the Basis event (ON_CONFIRMATION, AFTER_SHIPMENT, AFTER_DELIVERY,
+// AFTER_RETURN_WINDOW).
+type Term struct{ Basis, Window string }
+
+// OfferTerm is an offer's payout term, its policies.settlement; ok is false
+// when the offer has none.
+func OfferTerm(offer map[string]any) (t Term, ok bool) {
+	p := asMap(asMap(asMap(offer["offerAttributes"])["policies"])["settlement"])
+	t = Term{Basis: str(p["settlementBasis"]), Window: str(p["settlementWindow"])}
+	return t, t.Basis != "" || t.Window != ""
+}
+
+// OfferCommission is an offer's commission terms (type, value, appliesTo),
+// from the first of its considerations that states one; nil when none does.
+func OfferCommission(offer map[string]any) map[string]any {
+	for _, c := range slice(offer["considerations"]) {
+		if m := asMap(asMap(asMap(c)["considerationAttributes"])["commission"]); m != nil {
+			return m
+		}
+	}
+	return nil
+}
+
+// PayoutTerms are the contract's payout terms: those of the offers still
+// ordered (of every offer once all are cancelled), or -- for an order placed
+// before the terms moved to the offer -- the one on its settlement object.
+// Several terms: the payout falls due at the latest of their due dates.
+func PayoutTerms(contract map[string]any) []Term {
+	commitments := activeCommitments(contract)
+	if len(commitments) == 0 {
+		commitments = allCommitments(contract)
+	}
+	var terms []Term
+	seen := map[Term]bool{}
+	for _, cm := range commitments {
+		if t, ok := OfferTerm(asMap(cm["offer"])); ok && !seen[t] {
+			seen[t] = true
+			terms = append(terms, t)
+		}
+	}
+	if len(terms) == 0 {
+		if basis, window, _ := LegacyTerms(contract); basis != "" || window != "" {
+			terms = append(terms, Term{Basis: basis, Window: window})
+		}
+	}
+	return terms
+}
+
+// OfferCommissionOf works out the commission the contract's offers come to,
+// as the contract consideration's commission object: the offers' own terms
+// when every offer still ordered has the same PERCENT terms, otherwise type
+// AMOUNT with value the order's total; amount is the total either way. Each
+// offer's fee is on its own items: PERCENT of the unit price (ITEM_TOTAL) or
+// of the unit total with tax (ORDER_TOTAL), or the AMOUNT, times the
+// quantity still ordered. ok is false when no offer states a commission (an
+// order placed before the commission moved to the offer).
+func OfferCommissionOf(contract map[string]any) (commission map[string]any, ok bool) {
+	for _, cm := range allCommitments(contract) {
+		if OfferCommission(asMap(cm["offer"])) != nil {
+			ok = true
+		}
+	}
+	if !ok {
+		return nil, false
+	}
+	var total float64
+	var shared map[string]any
+	same := true
+	for _, cm := range activeCommitments(contract) {
+		offer := asMap(cm["offer"])
+		terms := OfferCommission(offer)
+		if terms == nil {
+			same = false
+			continue
+		}
+		qty := commitmentQty(cm)
+		value := num(terms["value"])
+		if str(terms["type"]) == "AMOUNT" {
+			total += value * qty
+		} else if str(terms["appliesTo"]) == "ORDER_TOTAL" {
+			total += unitTotal(offer) * qty * value / 100
+		} else {
+			total += unitPrice(cm) * qty * value / 100
+		}
+		if str(terms["type"]) == "AMOUNT" {
+			same = false
+		} else if shared == nil {
+			shared = terms
+		} else if num(shared["value"]) != value || appliesTo(shared) != appliesTo(terms) {
+			same = false
+		}
+	}
+	total = round2(total)
+	if same && shared != nil {
+		return map[string]any{"type": "PERCENT", "value": num(shared["value"]), "appliesTo": appliesTo(shared), "amount": total}, true
+	}
+	return map[string]any{"type": "AMOUNT", "value": total, "amount": total}, true
+}
+
+// StatedCommission is the commission.amount on the contract's price
+// consideration in force; ok is false when none states one.
+func StatedCommission(contract map[string]any) (amount float64, ok bool) {
+	for _, c := range priceConsiderations(contract) {
+		if v, ok := asMap(asMap(c["considerationAttributes"])["commission"])["amount"].(float64); ok {
+			return v, true
+		}
+	}
+	return 0, false
+}
+
+func appliesTo(terms map[string]any) string {
+	if str(terms["appliesTo"]) == "ORDER_TOTAL" {
+		return "ORDER_TOTAL"
+	}
+	return "ITEM_TOTAL"
+}
+
+// unitPrice is a commitment's pre-tax unit price: commitmentAttributes.price,
+// or its offer's BASE_PRICE.
+func unitPrice(cm map[string]any) float64 {
+	if v, ok := asMap(asMap(cm["commitmentAttributes"])["price"])["value"].(float64); ok {
+		return v
+	}
+	for _, c := range slice(asMap(cm["offer"])["considerations"]) {
+		for _, line := range slice(asMap(asMap(c)["considerationAttributes"])["breakup"]) {
+			if l := asMap(line); str(l["type"]) == "BASE_PRICE" {
+				return num(l["amount"])
+			}
+		}
+	}
+	return 0
+}
+
+// unitTotal is an offer's unit price with tax: its first consideration's
+// totalAmount.
+func unitTotal(offer map[string]any) float64 {
+	for _, c := range slice(offer["considerations"]) {
+		if v, ok := asMap(asMap(c)["considerationAttributes"])["totalAmount"].(float64); ok {
+			return v
+		}
+	}
+	return 0
+}
+
+// commitmentQty is a commitment's quantity: resources[0].quantity, then
+// commitmentAttributes.quantity, then 1.
+func commitmentQty(cm map[string]any) float64 {
+	if rs := slice(cm["resources"]); len(rs) > 0 {
+		if q := num(asMap(asMap(rs[0])["quantity"])["unitQuantity"]); q > 0 {
+			return q
+		}
+	}
+	if q := num(asMap(asMap(cm["commitmentAttributes"])["quantity"])["unitQuantity"]); q > 0 {
+		return q
+	}
+	return 1
+}
+
+func allCommitments(contract map[string]any) []map[string]any {
+	var out []map[string]any
+	for _, raw := range slice(contract["commitments"]) {
+		if m := asMap(raw); m != nil {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// activeCommitments are the commitments still ordered (not CLOSED by a
+// cancellation or return).
+func activeCommitments(contract map[string]any) []map[string]any {
+	var out []map[string]any
+	for _, cm := range allCommitments(contract) {
+		s := asMap(cm["status"])
+		code := str(asMap(s["descriptor"])["code"])
+		if code == "" {
+			code = str(s["code"])
+		}
+		if code != "CLOSED" {
+			out = append(out, cm)
+		}
+	}
+	return out
+}
+
+// priceConsiderations are the contract's price considerations in force: not
+// CANCELLED, and not a cancellation / restocking fee.
+func priceConsiderations(contract map[string]any) []map[string]any {
+	var out []map[string]any
+	for _, raw := range slice(contract["consideration"]) {
+		c := asMap(raw)
+		if c == nil || isFee(str(c["id"])) || str(asMap(c["status"])["code"]) == "CANCELLED" {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out
+}
 
 // Of returns the contract's payment settlement -- the first settlement that
 // is not a refund -- and its settlementAttributes; nil when there is none.
@@ -114,10 +335,10 @@ func Normalize(contract map[string]any) map[string]any {
 	return a
 }
 
-// Terms returns the settlement terms: from the settlement object, or from
-// contractAttributes (IONTradeContract) on a contract agreed before they
-// moved there.
-func Terms(contract map[string]any) (basis, window string, finderFee map[string]any) {
+// LegacyTerms returns the settlement terms of an order placed before they
+// moved to the offer: from the settlement object, or from contractAttributes
+// (IONTradeContract) on a contract agreed before they moved there.
+func LegacyTerms(contract map[string]any) (basis, window string, finderFee map[string]any) {
 	_, a := Of(contract)
 	ca := asMap(contract["contractAttributes"])
 	pick := func(k string) any {
@@ -179,9 +400,11 @@ type Amounts struct {
 }
 
 // Compute works out the contract's figures as it stands. The commission is
-// the agreed finderFee.feeAmount, or -- with recomputeFee, or when no
-// feeAmount was stated -- the fee its terms come to on the items still
-// ordered. It never exceeds what is left to pay out.
+// the one stated on the price consideration (commission.amount), or -- with
+// recomputeFee, or when none is stated -- what the offers' commission terms
+// come to on the items still ordered. An order placed before the commission
+// moved to the offer uses its finderFee the same way. It never exceeds what
+// is left to pay out.
 func Compute(contract map[string]any, recomputeFee bool) Amounts {
 	var a Amounts
 	_, attrs := Of(contract)
@@ -202,11 +425,19 @@ func Compute(contract map[string]any, recomputeFee bool) Amounts {
 		a.Refund += num(refund["amount"])
 		a.RefundIDs = append(a.RefundIDs, str(st["id"]))
 	}
-	_, _, fee := Terms(contract)
-	if stated, ok := fee["feeAmount"].(float64); ok && !recomputeFee {
-		a.Commission = stated
+	if commission, ok := OfferCommissionOf(contract); ok {
+		if stated, ok := StatedCommission(contract); ok && !recomputeFee {
+			a.Commission = stated
+		} else {
+			a.Commission = num(commission["amount"])
+		}
 	} else {
-		a.Commission = FeeAmount(fee, ItemTotal(contract), a.Order)
+		_, _, fee := LegacyTerms(contract)
+		if stated, ok := fee["feeAmount"].(float64); ok && !recomputeFee {
+			a.Commission = stated
+		} else {
+			a.Commission = FeeAmount(fee, ItemTotal(contract), a.Order)
+		}
 	}
 	if max := a.Order - a.Refund - a.Withholding; a.Commission > max {
 		a.Commission = math.Max(0, max)
@@ -217,23 +448,48 @@ func Compute(contract map[string]any, recomputeFee bool) Amounts {
 	return a
 }
 
-// Refresh recomputes the figures on the contract's settlement object --
-// finderFee.feeAmount, orderAmount, commission, withholdingAmount,
-// refundAmount, netPayable -- from the contract as it stands, and returns
-// them. A contract without a settlement is left unchanged.
+// Refresh recomputes the contract's commission and figures as it stands and
+// returns the figures: the commission on its price considerations in force,
+// and orderAmount, commission, withholdingAmount, refundAmount, netPayable on
+// its settlement object. An order placed before the commission moved to the
+// offer keeps its finderFee, with feeAmount recomputed. A contract without a
+// settlement only gets the commission.
 func Refresh(contract map[string]any) Amounts {
 	attrs := Normalize(contract)
 	a := Compute(contract, true)
-	if attrs == nil {
-		return a
-	}
-	_, _, fee := Terms(contract)
-	if fee != nil {
+	if commission, ok := OfferCommissionOf(contract); ok {
+		commission["amount"] = a.Commission
+		if str(commission["type"]) == "AMOUNT" {
+			commission["value"] = a.Commission
+		}
+		for _, c := range priceConsiderations(contract) {
+			ca := asMap(c["considerationAttributes"])
+			if ca == nil {
+				ca = map[string]any{}
+				c["considerationAttributes"] = ca
+			}
+			ca["commission"] = copyMap(commission)
+		}
+		for _, k := range termFields {
+			delete(attrs, k) // the terms are the offers' now
+		}
+	} else if _, _, fee := LegacyTerms(contract); fee != nil && attrs != nil {
 		fee["feeAmount"] = FeeAmount(fee, ItemTotal(contract), a.Order)
 		attrs["finderFee"] = fee
 	}
+	if attrs == nil {
+		return a
+	}
 	SetFigures(attrs, a)
 	return a
+}
+
+func copyMap(m map[string]any) map[string]any {
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
 }
 
 // SetFigures writes a's figures onto a settlement object.
@@ -262,11 +518,7 @@ func SetAccount(attrs, account map[string]any) {
 // restocking fee).
 func ItemTotal(contract map[string]any) float64 {
 	var total float64
-	for _, raw := range slice(contract["consideration"]) {
-		c := asMap(raw)
-		if isFee(str(c["id"])) || str(asMap(c["status"])["code"]) == "CANCELLED" {
-			continue
-		}
+	for _, c := range priceConsiderations(contract) {
 		for _, line := range slice(asMap(c["considerationAttributes"])["breakup"]) {
 			if l := asMap(line); str(l["type"]) == "BASE_PRICE" {
 				total += num(l["amount"])
@@ -285,17 +537,13 @@ func OrderTotal(contract map[string]any) float64 {
 		}
 	}
 	var total float64
-	for _, raw := range slice(contract["consideration"]) {
-		c := asMap(raw)
-		if isFee(str(c["id"])) || str(asMap(c["status"])["code"]) == "CANCELLED" {
-			continue
-		}
+	for _, c := range priceConsiderations(contract) {
 		total += num(asMap(c["considerationAttributes"])["totalAmount"])
 	}
 	return total
 }
 
-// FeeAmount applies a finderFee's terms: a percentage of the item total
+// FeeAmount applies an earlier order's finderFee terms: a percentage of the item total
 // (ITEM_TOTAL, the default) or of the order total (ORDER_TOTAL), or a fixed
 // AMOUNT. No finder fee agreed means no fee.
 func FeeAmount(fee map[string]any, items, order float64) float64 {

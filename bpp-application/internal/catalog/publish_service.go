@@ -15,6 +15,7 @@ import (
 	"github.com/remiges-tech/logharbour/logharbour"
 
 	dbsqlc "github.com/ion/winroom/bpp/db/sqlc"
+	"github.com/ion/winroom/bpp/internal/offerterms"
 	"github.com/ion/winroom/bpp/internal/config"
 	"github.com/ion/winroom/bpp/internal/httpclient"
 )
@@ -117,7 +118,7 @@ func (s *PublishService) saveCatalogInTx(ctx context.Context, q *dbsqlc.Queries,
 	if err := replaceResources(ctx, q, bppID, cat.ID, cat.Resources); err != nil {
 		return err
 	}
-	return replaceOffers(ctx, q, bppID, cat.ID, cat.Offers)
+	return replaceOffers(ctx, q, bppID, cat.ID, cat.Offers, offerterms.FromConfig(s.cfg))
 }
 
 // forwardToCDS builds the Beckn request, sends it to the CDS, and writes the
@@ -344,7 +345,7 @@ func replaceResources(ctx context.Context, q *dbsqlc.Queries, bppID, catalogID s
 	return nil
 }
 
-func replaceOffers(ctx context.Context, q *dbsqlc.Queries, bppID, catalogID string, offers []Offer) error {
+func replaceOffers(ctx context.Context, q *dbsqlc.Queries, bppID, catalogID string, offers []Offer, d offerterms.Defaults) error {
 	if err := q.DeleteCatalogOfferConsiderations(ctx, dbsqlc.DeleteCatalogOfferConsiderationsParams{
 		CatalogID: catalogID,
 		BppID:     bppID,
@@ -370,6 +371,7 @@ func replaceOffers(ctx context.Context, q *dbsqlc.Queries, bppID, catalogID stri
 			offerProviderID = strPtr(offer.Provider.ID)
 		}
 
+		offer.OfferAttributes = offerterms.FillAttributes(offer.OfferAttributes, d)
 		attrsCtx, attrsType := extractContextType(offer.OfferAttributes)
 
 		var validityStart, validityEnd pgtype.Timestamptz
@@ -397,6 +399,7 @@ func replaceOffers(ctx context.Context, q *dbsqlc.Queries, bppID, catalogID stri
 		}
 
 		for _, consid := range offer.Considerations {
+			consid.ConsiderationAttributes = offerterms.FillConsideration(consid.ConsiderationAttributes, d)
 			attrsCtx, attrsType := extractContextType(consid.ConsiderationAttributes)
 			if err := q.InsertOfferConsideration(ctx, dbsqlc.InsertOfferConsiderationParams{
 				OfferID:                        offer.ID,

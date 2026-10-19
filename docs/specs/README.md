@@ -29,12 +29,37 @@ pay it out:
 | Recipient | Receives |
 |---|---|
 | BPP | `netPayable` = `orderAmount − commission − withholdingAmount − refundAmount` |
-| BAP | `commission` — its finder fee |
+| BAP | `commission` — the commission (finder fee) the seller pays it |
 | Buyer | `refundAmount` — refunds made before the payout |
 | Stays at the PJP | `withholdingAmount` (0 in this app) |
 
 No tax is withheld from payouts. SEAM reads the agreement from the message
 log; payout status comes back through the PJP's webhook, outside this API.
+
+## Settlement terms are the seller's, on each offer
+
+The seller publishes its terms on every offer (ion-specs
+`feat/offer-settlement-policy`):
+
+- the **commission** (finder fee) it pays the buyer app, on the offer's
+  considerations: `considerationAttributes.commission` (IONTradeConsideration)
+  -- `type` `PERCENT` of the offer's item value without tax (`appliesTo:
+  ITEM_TOTAL`) or with tax (`ORDER_TOTAL`), or a fixed `AMOUNT` per unit sold;
+- the **payout term**, `offerAttributes.policies.settlement` (IONTradeOffer)
+  -- `settlementBasis` and `settlementWindow`.
+
+The seller sets them per offer on the Add Offer form; an offer without them
+gets the BPP's defaults (env `COMMISSION_TYPE`, `COMMISSION_VALUE`,
+`COMMISSION_APPLIES_TO`, `SETTLEMENT_BASIS`, `SETTLEMENT_WINDOW`) when it is
+saved, published or ordered. At `select`, `init` and `confirm` the BPP puts the
+terms stored for each offer on the order's commitments, so the buyer app can't
+change them. The buyer app takes the seller's commission as it is.
+
+The contract's price consideration carries the commission the order comes to
+(`commission.amount`): each offer's commission on its own items still ordered,
+summed. When every offer has the same `PERCENT` terms the contract repeats
+them; otherwise it is `type: AMOUNT` with `value` the total. With several
+offers, the payout term giving the latest due date applies.
 
 ## One settlement object, from init to reconcile
 
@@ -44,15 +69,22 @@ through the order and sent as it stands in `/reconcile`:
 
 | Step | Who | Adds or changes |
 |---|---|---|
-| `init` | BAP | `finderFee` terms (env `FINDER_FEE_*`, default 3% of the item total), its `settlementAccounts` entry (`holderRole: BAP`), `method` / `paymentRail` QRIS, `collectedBy: BAP`, `timing`, `status: PENDING`, figures estimated on the quoted price |
-| `on_init` | BPP | `settlementBasis`, `settlementWindow` (env `SETTLEMENT_BASIS`, `SETTLEMENT_WINDOW`), `finderFee.feeAmount` on its final price, its account (`holderRole: BPP`), the figures; the BAP checks the fee and logs a mismatch |
+| `on_select` | BPP | the offers' terms, and the commission on the quoted price |
+| `init` | BAP | its `settlementAccounts` entry (`holderRole: BAP`), `method` / `paymentRail` QRIS, `collectedBy: BAP`, `timing`, `status: PENDING`, figures estimated on the quoted price |
+| `on_init` | BPP | the offers' terms as stored, the commission on its final price, its account (`holderRole: BPP`), the figures; the BAP checks the commission and logs a mismatch |
 | `confirm` | BAP | `status: PAID`, `paidAt`, `gatewayRef`; `orderAmount` is the amount paid |
-| `on_cancel`, `on_update` | BPP | `finderFee.feeAmount`, `commission`, `refundAmount`, `netPayable` follow cancellations and returns |
+| `on_cancel`, `on_update` | BPP | the commission (on the replacement price), `commission`, `refundAmount`, `netPayable` follow cancellations and returns |
 | `/reconcile`, `/on_reconcile` | both | each participant's own figures, with `accord` in the answer |
 
 Until reconciliation the figures are estimates. Both apps keep this logic in
 one package, `internal/settlement` (the two copies are kept identical). Refund
 settlements stay ION TradeSettlement records.
+
+The settlement object no longer carries the terms (`finderFee`,
+`settlementBasis`, `settlementWindow`). An order placed before they moved to
+the offer still has them there (or in `contractAttributes`), and both apps
+keep using them for it: its commission, due date and completion are worked
+out as before.
 
 The settlement object, with the payment fields (`status`, `paidAt`,
 `gatewayRef`, `method`, `paymentRail`, `paymentGatewayProvider`,
@@ -63,7 +95,8 @@ declares an `IONPayment` and convert it.
 
 ## When a contract is due
 
-A contract is due at `basis event + settlementWindow`: delivery for
+A contract is due at `basis event + settlementWindow` -- with several offers,
+at the latest of their terms' due dates: delivery for
 `AFTER_DELIVERY` / `AFTER_SHIPMENT` (shipment isn't recorded separately),
 confirmation for `ON_CONFIRMATION`, the close of the longest return window for
 `AFTER_RETURN_WINDOW`. A contract cancelled before delivery is due at the

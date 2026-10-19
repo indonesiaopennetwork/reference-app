@@ -20,6 +20,7 @@ import (
 	dbsqlc "github.com/ion/winroom/bpp/db/sqlc"
 	"github.com/ion/winroom/bpp/internal/config"
 	"github.com/ion/winroom/bpp/internal/httpclient"
+	"github.com/ion/winroom/bpp/internal/offerterms"
 	"github.com/ion/winroom/bpp/internal/settlement"
 )
 
@@ -57,9 +58,11 @@ func (s *ConfirmService) ProcessConfirm(ctx context.Context, req *ConfirmRequest
 
 	prettyLog(fmt.Sprintf("← IN   CONFIRM   | txn=%.8s… | bap=%s", req.Context.TransactionID, req.Context.BapID), req)
 
-	// The seller's payout terms are agreed in on_init (on the settlement
-	// object); a contract initiated before that carried them gets them now.
-	withSettlementTerms(&req.Message.Contract, s.cfg.SettlementBasis, s.cfg.SettlementWindow)
+	// The seller's terms (stored for each offer) and the commission and
+	// figures on them go into the contract before it is stored and echoed.
+	if err := withSettlementTerms(ctx, dbsqlc.New(s.pool), &req.Message.Contract, s.cfg); err != nil {
+		s.lh.WithModule("confirmsvc").Warn().Error(err).Log("settlement terms not applied")
+	}
 
 	// Transition DRAFT → ACTIVE, record settlements, and retrieve the contract UUID.
 	contractID, err := s.confirmContract(ctx, req)
@@ -209,20 +212,38 @@ func validateSettlements(c ConfirmContract) error {
 	return nil
 }
 
-// withSettlementTerms makes the contract's payment settlement the
-// settlement object (ION IONSettlementReconciliation, see package
-// settlement) and fills in settlementBasis / settlementWindow (the seller's
-// payout terms) when it does not carry them yet; terms agreed in on_init are
-// kept.
-func withSettlementTerms(c *ConfirmContract, basis, window string) {
+// withSettlementTerms puts the seller's terms on the contract being
+// confirmed: each commitment's offer gets the commission and payout term
+// stored for it (offerterms.Apply), and the commission and the settlement
+// object's figures are worked out on them, so the buyer app cannot change
+// what was agreed in on_init. A contract initiated before the terms moved to
+// the offer keeps the terms it agreed on its settlement object (finderFee,
+// settlementBasis, settlementWindow); the payout term is filled in when it
+// carries none.
+func withSettlementTerms(ctx context.Context, store offerterms.Store, c *ConfirmContract, cfg *config.Config) error {
 	raw, err := json.Marshal(c)
 	if err != nil {
-		return
+		return err
 	}
 	var contract map[string]any
-	if json.Unmarshal(raw, &contract) != nil {
-		return
+	if err := json.Unmarshal(raw, &contract); err != nil {
+		return err
 	}
+	if legacyTerms(contract) {
+		fillLegacyTerms(c, contract, cfg.SettlementBasis, cfg.SettlementWindow)
+		return nil
+	}
+	return offerterms.ApplyTo(ctx, store, cfg.BppID, offerterms.FromConfig(cfg), c, func(contract map[string]any) {
+		settlement.Normalize(contract)
+		settlement.Refresh(contract)
+	})
+}
+
+// fillLegacyTerms makes the payment settlement of a contract that agreed its
+// terms on the settlement object the settlement object (ION
+// IONSettlementReconciliation), with settlementBasis / settlementWindow
+// filled in when it carries none.
+func fillLegacyTerms(c *ConfirmContract, contract map[string]any, basis, window string) {
 	st, _ := settlement.Of(contract)
 	attrs := settlement.Normalize(contract)
 	if attrs == nil {
@@ -243,6 +264,17 @@ func withSettlementTerms(c *ConfirmContract, basis, window string) {
 			c.Settlements[i].SettlementAttributes = out
 		}
 	}
+}
+
+// legacyTerms reports whether the contract, as the buyer app sent it, agreed
+// its terms on the settlement object (an order initiated before the terms
+// moved to the offer): a finderFee and no commission on its price.
+func legacyTerms(contract map[string]any) bool {
+	if _, ok := settlement.StatedCommission(contract); ok {
+		return false
+	}
+	_, _, fee := settlement.LegacyTerms(contract)
+	return fee != nil
 }
 
 // completedSettlements returns a copy of settlements marked COMPLETE — with no

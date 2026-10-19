@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/ion/winroom/bpp/internal/cancellation"
+	"github.com/ion/winroom/bpp/internal/settlement"
 )
 
 // DueContract is a contract whose settlement is not yet agreed, and when it
@@ -174,33 +175,53 @@ func (s *Service) assess(d *DueContract, deliveredAt, cancelledAt *time.Time, no
 	}
 	d.Figures = f
 
-	// What starts the clock. Shipment isn't recorded on its own, so
-	// AFTER_SHIPMENT counts from delivery; a contract cancelled before
-	// delivery counts from the cancellation.
+	// When each payout term falls due; the contract falls due at the latest.
 	paidAt, paidErr := time.Parse(time.RFC3339, firstNonEmpty(str(pa["paidAt"]), str(pa["settledAt"])))
+	var paid *time.Time
+	if paidErr == nil {
+		paid = &paidAt
+	}
+	for _, t := range f.Terms {
+		event, at, due, ok := termDue(t, paid, deliveredAt, cancelledAt, d.contract)
+		if !ok {
+			// A term whose event hasn't happened: the due date isn't known yet.
+			f.Basis, f.Window = t.Basis, t.Window
+			d.BasisEvent, d.BasisAt, d.DueAt, d.Due = event, nil, nil, false
+			return true
+		}
+		if d.DueAt == nil || due.After(*d.DueAt) {
+			f.Basis, f.Window = t.Basis, t.Window
+			d.BasisEvent, d.BasisAt, d.DueAt = event, at, &due
+		}
+	}
+	d.Due = d.DueAt != nil && !now.Before(*d.DueAt)
+	return true
+}
+
+// termDue is when a payout term falls due: what starts its clock, when, and
+// the due time; ok is false while that event hasn't happened. Shipment isn't
+// recorded on its own, so AFTER_SHIPMENT counts from delivery; a contract
+// cancelled before delivery counts from the cancellation.
+func termDue(t settlement.Term, paidAt, deliveredAt, cancelledAt *time.Time, contract map[string]any) (event string, at *time.Time, due time.Time, ok bool) {
 	switch {
-	case f.Basis == "ON_CONFIRMATION" && paidErr == nil:
-		d.BasisEvent, d.BasisAt = "confirmed", &paidAt
+	case t.Basis == "ON_CONFIRMATION" && paidAt != nil:
+		event, at = "confirmed", paidAt
 	case deliveredAt != nil:
-		d.BasisEvent, d.BasisAt = "delivered", deliveredAt
-		if f.Basis == "AFTER_RETURN_WINDOW" {
-			t := deliveredAt.Add(cancellation.LongestReturnWindow(d.contract))
-			d.BasisEvent, d.BasisAt = "return window closed", &t
+		event, at = "delivered", deliveredAt
+		if t.Basis == "AFTER_RETURN_WINDOW" {
+			closed := deliveredAt.Add(cancellation.LongestReturnWindow(contract))
+			event, at = "return window closed", &closed
 		}
 	case cancelledAt != nil:
-		d.BasisEvent, d.BasisAt = "cancelled", cancelledAt
+		event, at = "cancelled", cancelledAt
 	default:
-		d.BasisEvent = "awaiting delivery"
-		return true
+		return "awaiting delivery", nil, time.Time{}, false
 	}
-	window, err := cancellation.ParseISODuration(f.Window)
+	window, err := cancellation.ParseISODuration(t.Window)
 	if err != nil {
 		window = 0
 	}
-	due := d.BasisAt.Add(window)
-	d.DueAt = &due
-	d.Due = !now.Before(due)
-	return true
+	return event, at, at.Add(window), true
 }
 
 // summarize totals the figures of one BAP's due contracts.

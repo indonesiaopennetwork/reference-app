@@ -297,13 +297,13 @@ variable "zitadel_client_id" {
 # the same settings from .env.
 
 variable "settlement_basis" {
-  description = "bpp-application's SETTLEMENT_BASIS: the event the payout clock starts from -- AFTER_DELIVERY, AFTER_SHIPMENT, ON_CONFIRMATION or AFTER_RETURN_WINDOW. Also decides when a delivered contract becomes COMPLETE."
+  description = "bpp-application's SETTLEMENT_BASIS, the default payout basis for an offer published without its own policies.settlement: the event the payout clock starts from -- AFTER_DELIVERY, AFTER_SHIPMENT, ON_CONFIRMATION or AFTER_RETURN_WINDOW. Also decides when a delivered contract becomes COMPLETE."
   type        = string
   default     = "AFTER_DELIVERY"
 }
 
 variable "settlement_window" {
-  description = "bpp-application's SETTLEMENT_WINDOW: ISO 8601 duration after the basis event when a contract falls due for reconciliation. PT2M (testing) like the local .env; the app's own default, for production, is P1D."
+  description = "bpp-application's SETTLEMENT_WINDOW, the default for an offer without its own: ISO 8601 duration after the basis event when a contract falls due for reconciliation. PT2M (testing) like the local .env; the app's own default, for production, is P1D."
   type        = string
   default     = "PT2M"
 }
@@ -314,26 +314,26 @@ variable "reconcile_wait_for_settlement_window" {
   default     = false
 }
 
-variable "finder_fee_type" {
-  description = "bap-application's FINDER_FEE_TYPE: PERCENT or AMOUNT."
+variable "commission_type" {
+  description = "bpp-application's COMMISSION_TYPE, the default commission (finder fee) the seller pays the buyer app for an offer published without its own: PERCENT or AMOUNT (per unit sold)."
   type        = string
   default     = "PERCENT"
 }
 
-variable "finder_fee_value" {
-  description = "bap-application's FINDER_FEE_VALUE: the percentage (PERCENT) or fixed amount in IDR (AMOUNT)."
+variable "commission_value" {
+  description = "bpp-application's COMMISSION_VALUE: the percentage (PERCENT) or fixed amount per unit in IDR (AMOUNT)."
   type        = number
   default     = 3
 }
 
-variable "finder_fee_applies_to" {
-  description = "bap-application's FINDER_FEE_APPLIES_TO for a PERCENT fee: ITEM_TOTAL or ORDER_TOTAL."
+variable "commission_applies_to" {
+  description = "bpp-application's COMMISSION_APPLIES_TO for a PERCENT commission: ITEM_TOTAL (without tax) or ORDER_TOTAL (with tax)."
   type        = string
   default     = "ITEM_TOTAL"
 }
 
-# Payout accounts (settlementAccounts): where the PJP pays the BAP its finder
-# fee and the BPP its order proceeds. The defaults are demo accounts.
+# Payout accounts (settlementAccounts): where the PJP pays the BAP the commission
+# sellers pay it and the BPP its order proceeds. The defaults are demo accounts.
 variable "bap_settlement_bank_code" {
   type    = string
   default = "MANDIRI"

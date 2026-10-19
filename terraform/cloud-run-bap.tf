@@ -122,19 +122,7 @@ resource "google_cloud_run_v2_service" "bap" {
         name  = "DISCOVER_METHOD"
         value = var.discover_method
       }
-      # Settlement terms and reconciliation (see variables.tf).
-      env {
-        name  = "FINDER_FEE_TYPE"
-        value = var.finder_fee_type
-      }
-      env {
-        name  = "FINDER_FEE_VALUE"
-        value = tostring(var.finder_fee_value)
-      }
-      env {
-        name  = "FINDER_FEE_APPLIES_TO"
-        value = var.finder_fee_applies_to
-      }
+      # Payout account and reconciliation (see variables.tf).
       env {
         name  = "SETTLEMENT_BANK_CODE"
         value = var.bap_settlement_bank_code

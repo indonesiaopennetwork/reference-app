@@ -60,14 +60,14 @@ func (s *OnInitService) Process(ctx context.Context, req *OnInitRequest) {
 		s.lh.WithModule("on_init_svc").Warn().Error(err).Log("upsert transaction failed")
 	}
 
-	// The BPP states the finder fee its final price comes to
-	// (finderFee.feeAmount); flag it when this BAP computes otherwise --
-	// reconciliation would dispute the commission.
+	// The BPP states the commission its final price comes to (on the price,
+	// commission.amount, from its offers' terms); flag it when this BAP
+	// computes otherwise -- reconciliation would dispute the commission.
 	var priced map[string]any
 	if json.Unmarshal(req.Message.Contract, &priced) == nil {
-		if stated, computed, ok := reconcilesvc.CheckFinderFee(priced); ok && stated != computed {
+		if stated, computed, ok := reconcilesvc.CheckCommission(priced); ok && stated != computed {
 			s.lh.WithModule("on_init_svc").Warn().Log(fmt.Sprintf(
-				"finder fee mismatch on txn %s: seller states %v, buyer app computes %v", req.Context.TransactionID, stated, computed))
+				"commission mismatch on txn %s: seller states %v, buyer app computes %v", req.Context.TransactionID, stated, computed))
 		}
 	}
 

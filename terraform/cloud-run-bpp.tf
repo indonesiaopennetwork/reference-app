@@ -107,6 +107,18 @@ resource "google_cloud_run_v2_service" "bpp" {
         value = var.settlement_window
       }
       env {
+        name  = "COMMISSION_TYPE"
+        value = var.commission_type
+      }
+      env {
+        name  = "COMMISSION_VALUE"
+        value = tostring(var.commission_value)
+      }
+      env {
+        name  = "COMMISSION_APPLIES_TO"
+        value = var.commission_applies_to
+      }
+      env {
         name  = "SETTLEMENT_BANK_CODE"
         value = var.bpp_settlement_bank_code
       }

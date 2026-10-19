@@ -58,7 +58,7 @@ func (s *InitService) ProcessInit(ctx context.Context, req *InitRequest) {
 
 	// This seller's payout terms and settlement account go into the contract
 	// before it is stored and echoed in on_init.
-	if err := applySellerTerms(&req.Message.Contract, s.cfg); err != nil {
+	if err := applySellerTerms(ctx, dbsqlc.New(s.pool), &req.Message.Contract, s.cfg); err != nil {
 		s.lh.WithModule("initsvc").Warn().Error(err).Log("settlement terms not applied")
 	}
 

@@ -289,8 +289,9 @@ func Apply(contract map[string]any, items []Item, req Request, now time.Time) (*
 		c["settlements"] = append(settlements, res.RefundSettlement)
 	}
 
-	// The settlement object's figures follow the items still ordered and
-	// the refund: finderFee.feeAmount (reported as the commission),
+	// The commission and the settlement object's figures follow the items
+	// still ordered and the refund: the commission on the replacement price
+	// (from the offers' terms; finderFee.feeAmount on an earlier order),
 	// refundAmount and netPayable.
 	settlement.Refresh(c)
 
