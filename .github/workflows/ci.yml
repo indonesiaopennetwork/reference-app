@@ -1,0 +1,74 @@
+name: ci
+
+on:
+  push:
+
+jobs:
+  build:
+    runs-on: ion-central-staging
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: bap
+            context: bap-application
+          - image: bpp
+            context: bpp-application
+          - image: bap-migrate
+            context: bap-application
+            dockerfile: Dockerfile.migrate
+          - image: bpp-migrate
+            context: bpp-application
+            dockerfile: Dockerfile.migrate
+          - image: onix-bap
+            context: onix-bap
+          - image: onix-bpp
+            context: onix-bpp
+          - image: bap-frontend
+            context: bap-frontend
+          - image: bpp-frontend
+            context: bpp-frontend
+          - image: landing-page
+            context: landing-page
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Image metadata
+        id: meta
+        run: |
+          echo "image=asia-southeast2-docker.pkg.dev/ion-shared-infra/reference-app/${{ matrix.image }}" >> "$GITHUB_OUTPUT"
+          echo "tag=${GITHUB_REF_NAME}-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Artifact Registry access token
+        id: token
+        run: |
+          T=$(curl -s -H "Metadata-Flavor: Google" \
+            "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token" \
+            | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
+          echo "::add-mask::$T"
+          echo "token=$T" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/login-action@v3
+        with:
+          registry: asia-southeast2-docker.pkg.dev
+          username: oauth2accesstoken
+          password: ${{ steps.token.outputs.token }}
+
+      - name: Build
+        run: docker build -f "${{ matrix.context }}/${{ matrix.dockerfile || 'Dockerfile' }}" -t "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}" "${{ matrix.context }}"
+
+      - name: Trivy scan
+        if: ${{ !startsWith(matrix.image, 'onix') }}
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:0.65.0 image \
+            --severity HIGH,CRITICAL \
+            --exit-code 1 \
+            --ignore-unfixed \
+            "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}"
+
+      - name: Push
+        run: docker push "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}"
