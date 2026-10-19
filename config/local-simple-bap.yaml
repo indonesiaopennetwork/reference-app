@@ -1,0 +1,208 @@
+# Rendered into config/local-simple-bap.yaml by scripts/render-onix-config.sh,
+# which substitutes the ${...} placeholders below from the repo root .env.
+# Don't hand-edit the generated file's keyManager values -- edit .env and
+# re-run the script instead.
+appName: "onix-local"
+log:
+  level: debug
+  destinations:
+    - type: stdout
+  contextKeys:
+    - transaction_id
+    - message_id
+    - subscriber_id
+    - module_id
+http:
+  port: 8081
+  # write: 90 matches bap-application's own client timeout (see
+  # clientsvc/service.go) -- select/init/confirm go through two
+  # cold-Extended-Schema-cache-prone hops (this one, then onix-bpp's own)
+  # before bpp-application is even reached; this was cutting the
+  # connection at write:30 even though the real exchange completed fine a
+  # bit later, since this is a SERVER-side write deadline, independent of
+  # any client-side timeout.
+  timeout:
+    read: 90
+    write: 90
+    idle: 90
+pluginManager:
+  root: ./plugins
+
+# Ships telemetry to the otel-collector-bap sidecar (docker-compose.yml),
+# which filters and forwards only network-relevant signals to
+# netcol.iontest.in — see otel-collector/config.yaml. `producer` must be the
+# SAME value as `networkParticipant` in the keyManager blocks below (one
+# registered identity) — when you replace that stale example value with your
+# real subscriber ID, update this to match too, or telemetry will be
+# attributed to the wrong participant.
+plugins:
+  otelsetup:
+    id: otelsetup
+    config:
+      serviceName: "beckn-onix"
+      otlpEndpoint: "otel-collector-bap:4317"
+      enableMetrics: "true"
+      enableTracing: "true"
+      enableLogs: "true"
+      timeInterval: "5"
+      auditFieldsConfig: "/app/config/audit-fields.yaml"
+      producer: "baptest1.remiges.tech"
+      producerType: "bap"
+
+modules:
+  - name: bapTxnReceiver
+    path: /bap/receiver/
+    handler:
+      type: std
+      role: bap
+      httpClientConfig:
+        maxIdleConns: 1000
+        maxIdleConnsPerHost: 200
+        idleConnTimeout: 300s
+        responseHeaderTimeout: 30s
+      plugins:
+        registry:
+          id: dediregistry
+          config:
+            url: https://fabric.nfh.global/registry/dedi
+            timeout: 10
+            retry_max: 3
+            retry_wait_min: 100ms
+            retry_wait_max: 500ms
+        keyManager:
+          id: simplekeymanager
+          config:
+            networkParticipant: onix-bap-x7m2wmy7nq-et.a.run.app
+            keyId: 76EU91ME6AjAq2emEzHCJ2aNXgZAfRTF2VNRa3o6j6m7KPT7AdKmLc
+            signingPrivateKey: BkYJmBVlFt6LmPea4mYJH2K+6HAjj3TcC6efl2lNKZ0=
+            signingPublicKey: nHKQUR4dfE40eGnxP6phRvWiNzYRQuetJiybTtpndbs=
+            encrPrivateKey: BkYJmBVlFt6LmPea4mYJH2K+6HAjj3TcC6efl2lNKZ0=
+            encrPublicKey: nHKQUR4dfE40eGnxP6phRvWiNzYRQuetJiybTtpndbs=
+        schemaValidator:
+          id: schemav2validator
+          config:
+            type: url
+            # Release 1's Beckn core contract (ion-specs vendored/beckn, identical to
+            # upstream core-v2.0.0-lts), as ion-additional.yaml references it.
+            location: https://schema.ion.id/release1/schema/vendored/beckn/api/v2.0.0/beckn.yaml
+            cacheTTL: "3600"
+            extendedSchema_enabled: "true"
+            extendedSchema_cacheTTL: "86400"
+            extendedSchema_maxCacheSize: "100"
+            extendedSchema_downloadTimeout: "30"
+            extendedSchema_allowedDomains: "raw.githubusercontent.com,schema.ion.id,schema.beckn.io"
+            # Local copies of ION attribute packs, used instead of schema.ion.id's:
+            # ./schemas/<TypeName>/attributes.yaml (see schemas/README.md).
+            extendedSchema_localSchemaPath: "/app/schemas"
+            # ION endpoints Beckn does not define (/reconcile, /on_reconcile),
+            # merged into the action index from the published Release 1. Their ION @context
+            # types (IONSettlementReconciliation, ...) are fetched from schema.ion.id.
+            auxiliaryTypes: "url"
+            auxiliaryLocations: "https://schema.ion.id/release1/schema/core/api/v2.0.0/ion-additional.yaml"
+        cache:
+          id: cache
+          config:
+            addr: redis-bap:6379
+        signValidator:
+          id: signvalidator
+        signer:
+          id: signer
+        router:
+          id: router
+          config:
+            routingConfig: ./config/local-simple-routing-BAPReceiver.yaml
+        payloadStore:
+          id: payloadstore
+          config:
+            ttl: "24h"
+            indexTTL: "25h"
+            storeSignature: "true"
+        middleware:
+          - id: reqpreprocessor
+            config:
+              contextKeys: transactionId,messageId
+              role: bap
+      steps:
+        - validateSign
+        - addRoute
+        - validateSchema
+        - signAck
+  
+  - name: bapTxnCaller
+    path: /bap/caller/
+    handler:
+      type: std
+      role: bap
+      httpClientConfig:
+        maxIdleConns: 1000
+        maxIdleConnsPerHost: 200
+        idleConnTimeout: 300s
+        responseHeaderTimeout: 30s
+      plugins:
+        registry:
+          id: dediregistry
+          config:
+            url: https://fabric.nfh.global/registry/dedi
+            timeout: 10
+            retry_max: 3
+            retry_wait_min: 100ms
+            retry_wait_max: 500ms
+        keyManager:
+          id: simplekeymanager
+          config:
+            networkParticipant: onix-bap-x7m2wmy7nq-et.a.run.app
+            keyId: 76EU91ME6AjAq2emEzHCJ2aNXgZAfRTF2VNRa3o6j6m7KPT7AdKmLc
+            signingPrivateKey: BkYJmBVlFt6LmPea4mYJH2K+6HAjj3TcC6efl2lNKZ0=
+            signingPublicKey: nHKQUR4dfE40eGnxP6phRvWiNzYRQuetJiybTtpndbs=
+            encrPrivateKey: BkYJmBVlFt6LmPea4mYJH2K+6HAjj3TcC6efl2lNKZ0=
+            encrPublicKey: nHKQUR4dfE40eGnxP6phRvWiNzYRQuetJiybTtpndbs=
+        schemaValidator:
+          id: schemav2validator
+          config:
+            type: url
+            # Release 1's Beckn core contract (ion-specs vendored/beckn, identical to
+            # upstream core-v2.0.0-lts), as ion-additional.yaml references it.
+            location: https://schema.ion.id/release1/schema/vendored/beckn/api/v2.0.0/beckn.yaml
+            cacheTTL: "3600"
+            extendedSchema_enabled: "true"
+            extendedSchema_cacheTTL: "86400"
+            extendedSchema_maxCacheSize: "100"
+            extendedSchema_downloadTimeout: "30"
+            extendedSchema_allowedDomains: "raw.githubusercontent.com,schema.ion.id,schema.beckn.io"
+            # Local copies of ION attribute packs, used instead of schema.ion.id's:
+            # ./schemas/<TypeName>/attributes.yaml (see schemas/README.md).
+            extendedSchema_localSchemaPath: "/app/schemas"
+            # ION endpoints Beckn does not define (/reconcile, /on_reconcile),
+            # merged into the action index from the published Release 1. Their ION @context
+            # types (IONSettlementReconciliation, ...) are fetched from schema.ion.id.
+            auxiliaryTypes: "url"
+            auxiliaryLocations: "https://schema.ion.id/release1/schema/core/api/v2.0.0/ion-additional.yaml"
+        cache:
+          id: cache
+          config:
+            addr: redis-bap:6379
+        router:
+          id: router
+          config:
+            routingConfig: ./config/local-simple-routing-BAPCaller.yaml
+        signer:
+          id: signer
+        signValidator:
+          id: signvalidator
+        payloadStore:
+          id: payloadstore
+          config:
+            ttl: "24h"
+            indexTTL: "25h"
+            storeSignature: "true"
+        middleware:
+          - id: reqpreprocessor
+            config:
+              contextKeys: transactionId,messageId
+              role: bap
+      steps:
+        - addRoute
+        - sign
+        - storePayload
+        - validateSchema
+        - validateAckSign
