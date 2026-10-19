@@ -36,13 +36,13 @@ const I18nContext = createContext({
 })
 
 export function I18nProvider({ children }) {
-  const [lang, setLangState] = useState(() => storedLang() || 'en')
+  const [lang, setLang] = useState(() => storedLang() || 'en')
   // False until the visitor has picked a language (first visit).
   const [chosen, setChosen] = useState(() => storedLang() !== null)
 
-  const setLang = useCallback(code => {
+  const chooseLang = useCallback(code => {
     if (!DICTS[code]) return
-    setLangState(code)
+    setLang(code)
     setChosen(true)
     try { localStorage.setItem(STORAGE_KEY, code) } catch { /* storage blocked */ }
   }, [])
@@ -51,10 +51,10 @@ export function I18nProvider({ children }) {
   useEffect(() => { document.documentElement.lang = lang }, [lang])
 
   const value = useMemo(() => ({
-    lang, chosen, setLang,
+    lang, chosen, setLang: chooseLang,
     locale: LANGS.find(l => l.code === lang).locale,
     t: (text, vars) => translate(lang, text, vars),
-  }), [lang, chosen, setLang])
+  }), [lang, chosen, chooseLang])
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>
 }
 
@@ -74,7 +74,7 @@ export function rich(text) {
 export function LanguageToggle({ className = '' }) {
   const { lang, setLang, t } = useI18n()
   return (
-    <div role="group" aria-label={t('Language')} data-tour="language"
+    <fieldset aria-label={t('Language')} data-tour="language"
       className={`inline-flex shrink-0 rounded-lg border border-white/10 overflow-hidden text-[11px] font-bold ${className}`}>
       {LANGS.map(l => (
         <button key={l.code} type="button" onClick={() => setLang(l.code)} aria-pressed={lang === l.code}
@@ -83,7 +83,7 @@ export function LanguageToggle({ className = '' }) {
           {l.short}
         </button>
       ))}
-    </div>
+    </fieldset>
   )
 }
 

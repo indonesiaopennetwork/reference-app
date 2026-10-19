@@ -20,10 +20,13 @@ import (
 
 	dbsqlc "github.com/ion/winroom/bap/db/sqlc"
 	"github.com/ion/winroom/bap/internal/config"
-	"github.com/ion/winroom/bap/internal/settlement"
 	"github.com/ion/winroom/bap/internal/discoverwait"
 	"github.com/ion/winroom/bap/internal/httpclient"
+	"github.com/ion/winroom/bap/internal/settlement"
 )
+
+// ldContext is the JSON-LD @context key of the attribute objects built here.
+const ldContext = "@context"
 
 // discoverCallbackTimeout bounds how long Discover waits for discovery
 // service's on_discover callback to arrive after the initial Ack, before
@@ -48,9 +51,9 @@ type ClientService struct {
 
 func NewClientService(pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.Logger, registry *discoverwait.Registry) *ClientService {
 	return &ClientService{
-		pool:     pool,
-		cfg:      cfg,
-		lh:       lh,
+		pool: pool,
+		cfg:  cfg,
+		lh:   lh,
 		// 90s (not a round-trip-sized 5-10s) for the same reason as
 		// discoverCallbackTimeout above: select/init/confirm go through TWO
 		// cold-Extended-Schema-cache-prone hops synchronously (onix-bap, then
@@ -388,7 +391,7 @@ func buildSelectMessage(items []SelectItem, bapID string) ([]byte, error) {
 			"resources": []map[string]interface{}{resource},
 			"offer":     offer,
 			"commitmentAttributes": map[string]interface{}{
-				"@context":   "https://schema.ion.id/release1/schema/extension/trade/TradeCommitment/v1/context.jsonld",
+				ldContext:    "https://schema.ion.id/release1/schema/extension/trade/TradeCommitment/v1/context.jsonld",
 				"@type":      "ion:IONTradeCommitment",
 				"lineId":     fmt.Sprintf("LINE-%03d", i+1),
 				"resourceId": item.ResourceID,
@@ -404,9 +407,9 @@ func buildSelectMessage(items []SelectItem, bapID string) ([]byte, error) {
 				"id":         providerID,
 				"descriptor": map[string]interface{}{"name": providerName},
 				"participantAttributes": map[string]interface{}{
-					"@context": "https://schema.ion.id/release1/schema/extension/trade/TradeProvider/v1/context.jsonld",
-					"@type":    "ion:IONTradeProvider",
-					"id":       providerID,
+					ldContext: "https://schema.ion.id/release1/schema/extension/trade/TradeProvider/v1/context.jsonld",
+					"@type":   "ion:IONTradeProvider",
+					"id":      providerID,
 					"descriptor": map[string]interface{}{
 						"name": providerName,
 					},
@@ -416,10 +419,10 @@ func buildSelectMessage(items []SelectItem, bapID string) ([]byte, error) {
 				"id":         buyerID,
 				"descriptor": map[string]interface{}{"name": "Buyer"},
 				"participantAttributes": map[string]interface{}{
-					"@context": "https://raw.githubusercontent.com/beckn/schemas/main/schema/Consumer/v2.0/context.jsonld",
-					"@type":    "Consumer",
-					"role":     "buyer",
-					"person":   map[string]interface{}{"id": buyerID, "name": "Buyer"},
+					ldContext: "https://raw.githubusercontent.com/beckn/schemas/main/schema/Consumer/v2.0/context.jsonld",
+					"@type":   "Consumer",
+					"role":    "buyer",
+					"person":  map[string]interface{}{"id": buyerID, "name": "Buyer"},
 				},
 			},
 		},
@@ -430,7 +433,7 @@ func buildSelectMessage(items []SelectItem, bapID string) ([]byte, error) {
 				"status":        map[string]interface{}{"code": "PENDING"},
 				"commitmentIds": commitmentIDs,
 				"performanceAttributes": map[string]interface{}{
-					"@context":                  "https://schema.ion.id/release1/schema/extension/trade/TradePerformance/v1/context.jsonld",
+					ldContext:                   "https://schema.ion.id/release1/schema/extension/trade/TradePerformance/v1/context.jsonld",
 					"@type":                     "ion:IONTradePerformance",
 					"supportedPerformanceModes": []string{"DELIVERY"},
 					"deliveryDetails": map[string]interface{}{
@@ -483,8 +486,8 @@ func sanitizeOfferAttributes(raw json.RawMessage) map[string]interface{} {
 	)
 
 	out := map[string]interface{}{
-		"@context": offerCtx,
-		"@type":    offerType,
+		ldContext: offerCtx,
+		"@type":   offerType,
 	}
 
 	if len(raw) <= 2 {
@@ -497,10 +500,10 @@ func sanitizeOfferAttributes(raw json.RawMessage) map[string]interface{} {
 	}
 
 	// Preserve @context / @type from the discover response if present.
-	if v, ok := decoded["@context"]; ok {
+	if v, ok := decoded[ldContext]; ok {
 		var s string
 		if json.Unmarshal(v, &s) == nil && s != "" {
-			out["@context"] = s
+			out[ldContext] = s
 		}
 	}
 	if v, ok := decoded["@type"]; ok {
@@ -633,7 +636,7 @@ func declareSettlement(contract map[string]interface{}, cfg *config.Config) erro
 			"considerationId": considerationID,
 			"status":          "DRAFT",
 			"settlementAttributes": map[string]interface{}{
-				"@context":    settlement.Context,
+				ldContext:     settlement.Context,
 				"@type":       settlement.Type,
 				"method":      "QRIS",
 				"paymentRail": "QRIS",
@@ -1156,7 +1159,7 @@ func (s *ClientService) ReturnItems(ctx context.Context, req *ClientReturnItemsR
 		"commitmentIds": ids,
 		"status":        map[string]interface{}{"code": "Return_Initiated", "name": "Return requested"},
 		"performanceAttributes": map[string]interface{}{
-			"@context":                  "https://schema.ion.id/release1/schema/extension/trade/TradePerformance/v1/context.jsonld",
+			ldContext:                   "https://schema.ion.id/release1/schema/extension/trade/TradePerformance/v1/context.jsonld",
 			"@type":                     "ion:IONTradePerformance",
 			"type":                      "RETURN",
 			"supportedPerformanceModes": []string{"DELIVERY"},
@@ -1349,8 +1352,8 @@ func setCancellation(contract map[string]interface{}, reasonCode string, commitm
 	attrs := asObj(contract["contractAttributes"])
 	if attrs == nil {
 		attrs = map[string]interface{}{
-			"@context": "https://schema.ion.id/release1/schema/extension/trade/TradeContract/v1/context.jsonld",
-			"@type":    "ion:IONTradeContract",
+			ldContext: "https://schema.ion.id/release1/schema/extension/trade/TradeContract/v1/context.jsonld",
+			"@type":   "ion:IONTradeContract",
 		}
 		contract["contractAttributes"] = attrs
 	}

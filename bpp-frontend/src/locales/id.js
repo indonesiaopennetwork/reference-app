@@ -590,4 +590,5 @@ export default {
   "30 days": "30 hari",
   "Commission ≈ {currency} {amount} per unit at this price, deducted from your payout.": "Komisi ≈ {currency} {amount} per unit pada harga ini, dipotong dari pencairan Anda.",
   "The payout is due this long after the event; with several offers in one order, the latest due date applies.": "Pencairan jatuh tempo selama ini setelah peristiwa tersebut; jika satu pesanan berisi beberapa penawaran, tanggal jatuh tempo paling akhir yang berlaku.",
+  "Open menu": "Buka menu",
 }

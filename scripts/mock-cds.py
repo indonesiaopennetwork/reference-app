@@ -199,6 +199,8 @@ class MockCDSHandler(BaseHTTPRequestHandler):
 
 
 if __name__ == '__main__':
-    server = HTTPServer(('0.0.0.0', 8086), MockCDSHandler)
+    # Local development only: the mock is reached inside the compose network,
+    # with TLS handled nowhere else in the local stack either.
+    server = HTTPServer(('0.0.0.0', 8086), MockCDSHandler)  # NOSONAR -- local mock, plain HTTP by design
     print('Starting mock CDS on port 8086...')
     server.serve_forever()

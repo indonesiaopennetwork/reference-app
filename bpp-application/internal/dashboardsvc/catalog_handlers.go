@@ -15,10 +15,10 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	dbsqlc "github.com/ion/winroom/bpp/db/sqlc"
-	"github.com/ion/winroom/bpp/internal/offerterms"
 	"github.com/ion/winroom/bpp/internal/auth"
 	"github.com/ion/winroom/bpp/internal/catalog"
 	"github.com/ion/winroom/bpp/internal/httpclient"
+	"github.com/ion/winroom/bpp/internal/offerterms"
 )
 
 // actionCatalogRetire is a 'catalog_retire' beckn_action -- added by
@@ -278,18 +278,18 @@ func (h *Handler) HandleCreateCatalog(c *gin.Context) {
 
 	// Upsert catalog.
 	if err := q.UpsertCatalog(ctx, dbsqlc.UpsertCatalogParams{
-		ID:              req.ID,
-		BppID:           h.cfg.BppID,
-		BppUri:          h.cfg.BppURI,
-		ProviderID:      providerID,
-		DescriptorName:  req.Descriptor.Name,
-		DescriptorShortDesc: strPtr(req.Descriptor.ShortDesc),
-		DescriptorLongDesc:  strPtr(req.Descriptor.LongDesc),
-		DescriptorDocs:      json.RawMessage(`[]`),
+		ID:                   req.ID,
+		BppID:                h.cfg.BppID,
+		BppUri:               h.cfg.BppURI,
+		ProviderID:           providerID,
+		DescriptorName:       req.Descriptor.Name,
+		DescriptorShortDesc:  strPtr(req.Descriptor.ShortDesc),
+		DescriptorLongDesc:   strPtr(req.Descriptor.LongDesc),
+		DescriptorDocs:       json.RawMessage(`[]`),
 		DescriptorMediaFiles: json.RawMessage(`[]`),
-		CatalogType:     dbsqlc.NullCatalogType{},
-		ValidityStart:   parseTS(req.Validity, true),
-		ValidityEnd:     parseTS(req.Validity, false),
+		CatalogType:          dbsqlc.NullCatalogType{},
+		ValidityStart:        parseTS(req.Validity, true),
+		ValidityEnd:          parseTS(req.Validity, false),
 	}); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "upsert catalog: " + err.Error()})
 		return
@@ -349,10 +349,12 @@ func (h *Handler) HandleGetCatalog(c *gin.Context) {
 	cat.ShortDesc = ptrStr(sd)
 	cat.CatalogType = catType
 	if vs.Valid {
-		s := vs.Time.UTC().Format(time.RFC3339); cat.ValidityStart = &s
+		s := vs.Time.UTC().Format(time.RFC3339)
+		cat.ValidityStart = &s
 	}
 	if ve.Valid {
-		s := ve.Time.UTC().Format(time.RFC3339); cat.ValidityEnd = &s
+		s := ve.Time.UTC().Format(time.RFC3339)
+		cat.ValidityEnd = &s
 	}
 	if ca.Valid {
 		cat.CreatedAt = ca.Time.UTC().Format(time.RFC3339)
@@ -439,10 +441,12 @@ func (h *Handler) HandleGetCatalog(c *gin.Context) {
 		o.ResourceIDs = rids
 		o.ConsiderationAttributes = consAttrs
 		if ovs.Valid {
-			s := ovs.Time.UTC().Format(time.RFC3339); o.ValidityStart = &s
+			s := ovs.Time.UTC().Format(time.RFC3339)
+			o.ValidityStart = &s
 		}
 		if ove.Valid {
-			s := ove.Time.UTC().Format(time.RFC3339); o.ValidityEnd = &s
+			s := ove.Time.UTC().Format(time.RFC3339)
+			o.ValidityEnd = &s
 		}
 		offers = append(offers, o)
 	}
@@ -1071,11 +1075,11 @@ func (h *Handler) HandleDeleteCatalog(c *gin.Context) {
 // (the provider_id condition below still applies), not another seller's
 // data.
 func (h *Handler) HandleInventoryItems(c *gin.Context) {
-	page, limit   := parsePagination(c)
+	page, limit := parsePagination(c)
 	catalogFilter := c.DefaultQuery("catalog_id", "")
 	providerFilter := auth.ProviderIDFromContext(c)
-	search         := c.DefaultQuery("search", "")
-	ctx            := c.Request.Context()
+	search := c.DefaultQuery("search", "")
+	ctx := c.Request.Context()
 
 	countSQL := `
 		SELECT COUNT(*)

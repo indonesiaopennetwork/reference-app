@@ -17,10 +17,13 @@ function randomString(length) {
 }
 
 function base64url(buffer) {
-  return btoa(String.fromCharCode(...new Uint8Array(buffer)))
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '')
+  // btoa emits '=' only as trailing padding, so dropping every '=' is the
+  // same as stripping the padding (bytes are 0-255, so fromCodePoint ==
+  // fromCharCode here).
+  return btoa(String.fromCodePoint(...new Uint8Array(buffer)))
+    .replaceAll('+', '-')
+    .replaceAll('/', '_')
+    .replaceAll('=', '')
 }
 
 async function codeChallengeFor(verifier) {

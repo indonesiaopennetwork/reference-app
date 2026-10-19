@@ -14,6 +14,11 @@ async function bootstrap(token, businessName) {
   return res.json()
 }
 
+function retry() {
+  clearToken()
+  window.location.href = basePath
+}
+
 export default function App() {
   const [state, setState] = useState('loading') // loading | needs-profile | ready | error
   const [errorMessage, setErrorMessage] = useState('')
@@ -55,7 +60,11 @@ export default function App() {
         setState('error')
       }
     }
-    run()
+    run().catch((err) => {
+      console.error(err)
+      setErrorMessage(err.message || String(err))
+      setState('error')
+    })
   }, [])
 
   async function handleProfileSubmit(businessName) {
@@ -70,11 +79,6 @@ export default function App() {
       setErrorMessage(err.message || String(err))
       setState('error')
     }
-  }
-
-  function retry() {
-    clearToken()
-    window.location.href = basePath
   }
 
   if (state === 'loading') return <CenteredMessage text="Loading..." />
@@ -148,8 +152,9 @@ function Landing({ token, providerId }) {
   // (name/email) locally -- see their own auth.js/UserProfileMenu.jsx.
   const idToken = getIdToken()
   const idTokenParam = idToken ? `&id_token=${encodeURIComponent(idToken)}` : ''
-  const buyerUrl = `${config.bapUrl}/?token=${encodeURIComponent(token)}${idTokenParam}${providerId ? `&providerId=${encodeURIComponent(providerId)}` : ''}`
-  const sellerUrl = `${config.bppUrl}/?token=${encodeURIComponent(token)}${idTokenParam}${providerId ? `&providerId=${encodeURIComponent(providerId)}` : ''}`
+  const providerIdParam = providerId ? `&providerId=${encodeURIComponent(providerId)}` : ''
+  const buyerUrl = `${config.bapUrl}/?token=${encodeURIComponent(token)}${idTokenParam}${providerIdParam}`
+  const sellerUrl = `${config.bppUrl}/?token=${encodeURIComponent(token)}${idTokenParam}${providerIdParam}`
   return (
     <div className="relative min-h-screen flex items-center justify-center p-6">
       <button
@@ -174,14 +179,12 @@ function Landing({ token, providerId }) {
           <a href={buyerUrl} className="btn border-white/8 bg-white/3 hover:border-white/20 hover:bg-white/6">
             <span className="block mb-1.5 text-xs font-medium uppercase tracking-wider text-emerald-400">
               Buyer app (BAP)
-            </span>
-            Enter as Buyer
+            </span>Enter as Buyer
           </a>
           <a href={sellerUrl} className="btn border-white/8 bg-white/3 hover:border-white/20 hover:bg-white/6">
             <span className="block mb-1.5 text-xs font-medium uppercase tracking-wider text-sky-400">
               Seller app (BPP)
-            </span>
-            Enter as Seller
+            </span>Enter as Seller
           </a>
         </div>
       </div>
