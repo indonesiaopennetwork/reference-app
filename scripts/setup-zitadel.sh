@@ -125,13 +125,22 @@ if [ -z "${CLIENT_ID:-}" ] || [ "$CLIENT_ID" = "null" ]; then
     | jq -r '.oidcConfiguration.clientId')"
 else
   echo "Found existing application, client ID ${CLIENT_ID}. Ensuring idTokenUserinfoAssertion and postLogoutRedirectUris are up to date..."
-  APP_ID="$(api /zitadel.application.v2.ApplicationService/ListApplications '{}' \
-    | jq -r --arg pid "$PROJECT_ID" --arg name "$APP_NAME" \
-      '.applications[]? | select(.projectId == $pid and .name == $name) | .applicationId' | head -n1)"
-  api /zitadel.application.v2.ApplicationService/UpdateApplication \
-    "$(jq -n --arg aid "$APP_ID" --arg pid "$PROJECT_ID" --arg logout "$POST_LOGOUT_REDIRECT_URI" \
-      '{applicationId: $aid, projectId: $pid, oidcConfiguration: {idTokenUserinfoAssertion: true, postLogoutRedirectUris: [$logout]}}')" \
-    >/dev/null
+  APP="$(api /zitadel.application.v2.ApplicationService/ListApplications '{}' \
+    | jq -c --arg pid "$PROJECT_ID" --arg name "$APP_NAME" \
+      '[.applications[]? | select(.projectId == $pid and .name == $name)][0]')"
+  APP_ID="$(jq -r '.applicationId' <<<"$APP")"
+  # Zitadel answers an update that changes nothing with 400 "No changes"
+  # (COMMAND-1m88i), so only update when the settings differ.
+  if jq -e --arg logout "$POST_LOGOUT_REDIRECT_URI" \
+    '.oidcConfiguration.idTokenUserinfoAssertion == true and .oidcConfiguration.postLogoutRedirectUris == [$logout]' \
+    <<<"$APP" >/dev/null; then
+    echo "Application settings already up to date."
+  else
+    api /zitadel.application.v2.ApplicationService/UpdateApplication \
+      "$(jq -n --arg aid "$APP_ID" --arg pid "$PROJECT_ID" --arg logout "$POST_LOGOUT_REDIRECT_URI" \
+        '{applicationId: $aid, projectId: $pid, oidcConfiguration: {idTokenUserinfoAssertion: true, postLogoutRedirectUris: [$logout]}}')" \
+      >/dev/null
+  fi
 fi
 
 if [ -z "${CLIENT_ID:-}" ] || [ "$CLIENT_ID" = "null" ]; then
