@@ -32,6 +32,8 @@ jobs:
             context: bpp-frontend
           - image: landing-page
             context: landing-page
+          - image: ion-landing-page
+            context: ion-landing-page
     steps:
       - uses: actions/checkout@v4
 
