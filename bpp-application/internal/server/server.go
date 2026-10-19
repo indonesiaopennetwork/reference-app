@@ -223,7 +223,9 @@ func registerAuthRoutes(v1 *gin.RouterGroup, pool *pgxpool.Pool, cfg *config.Con
 	h := authsvc.NewHandler(pool, cfg, verifier)
 	authGroup := v1.Group("/auth")
 	authGroup.Use(corsMiddleware(cfg.LandingPageOrigin))
-	authGroup.OPTIONS("/bootstrap", func(c *gin.Context) {}) // preflight; corsMiddleware itself replies + aborts
+	authGroup.OPTIONS("/bootstrap", func(c *gin.Context) {
+		// Preflight: corsMiddleware has already replied 204 and aborted.
+	})
 	authGroup.Use(auth.RequireToken(verifier))
 	authGroup.POST("/bootstrap", h.HandleBootstrap)
 }

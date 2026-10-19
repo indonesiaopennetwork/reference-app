@@ -8,7 +8,7 @@ import {
   Star, Info, Receipt, Store, MapPin, Calendar, Zap,
   User, Phone, Home, ChevronLeft, Banknote,
   Ban, MessageSquare, RefreshCw, ThumbsUp,
-  History, Wand2, ExternalLink, ChevronDown, ChevronUp,
+  History, Wand2, ExternalLink, ChevronDown,
   Compass, AlertCircle, Copy,
 } from 'lucide-react';
 import Tour from './Tour.jsx';
@@ -30,7 +30,7 @@ async function apiFetch(path, opts = {}) {
   const res = await fetch(`${API_BASE}${path}`, {
     ...opts,
     headers: {
-      ...(opts.headers || {}),
+      ...opts.headers,
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
   });
@@ -161,6 +161,20 @@ function combineTax(breakup) {
   return [...items, ...taxes.values()];
 }
 
+// React keys for rows that carry no id of their own: built from the row's
+// fields, with a #n suffix on repeats so identical rows still differ.
+// Returns [key, row] pairs.
+function keyedRows(rows, keyOf) {
+  const seen = new Map();
+  return rows.map(row => {
+    const base = String(keyOf(row));
+    const n = seen.get(base) || 0;
+    seen.set(base, n + 1);
+    return [n ? `${base}#${n}` : base, row];
+  });
+}
+const lineKey = b => `${b.type}|${b.title}|${b.amount}`;
+
 function parseOnSelectContract(contract) {
   if (!contract) return null;
   const consideration = contract.consideration?.[0] ?? contract.considerations?.[0];
@@ -261,7 +275,7 @@ function SkeletonCard() {
 function OfferInfoPanel({ product }) {
   const { breakup, currency, price, sellerName, sellerAddress,
     returnPolicy, cancelPolicy, codAvailable,
-    deliveryRange, deliveryHours, deliveryDays, offerName, offerValidity } = product;
+    deliveryRange, deliveryHours, offerName, offerValidity } = product;
   const { t } = useI18n();
 
   const shortAddr = sellerAddress
@@ -286,8 +300,8 @@ function OfferInfoPanel({ product }) {
         <div className="px-4 py-3 space-y-1.5">
           {breakup.length > 0 ? (
             <>
-              {breakup.map((b, i) => (
-                <div key={i} className="flex justify-between text-sm">
+              {keyedRows(breakup, lineKey).map(([key, b]) => (
+                <div key={key} className="flex justify-between text-sm">
                   <span className="text-slate-400">{b.title}</span>
                   <span className={
                     b.type === 'DISCOUNT' ? 'text-emerald-400 font-medium' :
@@ -361,7 +375,7 @@ function ConfirmedQuotePanel({ quote, onInit, isLoading, nameOf }) {
   if (!quote) return null;
   if (quoteBlocked(quote)) return <UnavailablePanel quote={quote} nameOf={nameOf} />;
   const { total, currency, breakup, paymentMethods, codAvailable,
-    seller, returnPolicy, cancelPolicy } = quote;
+    seller, returnPolicy } = quote;
   return (
     <motion.div
       initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
@@ -375,8 +389,8 @@ function ConfirmedQuotePanel({ quote, onInit, isLoading, nameOf }) {
       <div className="px-4 py-3 space-y-2">
         {breakup.length > 0 && (
           <div className="space-y-1.5">
-            {breakup.map((b, i) => (
-              <div key={i} className="flex justify-between text-sm">
+            {keyedRows(breakup, lineKey).map(([key, b]) => (
+              <div key={key} className="flex justify-between text-sm">
                 <span className="text-slate-400">{b.title}</span>
                 <span className={b.type === 'TAX' ? 'text-amber-400' : b.type === 'DISCOUNT' ? 'text-emerald-400' : 'text-slate-200'}>
                   {fmt(b.amount, currency)}
@@ -620,7 +634,7 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
           <div className="absolute left-0 top-3 h-px bg-emerald-400 transition-all duration-700"
             style={{ width: `${(stepIndex / (STEPS.length - 1)) * 100}%` }} />
           {STEPS.map((label, i) => (
-            <div key={i} className="relative flex flex-col items-center gap-1.5 z-10">
+            <div key={label} className="relative flex flex-col items-center gap-1.5 z-10">
               <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold transition-all duration-500 ${i < stepIndex ? 'bg-emerald-400 text-slate-900' :
                 i === stepIndex ? 'bg-emerald-400 text-slate-900 ring-4 ring-emerald-400/20' :
                   'bg-slate-700 text-slate-400'}`}>
@@ -695,8 +709,8 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
                   )}
                 </div>
                 <div className="px-4 py-3 space-y-1.5">
-                  {confirmedQuote.breakup.map((b, i) => (
-                    <div key={i} className="flex justify-between text-sm">
+                  {keyedRows(confirmedQuote.breakup, lineKey).map(([key, b]) => (
+                    <div key={key} className="flex justify-between text-sm">
                       <span className="text-slate-400">{b.title}</span>
                       <span className={b.type === 'DISCOUNT' ? 'text-emerald-400' : b.type === 'TAX' ? 'text-amber-400' : 'text-slate-200'}>
                         {fmt(b.amount, currency)}
@@ -1074,7 +1088,7 @@ const TXN_STATUS_LABELS = {
   CANCELLED: 'Cancelled', UPDATE_SENT: 'Updating', COMPLETE: 'Completed', RATE_SENT: 'Rating sent', SUPPORT_SENT: 'Support requested',
   Return_Initiated: 'Return requested', Return_Approved: 'Return approved', Return_Rejected: 'Return rejected',
 };
-const txnStatusLabel = (t, s) => (TXN_STATUS_LABELS[s] ? t(TXN_STATUS_LABELS[s]) : String(s || '').replace(/_/g, ' '));
+const txnStatusLabel = (t, s) => (TXN_STATUS_LABELS[s] ? t(TXN_STATUS_LABELS[s]) : String(s || '').replaceAll('_', ' '));
 
 function fmtOrderDate(iso) {
   if (!iso) return '—';
@@ -1159,10 +1173,30 @@ function cancelBlockedReason(policy, fulfillmentStatus) {
 
 // ISO 8601 duration (P7D, PT2H, P1W2DT3H) in milliseconds; null if invalid.
 function isoDurationMs(s) {
-  const m = /^P(?:(\d+(?:\.\d+)?)Y)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)W)?(?:(\d+(?:\.\d+)?)D)?(?:T(?:(\d+(?:\.\d+)?)H)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)S)?)?$/.exec(s || '');
+  const m = /^P([^T]*)(?:T(.*))?$/.exec(s || '');
   if (!m || s === 'P' || s === 'PT') return null;
-  const [y, mo, w, d, h, mi, se] = m.slice(1).map(v => Number(v || 0));
+  const date = durationFields(m[1], 'YMWD');
+  const time = durationFields(m[2] ?? '', 'HMS');
+  if (!date || !time) return null;
+  const [y, mo, w, d] = date, [h, mi, se] = time;
   return ((((y * 365 + mo * 30 + w * 7 + d) * 24 + h) * 60 + mi) * 60 + se) * 1000;
+}
+
+// One part of an ISO 8601 duration ("1Y2M", "3H30M"): numbers each followed
+// by one of `units`, in that order and at most once each. The values in
+// `units` order (0 for a unit not given), or null if the part is malformed.
+function durationFields(part, units) {
+  const values = Array.from(units, () => 0);
+  const field = /(\d+(?:\.\d+)?)([A-Z])/y;
+  let next = 0;
+  while (field.lastIndex < part.length) {
+    const f = field.exec(part);
+    const at = f ? units.indexOf(f[2], next) : -1;
+    if (at < 0) return null;
+    values[at] = Number(f[1]);
+    next = at + 1;
+  }
+  return values;
 }
 
 // Return eligibility under an item's offer policies.returns -- the BAP and
@@ -1270,7 +1304,7 @@ function parseContractDetail(contract) {
     items: (p.commitmentIds || []).map(id => commitments.find(c => c.id === id)?.resources?.[0]?.descriptor?.name
       || commitments.find(c => c.id === id)?.offer?.descriptor?.name || id),
   }));
-  if (returnPerformance && returnPerformance.status?.code) {
+  if (returnPerformance?.status?.code) {
     fulfillmentStatus = returnPerformance.status.code;
   }
 
@@ -1367,10 +1401,10 @@ function OrderItemsCard({ txnId, order, txnStatus, deliveredAt, onChanged }) {
         )}
       </div>
       <div className="divide-y divide-white/[0.04]">
-        {order.items.map((item, i) => {
+        {keyedRows(order.items, item => item.id).map(([key, item]) => {
           const q = Math.min(cancelQty[item.id] ?? 1, item.qty);
           return (
-            <div key={i} className={`px-4 py-2.5 ${item.cancelled ? 'opacity-60' : ''}`}>
+            <div key={key} className={`px-4 py-2.5 ${item.cancelled ? 'opacity-60' : ''}`}>
               <div className="flex items-center gap-3">
                 <div className="w-8 h-8 rounded-lg bg-slate-800 flex items-center justify-center shrink-0">
                   {item.cancelled ? <Ban className="w-3.5 h-3.5 text-rose-400" /> : <Package className="w-3.5 h-3.5 text-slate-500" />}
@@ -1464,14 +1498,17 @@ function OrderItemsCard({ txnId, order, txnStatus, deliveredAt, onChanged }) {
       )}
       {order.returns?.length > 0 && (
         <div className="px-4 py-2.5 border-t border-white/[0.06] space-y-1">
-          {order.returns.map(r => (
-            <div key={r.id} className="text-xs flex items-start justify-between gap-3">
-              <span className="text-slate-400">{t('Return')} · {r.items.join(', ') || r.id}</span>
-              <span className={r.code === 'Return_Approved' ? 'text-emerald-400' : r.code === 'Return_Rejected' ? 'text-rose-400 text-right' : 'text-amber-400'}>
-                {r.code === 'Return_Approved' ? t('Approved') : r.code === 'Return_Rejected' ? `${t('Rejected')}${r.reason ? ` — ${r.reason}` : ''}` : t('Requested…')}
-              </span>
-            </div>
-          ))}
+          {order.returns.map(r => {
+            const rejected = r.reason ? `${t('Rejected')} — ${r.reason}` : t('Rejected');
+            return (
+              <div key={r.id} className="text-xs flex items-start justify-between gap-3">
+                <span className="text-slate-400">{t('Return')} · {r.items.join(', ') || r.id}</span>
+                <span className={r.code === 'Return_Approved' ? 'text-emerald-400' : r.code === 'Return_Rejected' ? 'text-rose-400 text-right' : 'text-amber-400'}>
+                  {r.code === 'Return_Approved' ? t('Approved') : r.code === 'Return_Rejected' ? rejected : t('Requested…')}
+                </span>
+              </div>
+            );
+          })}
         </div>
       )}
       {(order.fees.length > 0 || order.refunds.length > 0) && (
@@ -1520,7 +1557,7 @@ function LiveOrderItems({ txnId, onStatus }) {
 }
 
 function OrderDetailPanel({ txnId, onBack }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const [detail, setDetail] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -1530,7 +1567,11 @@ function OrderDetailPanel({ txnId, onBack }) {
   useEffect(() => {
     if (reloadKey === 0) { setLoading(true); setError(null); }
     apiFetch(`/orders/${txnId}`)
-      .then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(e.error || t('Could not load the order'))))
+      .then(async r => {
+        if (r.ok) return r.json();
+        const e = await r.json();
+        throw e.error || t('Could not load the order');
+      })
       .then(d => { setDetail(d); setLoading(false); })
       .catch(e => { setError(String(e)); setLoading(false); });
   }, [txnId, reloadKey]);
@@ -1574,11 +1615,7 @@ function OrderDetailPanel({ txnId, onBack }) {
   // Fallback to top-level contract
   if (!bestContract) bestContract = parseContractDetail(detail.contract);
 
-  const fmt = (amount, cur) => {
-    if (amount == null) return '—';
-    try { return new Intl.NumberFormat('id-ID', { style: 'currency', currency: cur || 'IDR', maximumFractionDigits: 0 }).format(amount); }
-    catch { return `${cur || 'IDR'} ${amount}`; }
-  };
+  const fmt = fmtIDR;
 
   // Pay & Confirm an order left at INIT_RECEIVED (the seller's on_init terms
   // were received but checkout was never completed) -- same /confirm call as
@@ -1671,8 +1708,8 @@ function OrderDetailPanel({ txnId, onBack }) {
             <p className="text-[11px] font-bold uppercase tracking-widest text-slate-500">{t('Payment')}</p>
           </div>
           <div className="px-4 py-3 space-y-1.5">
-            {bestContract.breakup.map((b, i) => (
-              <div key={i} className="flex justify-between text-xs">
+            {keyedRows(bestContract.breakup, lineKey).map(([key, b]) => (
+              <div key={key} className="flex justify-between text-xs">
                 <span className="text-slate-400">{b.title}</span>
                 <span className={b.amount < 0 ? 'text-emerald-400' : 'text-slate-300'}>{fmt(b.amount, bestContract.currency)}</span>
               </div>
@@ -1714,7 +1751,7 @@ function OrderDetailPanel({ txnId, onBack }) {
             <p className="text-[11px] font-bold uppercase tracking-widest text-slate-500">{t('Order Timeline')}</p>
           </div>
           <div className="px-4 py-3 space-y-3">
-            {snaps.map((s, i) => {
+            {keyedRows(snaps, s => `${s.action}@${s.created_at}`).map(([key, s], i) => {
               const al = ACTION_LABELS[s.action] || { icon: '•', label: s.action, color: 'text-slate-500' };
               let displayLabel = ACTION_LABELS[s.action] ? t(al.label) : al.label;
               let displayIcon = al.icon;
@@ -1752,7 +1789,7 @@ function OrderDetailPanel({ txnId, onBack }) {
               }
               
               return (
-                <div key={i} className="flex items-start gap-3">
+                <div key={key} className="flex items-start gap-3">
                   <div className="flex flex-col items-center shrink-0">
                     <div className={`w-7 h-7 rounded-full flex items-center justify-center text-base bg-slate-800 border border-white/[0.07] ${displayColor}`}>
                       {displayIcon}
@@ -1854,7 +1891,7 @@ function PayloadPanel({ message: m }) {
   };
 
   return (
-    <div className="rounded-lg border border-white/[0.07] bg-slate-950/60 overflow-hidden" onClick={e => e.stopPropagation()}>
+    <div className="rounded-lg border border-white/[0.07] bg-slate-950/60 overflow-hidden" role="presentation" onClick={e => e.stopPropagation()}>
       <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 border-b border-white/[0.06] flex-wrap">
         <div className="flex gap-1">
           {tabs.map(x => (
@@ -1910,7 +1947,7 @@ function MessageLogPanel() {
       if (!silent) setLoading(false);
     }
   }, []);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]); // load reports its own errors
   useLive(() => load(true));
 
   const toggle = id => setOpen(prev => {
@@ -2040,7 +2077,7 @@ function OrderHistoryDrawer({ open, onClose }) {
   useLive(() => load(page, true), open && tab === 'orders' && !selectedId);
 
   useEffect(() => {
-    if (open) { load(1); setSelectedId(null); setTab('orders'); }
+    if (open) { void load(1); setSelectedId(null); setTab('orders'); } // load logs its own errors
   }, [open, load]);
 
   const totalPages = Math.ceil(total / limit);
@@ -2237,7 +2274,7 @@ const tourSteps = t => [
 ];
 
 export default function App() {
-  const { t, locale, chosen: langChosen } = useI18n();
+  const { t, chosen: langChosen } = useI18n();
   const steps = useMemo(() => tourSteps(t), [t]);
   const [catalog, setCatalog] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -2297,7 +2334,10 @@ export default function App() {
     if (params.toString()) path += `?${params.toString()}`;
 
     apiFetch(path, { signal: controller.signal })
-      .then(r => { if (!r.ok) throw new Error(`Status ${r.status}`); return r.json(); })
+      .then(r => {
+        if (!r.ok) throw new Error(`Status ${r.status}`);
+        return r.json();
+      })
       .then(data => {
         // /api/v1/discover now returns the catalog result directly, whether
         // DISCOVER_METHOD routed it via DiscoverSync (a direct call to
@@ -2377,7 +2417,7 @@ export default function App() {
     setCart(p => p.map(i => i.id === id ? { ...i, qty: i.qty + delta } : i).filter(i => i.qty > 0));
 
   const addToCart = p => setCart(prev => {
-    const ex = prev.find(i => i.id === p.id);
+    const ex = prev.some(i => i.id === p.id);
     return ex ? prev.map(i => i.id === p.id ? { ...i, qty: i.qty + 1 } : i) : [...prev, { ...p, qty: 1 }];
   });
 
@@ -2538,7 +2578,7 @@ export default function App() {
         ratingCategory: 'order',
         range: { min: 1, max: 5, value: rating },
       };
-      if (feedback && feedback.trim()) {
+      if (feedback?.trim()) {
         ratingInput.feedbackFormSubmission = { data: { comment: feedback.trim() } };
       }
       const r = await apiFetch(`/rate`, {
@@ -2796,7 +2836,7 @@ export default function App() {
         )}
 
         {visibleCatalog.length > 0 && catalogSections.map((section, sIdx) => (
-          <div key={sIdx} className={`rounded-3xl p-6 sm:p-8 border border-white/[0.05] bg-white/[0.02] ${sIdx > 0 ? "mt-8" : ""}`}>
+          <div key={section.title} className={`rounded-3xl p-6 sm:p-8 border border-white/[0.05] bg-white/[0.02] ${sIdx > 0 ? "mt-8" : ""}`}>
             {section.title && (
               <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-3">
                 <div className="p-2 rounded-xl bg-white/[0.04]">
@@ -2884,6 +2924,7 @@ export default function App() {
 
                           {inCart ? (
                             <div
+                              role="presentation"
                               onClick={e => e.stopPropagation()}
                               className="flex items-center gap-0 rounded-xl overflow-hidden border"
                               style={{ borderColor: 'rgba(0,184,230,0.3)', background: 'rgba(0,184,230,0.1)' }}

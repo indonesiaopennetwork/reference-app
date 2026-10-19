@@ -1,13 +1,13 @@
 import { useState, useEffect, useCallback, useMemo, Fragment } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  LayoutDashboard, ShoppingBag, Package, Radio, MessageSquare,
+  LayoutDashboard, ShoppingBag, Package, MessageSquare,
   ChevronRight, TrendingUp, Clock, CheckCircle2, AlertCircle,
   RefreshCw, X, ChevronLeft, ChevronRight as ChevronRightIcon,
-  Upload, Plus, Trash2, Eye, ArrowUpRight, Filter, Search,
-  Activity, Zap, Store, Calendar, Tag, BarChart2, Inbox,
+  Upload, Plus, Trash2, Eye, Search,
+  Store, Tag,
   ArrowRight, Circle, Star, Ticket, Ban, Wand2,
-  BookOpen, FolderOpen, Send, ArrowLeft, ExternalLink,
+  BookOpen, Send, ArrowLeft, ExternalLink,
   ChevronDown, Copy, Check, Scale, Pencil, Compass, Lock,
   PauseCircle, PlayCircle,
 } from 'lucide-react'
@@ -62,7 +62,7 @@ function useApi(path, deps = [], { live = false } = {}) {
     catch (e) { setError(e.message) }
     finally { setLoading(false) }
   }, [path, ...deps]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { load() }, [load])
+  useEffect(() => { load().catch(e => console.error(e)) }, [load])
 
   // Live pages refresh quietly (no spinner; a failed refresh keeps what is
   // shown) every LIVE_EVERY while the tab is visible, and when it comes back.
@@ -317,6 +317,13 @@ const TOUR_DONE_KEY = 'bpp.tourDone'
 
 function Sidebar({ active, onNav, open, onClose, onTour }) {
   const { t } = useI18n()
+  // Escape closes the mobile drawer, like a click on its backdrop.
+  useEffect(() => {
+    if (!open || !onClose) return
+    const onKey = e => { if (e.key === 'Escape') onClose() }
+    globalThis.addEventListener('keydown', onKey)
+    return () => globalThis.removeEventListener('keydown', onKey)
+  }, [open, onClose])
   const navContent = (
     <>
       {/* Logo */}
@@ -394,7 +401,7 @@ function Sidebar({ active, onNav, open, onClose, onTour }) {
       {/* Mobile drawer */}
       {open && (
         <>
-          <div className="fixed inset-0 z-40 bg-black/60 lg:hidden" onClick={onClose} />
+          <div role="presentation" className="fixed inset-0 z-40 bg-black/60 lg:hidden" onClick={onClose} />
           <aside className="fixed inset-y-0 left-0 z-50 flex flex-col w-72 border-r border-white/[0.06] lg:hidden"
             style={{ background: '#0a0e1a' }}>
             {navContent}
@@ -663,7 +670,7 @@ function OrderDetailDrawer({ order, onClose }) {
         method: 'PUT',
         body: JSON.stringify({ status })
       })
-      reload()
+      reload().catch(e => console.error(e))
     } catch (e) {
       alert(t('Failed to update status: {error}', { error: e.message }))
     } finally {
@@ -735,7 +742,7 @@ function OrderDetailDrawer({ order, onClose }) {
                               <div key={rp.id} className="text-xs flex items-start justify-between gap-3">
                                 <span className="text-slate-400 font-mono">{rp.id} · {(rp.commitmentIds || []).join(', ')}</span>
                                 <span className={`${color} text-right`}>
-                                  {t(code.replace(/_/g, ' '))}{rp.status?.shortDesc ? ` — ${rp.status.shortDesc}` : ''}
+                                  {t(code.replaceAll('_', ' '))}{rp.status?.shortDesc ? ` — ${rp.status.shortDesc}` : ''}
                                 </span>
                               </div>
                             )
@@ -811,7 +818,7 @@ function OrderDetailDrawer({ order, onClose }) {
                           const price = attrs?.price || attrs?.totalAmount
                           const currency = attrs?.currency || 'IDR'
                           return (
-                            <Card key={i} className="p-4">
+                            <Card key={c.id ?? i} className="p-4">
                               <div className="flex items-center justify-between mb-2">
                                 <span className="text-xs font-semibold text-slate-300">{c.status_code}</span>
                                 {price && (
@@ -1775,7 +1782,11 @@ function offerToForm(o) {
   const commission = ca.commission || {}, payout = pol.settlement || {}
   const base = (ca.breakup || []).find(b => b.type === 'BASE_PRICE')
   const tax = (ca.breakup || []).find(b => b.type === 'TAX')
-  const local = iso => { if (!iso) return ''; const d = new Date(iso); return isNaN(d) ? '' : new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16) }
+  const local = iso => {
+    if (!iso) return ''
+    const d = new Date(iso)
+    return Number.isNaN(d.getTime()) ? '' : new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
+  }
   const blank = EMPTY_OFFER()
   return {
     ...blank,
@@ -2098,7 +2109,7 @@ function PublishPage({ onNav }) {
                   <button onClick={() => setResOpen(s => ({ ...s, [`${i}_phys`]: !s[`${i}_phys`] }))}
                     className="mt-4 w-full flex items-center justify-between text-xs font-semibold text-slate-400 hover:text-slate-200 transition-colors pt-3 border-t border-white/[0.06]">
                     <span>🏷️ {t('Identity & Physical Attributes')}</span>
-                    <ChevronRightIcon size={13} className={`transition-transform ${resOpen[`${i}_phys`] ? 'rotate-90' : ''}`} />
+                    <ChevronRightIcon size={13} className={resOpen[`${i}_phys`] ? 'transition-transform rotate-90' : 'transition-transform'} />
                   </button>
                   {resOpen[`${i}_phys`] && (
                     <div className="mt-3 space-y-4">
@@ -2165,7 +2176,7 @@ function PublishPage({ onNav }) {
                   <button onClick={() => setResOpen(s => ({ ...s, [`${i}_pkg`]: !s[`${i}_pkg`] }))}
                     className="mt-4 w-full flex items-center justify-between text-xs font-semibold text-slate-400 hover:text-slate-200 transition-colors pt-3 border-t border-white/[0.06]">
                     <span>📦 {t('Packaged Goods Declaration')}</span>
-                    <ChevronRightIcon size={13} className={`transition-transform ${resOpen[`${i}_pkg`] ? 'rotate-90' : ''}`} />
+                    <ChevronRightIcon size={13} className={resOpen[`${i}_pkg`] ? 'transition-transform rotate-90' : 'transition-transform'} />
                   </button>
                   {resOpen[`${i}_pkg`] && (
                     <div className="mt-3 space-y-4">
@@ -2260,7 +2271,7 @@ function PublishPage({ onNav }) {
                   <button onClick={() => setOffOpen(s => ({ ...s, [`${i}_pol`]: !s[`${i}_pol`] }))}
                     className="mt-4 w-full flex items-center justify-between text-xs font-semibold text-slate-400 hover:text-slate-200 transition-colors pt-3 border-t border-white/[0.06]">
                     <span>📋 {t('Policies (Returns · Cancellation · Replacement)')}</span>
-                    <ChevronRightIcon size={13} className={`transition-transform ${offOpen[`${i}_pol`] ? 'rotate-90' : ''}`} />
+                    <ChevronRightIcon size={13} className={offOpen[`${i}_pol`] ? 'transition-transform rotate-90' : 'transition-transform'} />
                   </button>
                   {offOpen[`${i}_pol`] && (
                     <div className="mt-3 space-y-4">
@@ -2354,7 +2365,7 @@ function PublishPage({ onNav }) {
                   <button onClick={() => setOffOpen(s => ({ ...s, [`${i}_svc`]: !s[`${i}_svc`] }))}
                     className="mt-4 w-full flex items-center justify-between text-xs font-semibold text-slate-400 hover:text-slate-200 transition-colors pt-3 border-t border-white/[0.06]">
                     <span>🚚 {t('Payment & Serviceability')}</span>
-                    <ChevronRightIcon size={13} className={`transition-transform ${offOpen[`${i}_svc`] ? 'rotate-90' : ''}`} />
+                    <ChevronRightIcon size={13} className={offOpen[`${i}_svc`] ? 'transition-transform rotate-90' : 'transition-transform'} />
                   </button>
                   {offOpen[`${i}_svc`] && (
                     <div className="mt-3 space-y-4">
@@ -2795,7 +2806,7 @@ function PayloadPanel({ message: m }) {
   }
 
   return (
-    <div className="rounded-xl border border-white/[0.07] bg-slate-950/60 overflow-hidden" onClick={e => e.stopPropagation()}>
+    <div className="rounded-xl border border-white/[0.07] bg-slate-950/60 overflow-hidden" role="presentation" onClick={e => e.stopPropagation()}>
       <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-white/[0.06] flex-wrap">
         <div className="flex gap-1">
           {tabs.map(x => (
@@ -3036,7 +3047,7 @@ function ReconciliationPage() {
       try { msg = JSON.parse(e.message).error || msg } catch { }
       setNotice({ ok: false, text: msg })
     } finally {
-      setSending(null); reload()
+      setSending(null); reload().catch(err => console.error(err))
     }
   }
 
@@ -3643,7 +3654,8 @@ function CatalogDetailPage({ onNav, catalogId }) {
   const offersByResourceId = {}
   offers.forEach(o => {
     (o.resourceIds || []).forEach(rid => {
-      (offersByResourceId[rid] ||= []).push(o)
+      offersByResourceId[rid] ||= []
+      offersByResourceId[rid].push(o)
     })
   })
 
@@ -3663,7 +3675,7 @@ function CatalogDetailPage({ onNav, catalogId }) {
     setPublishing(true)
     try {
       await apiFetch(`/catalogs/${catalogId}/publish`, { method: 'POST' })
-      reload()
+      reload().catch(err => console.error(err))
       alert(t('Published successfully!'))
     } catch (e) {
       alert(t('Publish failed: {error}', { error: e.message }))
@@ -3684,7 +3696,7 @@ function CatalogDetailPage({ onNav, catalogId }) {
         method: 'PATCH',
         body: JSON.stringify({ isActive: next }),
       })
-      reload()
+      reload().catch(err => console.error(err))
     } catch (e) {
       alert(t('Update failed: {error}', { error: e.message }))
     } finally {
@@ -3696,7 +3708,7 @@ function CatalogDetailPage({ onNav, catalogId }) {
     if (!window.confirm(t('Remove this offer? This cannot be undone.'))) return
     try {
       await apiFetch(`/catalogs/${catalogId}/offers/${oid}`, { method: 'DELETE' })
-      reload()
+      reload().catch(err => console.error(err))
     } catch (e) {
       alert(t('Remove failed: {error}', { error: e.message }))
     }
@@ -4195,7 +4207,8 @@ function AddProductPage({ onNav, catalogId, editResourceId }) {
     const uid = id => `${id}-${Date.now().toString(36)}`
     const samples = CRC_AUTOFILL[crcCode]
     if (samples?.length) {
-      const seed = samples[(_crcFillIdx[crcCode] = (_crcFillIdx[crcCode] ?? -1) + 1) % samples.length]
+      _crcFillIdx[crcCode] = (_crcFillIdx[crcCode] ?? -1) + 1
+      const seed = samples[_crcFillIdx[crcCode] % samples.length]
       setRes({ ...EMPTY_RESOURCE(), ...seed.res, id: uid(seed.res.id) })
       setCrcValues(structuredClone(seed.crc || {}))
       setCustomRows(structuredClone(seed.custom || []))
@@ -4730,8 +4743,8 @@ export default function App() {
         {/* Mobile top bar */}
         <div className="lg:hidden sticky top-0 z-30 flex items-center gap-3 px-4 py-3 border-b border-white/[0.06]"
           style={{ background: '#0a0e1a' }}>
-          <button onClick={() => setSidebarOpen(true)} className="p-2 rounded-lg text-slate-400 hover:text-white transition-colors">
-            <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+          <button onClick={() => setSidebarOpen(true)} aria-label={t('Open menu')} className="p-2 rounded-lg text-slate-400 hover:text-white transition-colors">
+            <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
               <path strokeLinecap="round" d="M4 6h16M4 12h16M4 18h16" />
             </svg>
           </button>

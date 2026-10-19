@@ -15,9 +15,9 @@ import (
 	"github.com/remiges-tech/logharbour/logharbour"
 
 	dbsqlc "github.com/ion/winroom/bpp/db/sqlc"
-	"github.com/ion/winroom/bpp/internal/offerterms"
 	"github.com/ion/winroom/bpp/internal/config"
 	"github.com/ion/winroom/bpp/internal/httpclient"
+	"github.com/ion/winroom/bpp/internal/offerterms"
 )
 
 // PublishService saves catalog data to the database, forwards it to the CDS,

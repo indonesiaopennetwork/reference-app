@@ -49,6 +49,9 @@ import (
 const (
 	Context = "https://schema.ion.id/release1/schema/common/Settlement/v1/context.jsonld"
 	Type    = "ion:IONSettlementReconciliation"
+
+	// contextKey is the JSON-LD @context key of the settlement object.
+	contextKey = "@context"
 )
 
 // legacyContexts are earlier @context URLs of the settlement object, no
@@ -63,8 +66,8 @@ var legacyContexts = map[string]bool{
 // validates when it is sent again. It returns the contract.
 func CurrentContext(contract map[string]any) map[string]any {
 	for _, raw := range slice(contract["settlements"]) {
-		if a := asMap(asMap(raw)["settlementAttributes"]); a != nil && legacyContexts[str(a["@context"])] {
-			a["@context"] = Context
+		if a := asMap(asMap(raw)["settlementAttributes"]); a != nil && legacyContexts[str(a[contextKey])] {
+			a[contextKey] = Context
 		}
 	}
 	return contract
@@ -318,7 +321,7 @@ func Normalize(contract map[string]any) map[string]any {
 		CurrentContext(contract)
 		return a
 	}
-	a["@context"], a["@type"] = Context, Type
+	a[contextKey], a["@type"] = Context, Type
 	ca := asMap(contract["contractAttributes"])
 	for _, k := range termFields {
 		if a[k] == nil && ca[k] != nil {
@@ -439,8 +442,8 @@ func Compute(contract map[string]any, recomputeFee bool) Amounts {
 			a.Commission = FeeAmount(fee, ItemTotal(contract), a.Order)
 		}
 	}
-	if max := a.Order - a.Refund - a.Withholding; a.Commission > max {
-		a.Commission = math.Max(0, max)
+	if payable := a.Order - a.Refund - a.Withholding; a.Commission > payable {
+		a.Commission = math.Max(0, payable)
 	}
 	a.Order, a.Refund, a.Withholding = round2(a.Order), round2(a.Refund), round2(a.Withholding)
 	a.Commission, a.RefundedAfterPayout = round2(a.Commission), round2(a.RefundedAfterPayout)

@@ -6,8 +6,11 @@
 export function decodeJwtPayload(token) {
   try {
     const payload = token.split('.')[1]
-    const json = atob(payload.replace(/-/g, '+').replace(/_/g, '/'))
-    return JSON.parse(decodeURIComponent(escape(json)))
+    const binary = atob(payload.replaceAll('-', '+').replaceAll('_', '/'))
+    const bytes = Uint8Array.from(binary, (c) => c.codePointAt(0))
+    // fatal: malformed UTF-8 throws (and so returns null), as before.
+    const json = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+    return JSON.parse(json)
   } catch {
     return null
   }

@@ -15,7 +15,7 @@ export const crcByCode = code => TRADE_CRCS.find(c => c.code === code) || null
 
 // "HALAL_COSMETICS" -> "Halal cosmetics"
 const optionLabel = o => {
-  const s = String(o).replace(/_/g, ' ').toLowerCase()
+  const s = String(o).replaceAll('_', ' ').toLowerCase()
   return s.charAt(0).toUpperCase() + s.slice(1)
 }
 
@@ -303,7 +303,7 @@ export function CrcAttributes({ code, values, onChange, labelCls, inputCls, t })
           <p className="text-xs font-semibold text-slate-300 mb-1">{t(s.label)}</p>
           {s.help && <p className="text-[11px] text-slate-500 mb-3 leading-relaxed">{s.help}</p>}
           <Fields fields={s.fields} value={values?.[s.key]} labelCls={labelCls} inputCls={inputCls} t={t}
-            onChange={v => onChange({ ...(values || {}), [s.key]: v })} />
+            onChange={v => onChange({ ...values, [s.key]: v })} />
         </div>
       ))}
     </div>

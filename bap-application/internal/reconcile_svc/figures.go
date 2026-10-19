@@ -32,10 +32,10 @@ type Terms struct {
 // Commission to the BAP, and returns Refund to the buyer:
 // OrderAmount = NetPayable + Commission + Withholding + Refund.
 type Figures struct {
-	SettlementID    string         `json:"settlement_id"`
-	ConsiderationID string         `json:"consideration_id"`
-	CollectedBy     string         `json:"collected_by,omitempty"`
-	Currency        string         `json:"currency"`
+	SettlementID    string `json:"settlement_id"`
+	ConsiderationID string `json:"consideration_id"`
+	CollectedBy     string `json:"collected_by,omitempty"`
+	Currency        string `json:"currency"`
 	// Basis / Window are the payout term the contract falls due by: of its
 	// Terms, the one giving the latest due date (see assess).
 	Basis  string `json:"settlement_basis,omitempty"`

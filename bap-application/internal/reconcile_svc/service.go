@@ -28,8 +28,8 @@ import (
 	"github.com/remiges-tech/logharbour/logharbour"
 
 	dbsqlc "github.com/ion/winroom/bap/db/sqlc"
-	"github.com/ion/winroom/bap/internal/settlement"
 	"github.com/ion/winroom/bap/internal/config"
+	"github.com/ion/winroom/bap/internal/settlement"
 )
 
 const (
@@ -154,7 +154,8 @@ func (s *Service) Process(ctx context.Context, raw []byte) error {
 	m := req.Message
 	batchTxn, _ := uuid.Parse(req.Context.TransactionID)
 	msgID, _ := uuid.Parse(req.Context.MessageID)
-	s.logMessage(ctx, batchTxn, msgID, actionReconcile, dbsqlc.MessageDirectionINBOUND, "/api/webhook/reconcile", req.Context, raw, nil, nil)
+	s.logMessage(ctx, messageLog{txn: batchTxn, msgID: msgID, action: actionReconcile, dir: dbsqlc.MessageDirectionINBOUND,
+		url: "/api/webhook/reconcile", context: req.Context, payload: raw})
 
 	replies := make([]any, 0, len(m.Contracts))
 	verdicts := make([]Verdict, 0, len(m.Contracts))
@@ -247,7 +248,8 @@ func (s *Service) Process(ctx context.Context, raw []byte) error {
 	}
 
 	respBody, sendErr := s.post(ctx, "on_reconcile", body)
-	s.logMessage(ctx, batchTxn, msgID, actionOnReconcile, dbsqlc.MessageDirectionOUTBOUND, s.cfg.BapCallerURL+"/on_reconcile", req.Context, body, respBody, sendErr)
+	s.logMessage(ctx, messageLog{txn: batchTxn, msgID: msgID, action: actionOnReconcile, dir: dbsqlc.MessageDirectionOUTBOUND,
+		url: s.cfg.BapCallerURL + "/on_reconcile", context: req.Context, payload: body, response: respBody, err: sendErr})
 	if sendErr != nil {
 		e := sendErr.Error()
 		_, _ = s.pool.Exec(ctx, `UPDATE reconciliations SET error_message = $2, updated_at = NOW() WHERE id = $1`, m.ReconciliationID, e)
@@ -535,7 +537,8 @@ func (s *Service) Send(ctx context.Context, bppID string, selected []string) (*B
 	}
 
 	respBody, sendErr := s.post(ctx, "reconcile", body)
-	s.logMessage(ctx, batchTxn, msgID, actionReconcile, dbsqlc.MessageDirectionOUTBOUND, s.cfg.BapCallerURL+"/reconcile", rc, body, respBody, sendErr)
+	s.logMessage(ctx, messageLog{txn: batchTxn, msgID: msgID, action: actionReconcile, dir: dbsqlc.MessageDirectionOUTBOUND,
+		url: s.cfg.BapCallerURL + "/reconcile", context: rc, payload: body, response: respBody, err: sendErr})
 	status := "SENT"
 	var errMsg *string
 	if sendErr == nil {
@@ -593,7 +596,8 @@ func (s *Service) ApplyOnReconcile(ctx context.Context, raw []byte) error {
 	m := req.Message
 	batchTxn, _ := uuid.Parse(req.Context.TransactionID)
 	msgID, _ := uuid.Parse(req.Context.MessageID)
-	defer s.logMessage(ctx, batchTxn, msgID, actionOnReconcile, dbsqlc.MessageDirectionINBOUND, "/api/webhook/on_reconcile", req.Context, raw, nil, nil)
+	defer s.logMessage(ctx, messageLog{txn: batchTxn, msgID: msgID, action: actionOnReconcile, dir: dbsqlc.MessageDirectionINBOUND,
+		url: "/api/webhook/on_reconcile", context: req.Context, payload: raw})
 
 	verdicts := make([]Verdict, 0, len(m.Contracts))
 	agreed := 0
@@ -817,32 +821,45 @@ func (s *Service) post(ctx context.Context, action string, body []byte) ([]byte,
 	return respBody, nil
 }
 
-func (s *Service) logMessage(ctx context.Context, txn, msgID uuid.UUID, action dbsqlc.BecknAction, dir dbsqlc.MessageDirection,
-	url string, c Context, payload, response []byte, callErr error) {
+// messageLog is one reconciliation message for the message log: the batch
+// transaction, the message, where it went or came from, its context, what
+// was sent or received, the answer, and the error of a failed send.
+type messageLog struct {
+	txn, msgID        uuid.UUID
+	action            dbsqlc.BecknAction
+	dir               dbsqlc.MessageDirection
+	url               string
+	context           Context
+	payload, response []byte
+	err               error
+}
+
+func (s *Service) logMessage(ctx context.Context, e messageLog) {
 	ack := dbsqlc.NullAckStatus{AckStatus: dbsqlc.AckStatusACK, Valid: true}
 	var errMsg *string
-	if callErr != nil {
+	if e.err != nil {
 		ack = dbsqlc.NullAckStatus{AckStatus: dbsqlc.AckStatusNACK, Valid: true}
-		e := callErr.Error()
-		errMsg = &e
+		msg := e.err.Error()
+		errMsg = &msg
 	}
 	var resp json.RawMessage
-	if len(response) > 0 && json.Valid(response) {
-		resp = response
+	if len(e.response) > 0 && json.Valid(e.response) {
+		resp = e.response
 	}
+	c := e.context
 	if err := dbsqlc.New(s.pool).InsertMessageLog(ctx, dbsqlc.InsertMessageLogParams{
-		TransactionID:   pgtype.UUID{Bytes: txn, Valid: txn != uuid.Nil},
-		MessageID:       msgID,
-		Action:          action,
-		Direction:       dir,
-		Url:             &url,
+		TransactionID:   pgtype.UUID{Bytes: e.txn, Valid: e.txn != uuid.Nil},
+		MessageID:       e.msgID,
+		Action:          e.action,
+		Direction:       e.dir,
+		Url:             &e.url,
 		BapID:           &c.BapID,
 		BapUri:          &c.BapURI,
 		BppID:           &c.BppID,
 		BppUri:          &c.BppURI,
 		NetworkID:       &c.NetworkID,
 		AckStatus:       ack,
-		RequestPayload:  payload,
+		RequestPayload:  e.payload,
 		ResponsePayload: resp,
 		ErrorMessage:    errMsg,
 	}); err != nil {

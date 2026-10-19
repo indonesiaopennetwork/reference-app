@@ -219,7 +219,9 @@ func buildVerifier(cfg config.Config, logger *logharbour.Logger) *signing.Verifi
 // see CONTEXT.md D19.
 func buildCatalogStore(cfg config.Config, logger *logharbour.Logger) (service.CatalogStore, func()) {
 	if len(cfg.CatalogIndexURLs) == 0 {
-		return service.EmbeddedCatalogStore{}, func() {}
+		return service.EmbeddedCatalogStore{}, func() {
+			// The embedded store has no background polling to stop.
+		}
 	}
 
 	logger.LogActivity("catalog index urls configured, crawling for real catalog data", map[string]any{

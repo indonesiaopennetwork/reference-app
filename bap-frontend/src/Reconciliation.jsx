@@ -14,7 +14,12 @@ import { useLive } from './live.js';
 
 const rupiah = n => (n == null ? '—' : `Rp ${Number(n).toLocaleString('id-ID')}`);
 const fmtWhen = ts => (ts ? new Date(ts).toLocaleString(localeNow(), { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—');
-const parse = v => { if (typeof v !== 'string') return v; try { return JSON.parse(v); } catch { return v; } };
+const parse = v => {
+  if (typeof v !== 'string') return v;
+  try { return JSON.parse(v); } catch { return v; }
+};
+// A contract's dispute as "CODE: description" (just the code without one).
+const disputeText = d => (d.description ? `${d.code}: ${d.description}` : `${d.code}`);
 
 const STATUS = {
   AGREED: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
@@ -133,7 +138,7 @@ function BatchRow({ b }) {
                       <td className="px-3 py-2"><Accord accord={v.accord} /></td>
                       <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap text-slate-200">{rupiah(v.netPayable)}</td>
                       <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap text-slate-200">{rupiah(v.commission)}</td>
-                      <td className="px-3 py-2 text-slate-400">{v.dispute ? `${v.dispute.code}${v.dispute.description ? `: ${v.dispute.description}` : ''}` : '—'}</td>
+                      <td className="px-3 py-2 text-slate-400">{v.dispute ? disputeText(v.dispute) : '—'}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -347,11 +352,11 @@ export default function Reconciliation() {
       setError(e.message);
     } finally {
       setSendingTo(null);
-      load();
+      void load(); // load reports its own errors
     }
   }, [load, t]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
   useLive(() => load(true));
 
   const allBpps = data?.bpps || [];

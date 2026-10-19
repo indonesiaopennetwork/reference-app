@@ -14,6 +14,9 @@ import (
 	"time"
 )
 
+// ldContext is the JSON-LD @context key of the attribute objects built here.
+const ldContext = "@context"
+
 func main() {
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage of %s:\n", os.Args[0])
@@ -56,7 +59,7 @@ func main() {
 
 	reader := csv.NewReader(file)
 	reader.Comma = '|'
-	
+
 	// Read header
 	headers, err := reader.Read()
 	if err != nil {
@@ -97,7 +100,7 @@ func main() {
 		offerID := getValue("offer_id")
 		nameBahasa := getValue("name_bahasa")
 		nameEnglish := getValue("name_english")
-		
+
 		fullName := nameBahasa
 		if nameEnglish != "" && !strings.Contains(nameBahasa, nameEnglish) {
 			fullName = fmt.Sprintf("%s (%s)", nameBahasa, nameEnglish)
@@ -116,8 +119,8 @@ func main() {
 				"longDesc":  getValue("long_desc"),
 			},
 			"resourceAttributes": map[string]any{
-				"@type":    "ion:IONTradeResource",
-				"@context": "https://schema.ion.id/release1/schema/extension/trade/TradeResource/v1/context.jsonld",
+				"@type":   "ion:IONTradeResource",
+				ldContext: "https://schema.ion.id/release1/schema/extension/trade/TradeResource/v1/context.jsonld",
 				"identity": map[string]any{
 					"brand":         getValue("brand"),
 					"originCountry": getValue("origin_country"),
@@ -135,7 +138,13 @@ func main() {
 				},
 				"packagedGoodsDeclaration": map[string]any{
 					"netQuantity": map[string]any{
-						"unitCode":     func() string { if val := getValue("net_qty_unit"); val != "" { return val } else { return "G" } }(),
+						"unitCode": func() string {
+							if val := getValue("net_qty_unit"); val != "" {
+								return val
+							} else {
+								return "G"
+							}
+						}(),
 						"unitQuantity": netQty,
 					},
 					"commonOrGenericName": getValue("common_name"),
@@ -198,7 +207,7 @@ func main() {
 					},
 					"considerationAttributes": map[string]any{
 						"@type":       "ion:IONTradeConsideration",
-						"@context":    "https://schema.ion.id/release1/schema/extension/trade/TradeConsideration/v1/context.jsonld",
+						ldContext:     "https://schema.ion.id/release1/schema/extension/trade/TradeConsideration/v1/context.jsonld",
 						"currency":    currency,
 						"totalAmount": price,
 						"breakup": []map[string]any{
@@ -217,8 +226,8 @@ func main() {
 				"endDate":   endDate,
 			},
 			"offerAttributes": map[string]any{
-				"@type":    "ion:IONTradeOffer",
-				"@context": "https://schema.ion.id/release1/schema/extension/trade/TradeOffer/v1/context.jsonld",
+				"@type":   "ion:IONTradeOffer",
+				ldContext: "https://schema.ion.id/release1/schema/extension/trade/TradeOffer/v1/context.jsonld",
 				"policies": map[string]any{
 					"returns": map[string]any{
 						"allowed": false,

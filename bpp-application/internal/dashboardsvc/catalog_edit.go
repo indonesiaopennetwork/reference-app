@@ -10,9 +10,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/ion/winroom/bpp/internal/offerterms"
 	"github.com/ion/winroom/bpp/internal/auth"
 	"github.com/ion/winroom/bpp/internal/catalog"
+	"github.com/ion/winroom/bpp/internal/offerterms"
 )
 
 // Editing a catalog's products (resources) and offers. Each handler loads or
