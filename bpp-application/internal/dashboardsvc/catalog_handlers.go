@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	dbsqlc "github.com/ion/winroom/bpp/db/sqlc"
+	"github.com/ion/winroom/bpp/internal/offerterms"
 	"github.com/ion/winroom/bpp/internal/auth"
 	"github.com/ion/winroom/bpp/internal/catalog"
 	"github.com/ion/winroom/bpp/internal/httpclient"
@@ -582,7 +583,9 @@ func (h *Handler) insertOffer(ctx context.Context, q *dbsqlc.Queries, catalogID,
 		offerProviderID = strPtr(providerID)
 	}
 
-	// Insert offer.
+	// Insert offer, with this seller's default terms where it has none.
+	d := offerterms.FromConfig(h.cfg)
+	offer.OfferAttributes = offerterms.FillAttributes(offer.OfferAttributes, d)
 	oAttrsCtx, oAttrsType := extractContextType(offer.OfferAttributes)
 	var validityStart, validityEnd pgtype.Timestamptz
 	if offer.Validity != nil {
@@ -609,6 +612,7 @@ func (h *Handler) insertOffer(ctx context.Context, q *dbsqlc.Queries, catalogID,
 
 	// Insert considerations.
 	for _, consid := range offer.Considerations {
+		consid.ConsiderationAttributes = offerterms.FillConsideration(consid.ConsiderationAttributes, d)
 		cAttrsCtx, cAttrsType := extractContextType(consid.ConsiderationAttributes)
 		if err := q.InsertOfferConsideration(ctx, dbsqlc.InsertOfferConsiderationParams{
 			OfferID:                        offer.ID,
@@ -766,6 +770,7 @@ func (h *Handler) HandlePublishCatalog(c *gin.Context) {
 			&rids, &o.OfferAttributes, &vs, &ve, &provName, &provID); err != nil {
 			continue
 		}
+		o.OfferAttributes = offerterms.FillAttributes(o.OfferAttributes, offerterms.FromConfig(h.cfg))
 		o.ResourceIDs = rids
 		if provID != "" {
 			o.Provider = &catalog.Provider{
@@ -803,7 +808,7 @@ func (h *Handler) HandlePublishCatalog(c *gin.Context) {
 				ro.offer.Considerations = append(ro.offer.Considerations, catalog.Consideration{
 					ID:                      considID,
 					Status:                  catalog.Status{Code: statusCode, Name: statusName},
-					ConsiderationAttributes: attrs,
+					ConsiderationAttributes: offerterms.FillConsideration(attrs, offerterms.FromConfig(h.cfg)),
 				})
 			}
 		}
@@ -1251,6 +1256,8 @@ func (h *Handler) HandleAddOffer(c *gin.Context) {
 		offerProviderID = strPtr(providerID)
 	}
 
+	d := offerterms.FromConfig(h.cfg)
+	req.OfferAttributes = offerterms.FillAttributes(req.OfferAttributes, d)
 	oAttrsCtx, oAttrsType := extractContextType(req.OfferAttributes)
 	var validityStart, validityEnd pgtype.Timestamptz
 	if req.Validity != nil {
@@ -1278,6 +1285,7 @@ func (h *Handler) HandleAddOffer(c *gin.Context) {
 	}
 
 	for _, consid := range req.Considerations {
+		consid.ConsiderationAttributes = offerterms.FillConsideration(consid.ConsiderationAttributes, d)
 		cAttrsCtx, cAttrsType := extractContextType(consid.ConsiderationAttributes)
 		if err := qt.InsertOfferConsideration(ctx, dbsqlc.InsertOfferConsiderationParams{
 			OfferID:                        req.ID,

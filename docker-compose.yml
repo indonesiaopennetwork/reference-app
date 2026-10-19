@@ -467,10 +467,13 @@ services:
       BPP_CALLER_URL: http://onix-bpp:8082/bpp/caller
       CDS_PUBLISH_URL: http://onix-catalog-publish:8085/catalog/publish
 
-      # Seller payout terms set in on_init, and this BPP's payout account
-      # (see .env.example).
+      # Default settlement terms for offers published without their own, and
+      # this BPP's payout account (see .env.example).
       SETTLEMENT_BASIS: ${SETTLEMENT_BASIS:-AFTER_DELIVERY}
       SETTLEMENT_WINDOW: ${SETTLEMENT_WINDOW:-P1D}
+      COMMISSION_TYPE: ${COMMISSION_TYPE:-PERCENT}
+      COMMISSION_VALUE: ${COMMISSION_VALUE:-3}
+      COMMISSION_APPLIES_TO: ${COMMISSION_APPLIES_TO:-ITEM_TOTAL}
       SETTLEMENT_BANK_CODE: ${BPP_SETTLEMENT_BANK_CODE:-BCA}
       SETTLEMENT_ACCOUNT_NUMBER: ${BPP_SETTLEMENT_ACCOUNT_NUMBER:-8730000000001}
       SETTLEMENT_ACCOUNT_NAME: ${BPP_SETTLEMENT_ACCOUNT_NAME:-}
@@ -539,11 +542,8 @@ services:
       # ADAPTER_URL is the ONIX BAP adapter the BAP actually POSTs to.
       ADAPTER_URL: http://onix-bap:8081/bap/caller
 
-      # Finder fee proposed in init, and this BAP's payout account for it
+      # This BAP's payout account for the commission sellers pay it
       # (see .env.example).
-      FINDER_FEE_TYPE: ${FINDER_FEE_TYPE:-PERCENT}
-      FINDER_FEE_VALUE: ${FINDER_FEE_VALUE:-3}
-      FINDER_FEE_APPLIES_TO: ${FINDER_FEE_APPLIES_TO:-ITEM_TOTAL}
       SETTLEMENT_BANK_CODE: ${BAP_SETTLEMENT_BANK_CODE:-MANDIRI}
       SETTLEMENT_ACCOUNT_NUMBER: ${BAP_SETTLEMENT_ACCOUNT_NUMBER:-1370000000001}
       SETTLEMENT_ACCOUNT_NAME: ${BAP_SETTLEMENT_ACCOUNT_NAME:-}

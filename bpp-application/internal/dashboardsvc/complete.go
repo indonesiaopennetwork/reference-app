@@ -16,18 +16,25 @@ import (
 // passed: at delivery for AFTER_DELIVERY, and for AFTER_SHIPMENT and
 // ON_CONFIRMATION too (shipment isn't recorded on its own, and an order isn't
 // complete before it arrives); for AFTER_RETURN_WINDOW once the longest
-// return window after delivery has closed. It can still be returned while
-// COMPLETE (see cancellation.Execute).
+// return window after delivery has closed. With several offers' payout terms
+// (see settlement.PayoutTerms), the latest of these applies. It can still be
+// returned while COMPLETE (see cancellation.Execute).
 
 // completeAt is when a contract delivered at deliveredAt becomes COMPLETE.
 // defaultBasis applies when the contract states none.
 func completeAt(contract map[string]any, defaultBasis string, deliveredAt time.Time) time.Time {
-	basis, _, _ := settlement.Terms(contract)
-	if basis == "" {
-		basis = defaultBasis
+	terms := settlement.PayoutTerms(contract)
+	if len(terms) == 0 {
+		terms = []settlement.Term{{Basis: defaultBasis}}
 	}
-	if config.NormalizeSettlementBasis(basis) == "AFTER_RETURN_WINDOW" {
-		return deliveredAt.Add(cancellation.LongestReturnWindow(contract))
+	for _, t := range terms {
+		basis := t.Basis
+		if basis == "" {
+			basis = defaultBasis
+		}
+		if config.NormalizeSettlementBasis(basis) == "AFTER_RETURN_WINDOW" {
+			return deliveredAt.Add(cancellation.LongestReturnWindow(contract))
+		}
 	}
 	return deliveredAt
 }

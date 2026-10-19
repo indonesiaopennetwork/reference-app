@@ -28,6 +28,7 @@ import (
 	"github.com/remiges-tech/logharbour/logharbour"
 
 	dbsqlc "github.com/ion/winroom/bap/db/sqlc"
+	"github.com/ion/winroom/bap/internal/settlement"
 	"github.com/ion/winroom/bap/internal/config"
 )
 
@@ -409,33 +410,53 @@ func assess(d *DueContract, deliveredAt *time.Time, snapAt, now time.Time) bool 
 		return false
 	}
 	d.Figures = f
-	var basisAt *time.Time
-	paidAt, paidErr := time.Parse(time.RFC3339, str(pa["paidAt"]))
+	// When each payout term falls due; the contract falls due at the latest.
+	var paid *time.Time
+	if paidAt, err := time.Parse(time.RFC3339, str(pa["paidAt"])); err == nil {
+		paid = &paidAt
+	}
+	cancelled := str(asMap(d.own.contract["status"])["code"]) == "CANCELLED" || d.Status == "CANCELLED"
+	for _, t := range f.Terms {
+		event, due, ok := termDue(t, paid, deliveredAt, cancelled, snapAt)
+		if !ok {
+			// A term whose due date isn't known yet.
+			f.Basis, f.Window = t.Basis, t.Window
+			d.BasisEvent, d.DueAt, d.Due = event, nil, false
+			return true
+		}
+		if d.DueAt == nil || due.After(*d.DueAt) {
+			f.Basis, f.Window = t.Basis, t.Window
+			d.BasisEvent, d.DueAt = event, &due
+		}
+	}
+	d.Due = d.DueAt != nil && !now.Before(*d.DueAt)
+	return true
+}
+
+// termDue is when a payout term falls due: what starts its clock and the due
+// time; ok is false while that isn't known -- the event hasn't happened, or
+// (AFTER_RETURN_WINDOW) this BAP doesn't track the seller's return windows
+// and leaves the contract to the seller to reconcile.
+func termDue(t settlement.Term, paidAt, deliveredAt *time.Time, cancelled bool, snapAt time.Time) (event string, due time.Time, ok bool) {
+	var at *time.Time
 	switch {
-	case f.Basis == "ON_CONFIRMATION" && paidErr == nil:
-		d.BasisEvent, basisAt = "confirmed", &paidAt
+	case t.Basis == "ON_CONFIRMATION" && paidAt != nil:
+		event, at = "confirmed", paidAt
 	case deliveredAt != nil:
-		d.BasisEvent, basisAt = "delivered", deliveredAt
-	case str(asMap(d.own.contract["status"])["code"]) == "CANCELLED" || d.Status == "CANCELLED":
-		d.BasisEvent, basisAt = "cancelled", &snapAt
+		if t.Basis == "AFTER_RETURN_WINDOW" {
+			return "awaiting return window", time.Time{}, false
+		}
+		event, at = "delivered", deliveredAt
+	case cancelled:
+		event, at = "cancelled", &snapAt
 	default:
-		d.BasisEvent = "awaiting delivery"
-		return true
+		return "awaiting delivery", time.Time{}, false
 	}
-	if f.Basis == "AFTER_RETURN_WINDOW" && d.BasisEvent == "delivered" {
-		// This BAP doesn't track the seller's return windows; it leaves
-		// these contracts to the seller to reconcile.
-		d.BasisEvent = "awaiting return window"
-		return true
-	}
-	window, err := parseISODuration(f.Window)
+	window, err := parseISODuration(t.Window)
 	if err != nil {
 		window = 0
 	}
-	due := basisAt.Add(window)
-	d.DueAt = &due
-	d.Due = !now.Before(due)
-	return true
+	return event, at.Add(window), true
 }
 
 // Send sends this BAP's /reconcile to a BPP: the selected contracts, or by

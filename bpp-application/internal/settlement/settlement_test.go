@@ -84,7 +84,7 @@ func TestNormalizeConvertsAnEarlierPayment(t *testing.T) {
 	if attrs["@type"] != Type || value(attrs, "orderAmount") != 98900.0 || attrs["amount"] != nil {
 		t.Errorf("normalized = %v", attrs)
 	}
-	if basis, window, fee := Terms(c); basis != "AFTER_DELIVERY" || window != "P1D" || fee["feeValue"] != 5000.0 {
+	if basis, window, fee := LegacyTerms(c); basis != "AFTER_DELIVERY" || window != "P1D" || fee["feeValue"] != 5000.0 {
 		t.Errorf("terms = %v %v %v", basis, window, fee)
 	}
 	if v, ok := PaidAmount(attrs); !ok || v != 98900 {
@@ -95,7 +95,7 @@ func TestNormalizeConvertsAnEarlierPayment(t *testing.T) {
 func TestTermsFallBackToContractAttributes(t *testing.T) {
 	c := contract(t, `{"contractAttributes": {"settlementBasis": "AFTER_SHIPMENT"},
 	  "settlements": [{"settlementAttributes": {"amount": 1}}]}`)
-	if basis, _, _ := Terms(c); basis != "AFTER_SHIPMENT" {
+	if basis, _, _ := LegacyTerms(c); basis != "AFTER_SHIPMENT" {
 		t.Errorf("basis = %q", basis)
 	}
 }

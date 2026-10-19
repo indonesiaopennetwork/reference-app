@@ -15,8 +15,9 @@ const (
 	reconcileType    = settlement.Type
 )
 
-// Terms are the seller's default payout terms, used for contracts agreed
-// before the terms were carried with the settlement.
+// Terms are the seller's default payout terms, used for a contract none of
+// whose offers states its own (policies.settlement) and that carries none
+// from before the terms moved to the offer.
 type Terms struct {
 	Basis, Window string
 	// Account is this participant's own payout account (holderRole BAP or
@@ -35,9 +36,12 @@ type Figures struct {
 	ConsiderationID string         `json:"consideration_id"`
 	CollectedBy     string         `json:"collected_by,omitempty"`
 	Currency        string         `json:"currency"`
-	Basis           string         `json:"settlement_basis,omitempty"`
-	Window          string         `json:"settlement_window,omitempty"`
-	FinderFee       map[string]any `json:"finder_fee,omitempty"`
+	// Basis / Window are the payout term the contract falls due by: of its
+	// Terms, the one giving the latest due date (see assess).
+	Basis  string `json:"settlement_basis,omitempty"`
+	Window string `json:"settlement_window,omitempty"`
+	// Terms are the payout terms of the contract's offers.
+	Terms []settlement.Term `json:"-"`
 
 	OrderAmount float64 `json:"order_amount"`
 	Commission  float64 `json:"commission"`
@@ -102,14 +106,19 @@ func contractFigures(contract map[string]any, defaults Terms) (*Figures, error) 
 	if f.CollectedBy == "" {
 		f.CollectedBy = "BAP"
 	}
-	f.Basis, f.Window, f.FinderFee = settlement.Terms(contract)
-	if f.Basis == "" {
-		f.Basis = defaults.Basis
+	for _, t := range settlement.PayoutTerms(contract) {
+		if t.Basis == "" {
+			t.Basis = defaults.Basis
+		}
+		if t.Window == "" {
+			t.Window = defaults.Window
+		}
+		f.Terms = append(f.Terms, settlement.Term{Basis: normalizeBasis(t.Basis), Window: t.Window})
 	}
-	if f.Window == "" {
-		f.Window = defaults.Window
+	if len(f.Terms) == 0 {
+		f.Terms = []settlement.Term{{Basis: normalizeBasis(defaults.Basis), Window: defaults.Window}}
 	}
-	f.Basis = normalizeBasis(f.Basis)
+	f.Basis, f.Window = f.Terms[0].Basis, f.Terms[0].Window
 	return f, nil
 }
 
@@ -144,20 +153,6 @@ func (f *Figures) bag() map[string]any {
 		}(),
 	} {
 		b[k] = v
-	}
-	if f.Basis != "" {
-		b["settlementBasis"] = f.Basis
-	}
-	if f.Window != "" {
-		b["settlementWindow"] = f.Window
-	}
-	if f.FinderFee != nil {
-		fee := map[string]any{}
-		for k, v := range f.FinderFee {
-			fee[k] = v
-		}
-		fee["feeAmount"] = f.Commission
-		b["finderFee"] = fee
 	}
 	return b
 }
@@ -271,13 +266,17 @@ func normalizeBasis(basis string) string {
 	return basis
 }
 
-// CheckFinderFee compares the finderFee.feeAmount a BPP states (in on_init,
-// on_cancel or on_update) with what this BAP computes from the same contract's
-// terms and prices. ok is false when the contract states no fee amount.
-func CheckFinderFee(contract map[string]any) (stated, computed float64, ok bool) {
-	_, _, fee := settlement.Terms(contract)
-	stated, ok = fee["feeAmount"].(float64)
-	if !ok {
+// CheckCommission compares the commission a BPP states on the contract's
+// price (commission.amount, in on_init, on_cancel or on_update) with what
+// this BAP computes from the same contract's offers and prices -- or, for an
+// order placed before the commission moved to the offer, from its
+// finderFee. ok is false when the contract states none.
+func CheckCommission(contract map[string]any) (stated, computed float64, ok bool) {
+	if stated, ok = settlement.StatedCommission(contract); ok {
+		return stated, settlement.Compute(contract, true).Commission, true
+	}
+	_, _, fee := settlement.LegacyTerms(contract)
+	if stated, ok = fee["feeAmount"].(float64); !ok {
 		return 0, 0, false
 	}
 	return stated, settlement.FeeAmount(fee, settlement.ItemTotal(contract), settlement.OrderTotal(contract)), true

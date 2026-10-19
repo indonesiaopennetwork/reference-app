@@ -617,18 +617,15 @@ func (s *ClientService) buildInitMessage(ctx context.Context, q *dbsqlc.Queries,
 
 // declareSettlement adds the order's settlement object (ION
 // IONSettlementReconciliation, see package settlement), which the BPP answers
-// in on_init: this BAP collects the buyer payment by QRIS into the PJP, asks
-// for its finder fee (FinderFee*), and gives the account the fee is paid to
-// (holderRole BAP). The figures are estimates on the quoted price until the
-// BPP answers with its own.
+// in on_init: this BAP collects the buyer payment by QRIS into the PJP and
+// gives the account its commission is paid to (holderRole BAP). The
+// commission is the seller's, from the offers' terms (see package
+// settlement). The figures are estimates on the quoted price until the BPP
+// answers with its own.
 func declareSettlement(contract map[string]interface{}, cfg *config.Config) error {
 	considerationID, _, currency, err := firstConsideration(contract)
 	if err != nil {
 		return err
-	}
-	fee := map[string]interface{}{"feeType": cfg.FinderFeeType, "feeValue": cfg.FinderFeeValue}
-	if cfg.FinderFeeType == "PERCENT" {
-		fee["appliesTo"] = cfg.FinderFeeAppliesTo
 	}
 	contract["settlements"] = []interface{}{
 		map[string]interface{}{
@@ -644,7 +641,6 @@ func declareSettlement(contract map[string]interface{}, cfg *config.Config) erro
 				"timing":      "ON_ORDER",
 				"status":      "PENDING",
 				"currency":    currency,
-				"finderFee":   fee,
 				"settlementAccounts": []interface{}{map[string]interface{}{
 					"holderRole":    "BAP",
 					"bankCode":      cfg.SettlementBankCode,
