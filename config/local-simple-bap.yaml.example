@@ -82,7 +82,9 @@ modules:
           id: schemav2validator
           config:
             type: url
-            location: https://raw.githubusercontent.com/beckn/protocol-specifications-v2/refs/tags/core-v2.0.0-lts/api/v2.0.0/beckn.yaml
+            # Release 1's Beckn core contract (ion-specs vendored/beckn, identical to
+            # upstream core-v2.0.0-lts), as ion-additional.yaml references it.
+            location: https://schema.ion.id/release1/schema/vendored/beckn/api/v2.0.0/beckn.yaml
             cacheTTL: "3600"
             extendedSchema_enabled: "true"
             extendedSchema_cacheTTL: "86400"
@@ -93,10 +95,10 @@ modules:
             # ./schemas/<TypeName>/attributes.yaml (see schemas/README.md).
             extendedSchema_localSchemaPath: "/app/schemas"
             # ION endpoints Beckn does not define (/reconcile, /on_reconcile),
-            # merged into the action index from ion-specs main. Their ION @context
+            # merged into the action index from the published Release 1. Their ION @context
             # types (IONSettlementReconciliation, ...) are fetched from schema.ion.id.
             auxiliaryTypes: "url"
-            auxiliaryLocations: "https://raw.githubusercontent.com/indonesiaopennetwork/ion-specs/refs/heads/main/releases/release1/schema/core/api/v2.0.0/ion-additional.yaml"
+            auxiliaryLocations: "https://schema.ion.id/release1/schema/core/api/v2.0.0/ion-additional.yaml"
         cache:
           id: cache
           config:
@@ -158,7 +160,9 @@ modules:
           id: schemav2validator
           config:
             type: url
-            location: https://raw.githubusercontent.com/beckn/protocol-specifications-v2/refs/tags/core-v2.0.0-lts/api/v2.0.0/beckn.yaml
+            # Release 1's Beckn core contract (ion-specs vendored/beckn, identical to
+            # upstream core-v2.0.0-lts), as ion-additional.yaml references it.
+            location: https://schema.ion.id/release1/schema/vendored/beckn/api/v2.0.0/beckn.yaml
             cacheTTL: "3600"
             extendedSchema_enabled: "true"
             extendedSchema_cacheTTL: "86400"
@@ -169,10 +173,10 @@ modules:
             # ./schemas/<TypeName>/attributes.yaml (see schemas/README.md).
             extendedSchema_localSchemaPath: "/app/schemas"
             # ION endpoints Beckn does not define (/reconcile, /on_reconcile),
-            # merged into the action index from ion-specs main. Their ION @context
+            # merged into the action index from the published Release 1. Their ION @context
             # types (IONSettlementReconciliation, ...) are fetched from schema.ion.id.
             auxiliaryTypes: "url"
-            auxiliaryLocations: "https://raw.githubusercontent.com/indonesiaopennetwork/ion-specs/refs/heads/main/releases/release1/schema/core/api/v2.0.0/ion-additional.yaml"
+            auxiliaryLocations: "https://schema.ion.id/release1/schema/core/api/v2.0.0/ion-additional.yaml"
         cache:
           id: cache
           config:

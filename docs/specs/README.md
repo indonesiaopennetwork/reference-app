@@ -7,16 +7,18 @@ endpoint that Beckn v2.0.0 does not define. Their settlement object,
 `IONSettlementReconciliation`, is the ion-specs `common/Settlement/v1`
 attribute pack.
 
-This repository keeps no copy of either. Both ONIX adapters load the API from
-ion-specs `main`
-(`auxiliaryTypes: "url"`, `auxiliaryLocations` in the ONIX configs):
+This repository keeps no copy of either. Both ONIX adapters load the Beckn
+core contract and these endpoints from the published Release 1 (`location`,
+and `auxiliaryTypes: "url"` / `auxiliaryLocations`, in the ONIX configs):
 
 ```text
-https://raw.githubusercontent.com/indonesiaopennetwork/ion-specs/refs/heads/main/releases/release1/schema/core/api/v2.0.0/ion-additional.yaml
+https://schema.ion.id/release1/schema/vendored/beckn/api/v2.0.0/beckn.yaml
+https://schema.ion.id/release1/schema/core/api/v2.0.0/ion-additional.yaml
 ```
 
-and fetch the settlement pack, like every other ION `@context` type, from
-schema.ion.id. A change to either belongs in ion-specs; restart the adapters
+`ion-additional.yaml` references the first (ion-specs' vendored copy of
+Beckn core `v2.0.0-lts`, unchanged). The adapters fetch the settlement pack,
+like every other ION `@context` type, from schema.ion.id. A change to either belongs in ion-specs; restart the adapters
 to pick it up.
 
 ## Money model: the PJP holds the payment
@@ -160,7 +162,7 @@ agreed before `feeAmount` existed has it computed by the same rule.
 ## Examples
 
 Built by the apps' own code and validated against ion-specs `ion-additional.yaml` and
-`ion-beckn.yaml`: `examples/reconcile.json` (the BPP's batch for
+the vendored Beckn `beckn.yaml`: `examples/reconcile.json` (the BPP's batch for
 2026-09-30) and `examples/on_reconcile.json` (the BAP agrees with every
 contract). Each order paid 90,000 (80,000 of items plus PPN) with a 3% finder
 fee on the item total:
