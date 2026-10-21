@@ -9,7 +9,7 @@ import {
   ArrowRight, Circle, Star, Ticket, Ban, Wand2,
   BookOpen, Send, ArrowLeft, ExternalLink,
   ChevronDown, Copy, Check, Scale, Pencil, Compass, Lock,
-  PauseCircle, PlayCircle, Layers,
+  PauseCircle, PlayCircle, Layers, FileText,
 } from 'lucide-react'
 import { captureTokenFromUrl, getToken, getIdToken, clearToken, redirectToLogin, basePath } from './auth.js'
 import Tour from './Tour.jsx'
@@ -170,6 +170,53 @@ function ErrorBox({ message, onRetry }) {
 function SectionTitle({ children }) {
   return (
     <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-3">{children}</p>
+  )
+}
+
+// JsonViewerModal: a simple overlay showing pretty-printed JSON, with a
+// copy-to-clipboard button. `content` is the raw object to display;
+// `loading`/`error` let the caller drive the fetch state from outside.
+function JsonViewerModal({ title, subtitle, content, loading, error, onClose }) {
+  const { t } = useI18n()
+  const [copied, setCopied] = useState(false)
+  const pretty = content ? JSON.stringify(content, null, 2) : ''
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(pretty)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch { /* ignore -- clipboard may be unavailable */ }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true">
+      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+      <div className="relative w-full max-w-3xl max-h-[85vh] flex flex-col rounded-2xl border border-white/[0.08] bg-slate-900 shadow-2xl">
+        <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-white/[0.06]">
+          <div className="min-w-0">
+            <p className="text-sm font-bold text-white">{title}</p>
+            {subtitle && <p className="text-[11px] font-mono text-slate-500 mt-0.5 truncate">{subtitle}</p>}
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {content && (
+              <button onClick={handleCopy}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold border border-white/[0.08] text-slate-300 hover:text-white hover:border-white/20 transition-colors">
+                {copied ? <Check size={12} /> : <Copy size={12} />} {copied ? t('Copied!') : t('Copy')}
+              </button>
+            )}
+            <button onClick={onClose} className="p-1.5 rounded-lg text-slate-400 hover:text-white transition-colors">
+              <X size={16} />
+            </button>
+          </div>
+        </div>
+        <div className="flex-1 overflow-auto p-5">
+          {loading ? <LoadingSpinner label={t('Loading…')} /> : error ? <ErrorBox message={error} /> : (
+            <pre className="text-[11px] leading-relaxed text-slate-300 font-mono whitespace-pre-wrap break-all">{pretty}</pre>
+          )}
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -3323,7 +3370,18 @@ function CatalogsPage({ onNav }) {
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
   const [publishing, setPublishing] = useState(null)
+  const [indexViewer, setIndexViewer] = useState(null) // { loading, error, content } | null
   const limit = 20
+
+  const handleViewIndex = async () => {
+    setIndexViewer({ loading: true, error: null, content: null })
+    try {
+      const data = await apiFetch('/catalog-index')
+      setIndexViewer({ loading: false, error: null, content: data })
+    } catch (e) {
+      setIndexViewer({ loading: false, error: e.message, content: null })
+    }
+  }
 
   // provider_id is no longer a query param -- the API always scopes to the
   // logged-in seller's own provider (see internal/dashboardsvc), so there's
@@ -3358,12 +3416,24 @@ function CatalogsPage({ onNav }) {
           <h1 className="text-2xl font-bold text-white tracking-tight">{t('Catalogs')}</h1>
           <p className="text-sm text-slate-500 mt-0.5">{t('Create catalogs, add products, and publish to the network')}</p>
         </div>
-        <button data-tour="create-catalog" onClick={() => onNav('create_catalog')}
-          className="shrink-0 whitespace-nowrap flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white shadow-lg transition-all hover:scale-105 active:scale-95"
-          style={{ background: BRAND }}>
-          <Plus size={15} /> {t('Create Catalog')}
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <button onClick={handleViewIndex}
+            className="whitespace-nowrap flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold border border-white/[0.08] text-slate-300 hover:text-white hover:border-white/20 transition-colors">
+            <FileText size={15} /> {t('View Index File')}
+          </button>
+          <button data-tour="create-catalog" onClick={() => onNav('create_catalog')}
+            className="whitespace-nowrap flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white shadow-lg transition-all hover:scale-105 active:scale-95"
+            style={{ background: BRAND }}>
+            <Plus size={15} /> {t('Create Catalog')}
+          </button>
+        </div>
       </div>
+
+      {indexViewer && (
+        <JsonViewerModal title={t('Catalog Index File')} subtitle="index/becknCatalogs.index.json"
+          loading={indexViewer.loading} error={indexViewer.error} content={indexViewer.content}
+          onClose={() => setIndexViewer(null)} />
+      )}
 
       {/* Filters */}
       <Card>
@@ -3644,6 +3714,7 @@ function CatalogDetailPage({ onNav, catalogId }) {
   const [togglingActive, setTogglingActive] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [compacting, setCompacting] = useState(false)
+  const [fileViewer, setFileViewer] = useState(null) // { loading, error, content } | null
 
   const cat = data?.catalog || {}
   const resources = data?.resources || []
@@ -3746,6 +3817,16 @@ function CatalogDetailPage({ onNav, catalogId }) {
     }
   }
 
+  const handleViewCatalogFile = async () => {
+    setFileViewer({ loading: true, error: null, content: null })
+    try {
+      const data = await apiFetch(`/catalogs/${catalogId}/latest-file`)
+      setFileViewer({ loading: false, error: null, content: data })
+    } catch (e) {
+      setFileViewer({ loading: false, error: e.message, content: null })
+    }
+  }
+
   const fmtDate = ts => ts ? new Date(ts).toLocaleDateString(localeNow()) : '—'
 
   const getPrice = (offer) => {
@@ -3805,6 +3886,13 @@ function CatalogDetailPage({ onNav, catalogId }) {
             <Trash2 size={14} />
             {deleting ? t('Deleting…') : t('Delete Catalog')}
           </button>
+          {cat.isPublished && (
+            <button onClick={handleViewCatalogFile}
+              title={t('View this catalog\'s latest published file')}
+              className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold border border-white/[0.08] text-slate-300 hover:text-white hover:border-white/20 transition-colors">
+              <FileText size={14} /> {t('View Catalog File')}
+            </button>
+          )}
           <button onClick={handleToggleActive} disabled={togglingActive}
             className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold border border-slate-500/30 text-slate-400 hover:bg-slate-500/10 transition-colors disabled:opacity-50">
             {cat.isActive ? <PauseCircle size={14} /> : <PlayCircle size={14} />}
@@ -3970,6 +4058,12 @@ function CatalogDetailPage({ onNav, catalogId }) {
           </div>
         )}
       </Card>
+
+      {fileViewer && (
+        <JsonViewerModal title={t('Catalog File')} subtitle={`catalogs/${catalogId}.latest.json.gz`}
+          loading={fileViewer.loading} error={fileViewer.error} content={fileViewer.content}
+          onClose={() => setFileViewer(null)} />
+      )}
     </div>
   )
 }
