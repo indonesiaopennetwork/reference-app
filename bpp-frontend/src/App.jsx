@@ -14,6 +14,7 @@ import {
 import { captureTokenFromUrl, getToken, getIdToken, clearToken, redirectToLogin, basePath } from './auth.js'
 import Tour from './Tour.jsx'
 import { useReconSelection, inDateRange } from './reconSelection.js'
+import { BatchSettlements, AnswerSummary, CollectionChip } from './ReconDetails.jsx'
 import UserProfileMenu from './UserProfileMenu.jsx'
 import { CrcSelect, CrcAttributes, crcByCode, crcResourceAttributes, crcFormValues, CRC_FIELD, CustomAttributes, customAttributes, customFormRows, CUSTOM_ATTRIBUTES_FIELD } from './CrcFields.jsx'
 import { CRC_AUTOFILL } from './crcSamples.js'
@@ -1416,15 +1417,22 @@ const SETTLEMENT_WINDOWS = [
   ['P7D', '7 days'], ['P14D', '14 days'], ['P30D', '30 days'],
 ]
 
-// The commission (finder fee) the seller pays the buyer app, as the offer
-// consideration's commission (IONTradeConsideration): PERCENT of the item
-// value without tax (ITEM_TOTAL) or with tax (ORDER_TOTAL), or a fixed AMOUNT
-// per unit sold.
+// A new commission entry of an offer form.
+const NEW_COMMISSION = () => ({ name: '', type: 'PERCENT', value: '', applies_to: 'ITEM_TOTAL' })
+
+// The commission the seller pays the buyer app, as the offer's
+// policies.commission (IONTradeOffer): named entries that add up, each
+// PERCENT of the item value without tax (ITEM_TOTAL) or with tax
+// (ORDER_TOTAL), or a fixed AMOUNT per unit sold. Entries without a value are
+// left out.
 function buildCommission(o) {
-  const value = Number(o.commission_value) || 0
-  return o.commission_type === 'AMOUNT'
-    ? { type: 'AMOUNT', value }
-    : { type: 'PERCENT', value, appliesTo: o.commission_applies_to || 'ITEM_TOTAL' }
+  return (o.commissions || [])
+    .filter(c => c.value !== '' && c.value != null)
+    .map(c => {
+      const entry = { feeName: (c.name || '').trim() || 'Finder fee', feeType: c.type === 'AMOUNT' ? 'AMOUNT' : 'PERCENT', feeValue: Number(c.value) || 0 }
+      if (entry.feeType === 'PERCENT') entry.appliesTo = c.applies_to || 'ITEM_TOTAL'
+      return entry
+    })
 }
 
 // The offer's payout term, policies.settlement.
@@ -1432,40 +1440,64 @@ function buildSettlementPolicy(o) {
   return { settlementBasis: o.settlement_basis || 'AFTER_DELIVERY', settlementWindow: o.settlement_window || 'P1D' }
 }
 
-// Commission and payout term fields of an offer form, with what the
+// Commission entries and payout term of an offer form, with what the
 // commission comes to per unit at the offer's price.
 function SettlementTermsFields({ offer, onChange, labelCls, inputCls }) {
   const { t } = useI18n()
-  const percent = offer.commission_type !== 'AMOUNT'
+  const commissions = offer.commissions || []
   const price = Number(offer.price) || 0
-  const base = percent && offer.commission_applies_to === 'ORDER_TOTAL' && offer.price ? buildPriceBreakup(offer).totalAmount : price
-  const perUnit = percent ? base * (Number(offer.commission_value) || 0) / 100 : Number(offer.commission_value) || 0
+  const withTax = offer.price ? buildPriceBreakup(offer).totalAmount : 0
+  const perUnit = commissions.reduce((sum, c) => {
+    const v = Number(c.value) || 0
+    if (c.type === 'AMOUNT') return sum + v
+    return sum + (c.applies_to === 'ORDER_TOTAL' ? withTax : price) * v / 100
+  }, 0)
+  const setEntry = (i, k, v) => onChange('commissions', commissions.map((c, j) => (j === i ? { ...c, [k]: v } : c)))
   const windows = SETTLEMENT_WINDOWS.some(([v]) => v === offer.settlement_window) || !offer.settlement_window
     ? SETTLEMENT_WINDOWS : [...SETTLEMENT_WINDOWS, [offer.settlement_window, offer.settlement_window]]
   return (
-    <div className="col-span-full p-3 rounded-lg bg-slate-800/50 border border-white/[0.06] space-y-2" data-tour="offer-settlement">
+    <div className="p-3 rounded-lg bg-slate-800/50 border border-white/[0.06] space-y-2" data-tour="offer-settlement">
       <p className="text-xs font-semibold text-slate-300">💸 {t('Settlement terms')}</p>
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <div><label className={labelCls}>{t('Commission to buyer app')}</label>
-          <select className={inputCls} value={offer.commission_type} onChange={e => onChange('commission_type', e.target.value)}>
-            <option value="PERCENT" className="bg-slate-900">{t('Percent')}</option>
-            <option value="AMOUNT" className="bg-slate-900">{t('Fixed amount per unit')}</option>
-          </select>
-        </div>
-        <div><label className={labelCls}>{percent ? t('Commission (%)') : t('Commission ({currency})', { currency: offer.currency || 'IDR' })}</label>
-          <input className={inputCls} type="number" min="0" max={percent ? 100 : undefined} step="0.01" required
-            value={offer.commission_value} onChange={e => onChange('commission_value', e.target.value)} placeholder={percent ? '3' : '1000'} />
-        </div>
-        {percent && (
-          <div><label className={labelCls}>{t('Commission on')}</label>
-            <select className={inputCls} value={offer.commission_applies_to} onChange={e => onChange('commission_applies_to', e.target.value)}>
-              <option value="ITEM_TOTAL" className="bg-slate-900">{t('Item price (without tax)')}</option>
-              <option value="ORDER_TOTAL" className="bg-slate-900">{t('Price with tax')}</option>
-            </select>
+      <p className="text-[11px] text-slate-500">{t('Commission to buyer app')}</p>
+      {commissions.map((c, i) => {
+        const percent = c.type !== 'AMOUNT'
+        return (
+          // Editable rows: the name is typed in place, so the position is the key.
+          <div key={i} className="grid grid-cols-1 sm:grid-cols-[1.4fr_1fr_0.8fr_1.2fr_auto] gap-2 items-end">
+            <div><label className={labelCls}>{t('Name')}</label>
+              <input className={inputCls} value={c.name} onChange={e => setEntry(i, 'name', e.target.value)} placeholder={t('Finder fee')} />
+            </div>
+            <div><label className={labelCls}>{t('Type')}</label>
+              <select className={inputCls} value={c.type} onChange={e => setEntry(i, 'type', e.target.value)}>
+                <option value="PERCENT" className="bg-slate-900">{t('Percent')}</option>
+                <option value="AMOUNT" className="bg-slate-900">{t('Fixed amount per unit')}</option>
+              </select>
+            </div>
+            <div><label className={labelCls}>{percent ? t('Value (%)') : t('Value ({currency})', { currency: offer.currency || 'IDR' })}</label>
+              <input className={inputCls} type="number" min="0" max={percent ? 100 : undefined} step="0.01" required
+                value={c.value} onChange={e => setEntry(i, 'value', e.target.value)} placeholder={percent ? '3' : '1000'} />
+            </div>
+            {percent ? (
+              <div><label className={labelCls}>{t('Commission on')}</label>
+                <select className={inputCls} value={c.applies_to} onChange={e => setEntry(i, 'applies_to', e.target.value)}>
+                  <option value="ITEM_TOTAL" className="bg-slate-900">{t('Item price (without tax)')}</option>
+                  <option value="ORDER_TOTAL" className="bg-slate-900">{t('Price with tax')}</option>
+                </select>
+              </div>
+            ) : <div />}
+            <button type="button" title={t('Remove commission')} disabled={commissions.length === 1}
+              onClick={() => onChange('commissions', commissions.filter((_, j) => j !== i))}
+              className="p-2 rounded-lg border border-white/[0.08] text-slate-500 hover:text-red-400 disabled:opacity-30 disabled:hover:text-slate-500 transition-colors">
+              <Trash2 size={14} />
+            </button>
           </div>
-        )}
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        )
+      })}
+      <button type="button" onClick={() => onChange('commissions', [...commissions, NEW_COMMISSION()])}
+        className="flex items-center gap-1.5 text-xs font-semibold text-slate-400 hover:text-white transition-colors">
+        <Plus size={13} /> {t('Add commission')}
+      </button>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
         <div><label className={labelCls}>{t('Payout starts')}</label>
           <select className={inputCls} value={offer.settlement_basis} onChange={e => onChange('settlement_basis', e.target.value)}>
             {SETTLEMENT_BASES.map(([v, l]) => <option key={v} value={v} className="bg-slate-900">{t(l)}</option>)}
@@ -1535,17 +1567,14 @@ const EMPTY_OFFER = () => ({
   replace_allowed: true, replace_window: 'P7D', replace_method: 'SELLER_PICKUP', replace_subject_avail: true,
   // settlement terms: the commission paid to the buyer app (on the price
   // consideration) and the payout term (policies.settlement)
-  commission_type: 'PERCENT', commission_value: '3', commission_applies_to: 'ITEM_TOTAL',
+  commissions: [{ name: 'Finder fee', type: 'PERCENT', value: '3', applies_to: 'ITEM_TOTAL' }],
   settlement_basis: 'AFTER_DELIVERY', settlement_window: 'P1D',
   // payment & serviceability
   cod_available: true,
   max_distance: '15', distance_unit: 'KM',
-  timing_days: ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'],
-  timing_start: '09:00', timing_end: '21:00',
 })
 
 const CATALOG_TYPES = ['', 'regular']
-const ALL_DAYS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN']
 
 // ---------------------------------------------------------------------------
 // Auto-fill seed data — pool of real Indonesian snack products.
@@ -1570,7 +1599,7 @@ const AUTO_FILL_POOL = [
     }],
     offers: [{
       ...EMPTY_OFFER(),
-      commission_type: 'PERCENT', commission_value: '3', commission_applies_to: 'ITEM_TOTAL', settlement_basis: 'AFTER_DELIVERY', settlement_window: 'P1D',
+      commissions: [{ name: 'Finder fee', type: 'PERCENT', value: '3', applies_to: 'ITEM_TOTAL' }], settlement_basis: 'AFTER_DELIVERY', settlement_window: 'P1D',
       id: 'offer-biscuit-khong-guan-001', name: 'Biskuit Kaleng Khong Guan (Khong Guan Assorted Biscuits Tin)',
       short_desc: 'Aneka biskuit renyah dalam kaleng ikonik', resource_ids: 'res-biscuit-khong-guan-001',
       price: '185000', currency: 'IDR', validity_start: '2026-04-11', validity_end: '2027-04-11',
@@ -1594,7 +1623,7 @@ const AUTO_FILL_POOL = [
     }],
     offers: [{
       ...EMPTY_OFFER(),
-      commission_type: 'PERCENT', commission_value: '4', commission_applies_to: 'ORDER_TOTAL', settlement_basis: 'AFTER_DELIVERY', settlement_window: 'P3D',
+      commissions: [{ name: 'Finder fee', type: 'PERCENT', value: '4', applies_to: 'ORDER_TOTAL' }, { name: 'Platform fee', type: 'PERCENT', value: '1', applies_to: 'ITEM_TOTAL' }], settlement_basis: 'AFTER_DELIVERY', settlement_window: 'P3D',
       id: 'offer-chips-chitato-sapi-003', name: 'Keripik Chitato Rasa Sapi Panggang (Chitato Beef BBQ Potato Chips)',
       short_desc: 'Keripik kentang gurih rasa sapi panggang', resource_ids: 'res-chips-chitato-sapi-003',
       price: '12000', currency: 'IDR', validity_start: '2026-04-11', validity_end: '2027-04-11',
@@ -1619,7 +1648,7 @@ const AUTO_FILL_POOL = [
     }],
     offers: [{
       ...EMPTY_OFFER(),
-      commission_type: 'AMOUNT', commission_value: '5000', settlement_basis: 'AFTER_RETURN_WINDOW', settlement_window: 'P1D',
+      commissions: [{ name: 'Finder fee', type: 'AMOUNT', value: '5000' }], settlement_basis: 'AFTER_RETURN_WINDOW', settlement_window: 'P1D',
       id: 'offer-cake-lapis-legit-005', name: 'Kue Lapis Legit Premium (Premium Spekkoek Layered Cake)',
       short_desc: 'Kue lapis klasik Belanda-Indonesia', resource_ids: 'res-cake-lapis-legit-005',
       price: '185000', currency: 'IDR', validity_start: '2026-04-11', validity_end: '2027-04-11',
@@ -1644,7 +1673,7 @@ const AUTO_FILL_POOL = [
     }],
     offers: [{
       ...EMPTY_OFFER(),
-      commission_type: 'PERCENT', commission_value: '2.5', commission_applies_to: 'ITEM_TOTAL', settlement_basis: 'ON_CONFIRMATION', settlement_window: 'P7D',
+      commissions: [{ name: 'Finder fee', type: 'PERCENT', value: '2.5', applies_to: 'ITEM_TOTAL' }], settlement_basis: 'ON_CONFIRMATION', settlement_window: 'P7D',
       id: 'offer-biscuit-monde-butter-007', name: 'Biskuit Monde Butter Cookies (Monde Butter Cookies)',
       short_desc: 'Kue kering butter premium dalam kaleng cantik', resource_ids: 'res-biscuit-monde-butter-007',
       price: '120000', currency: 'IDR', validity_start: '2026-04-11', validity_end: '2027-04-11',
@@ -1668,7 +1697,7 @@ const AUTO_FILL_POOL = [
     }],
     offers: [{
       ...EMPTY_OFFER(),
-      commission_type: 'AMOUNT', commission_value: '2000', settlement_basis: 'AFTER_SHIPMENT', settlement_window: 'P3D',
+      commissions: [{ name: 'Finder fee', type: 'AMOUNT', value: '2000' }], settlement_basis: 'AFTER_SHIPMENT', settlement_window: 'P3D',
       id: 'offer-cake-brownies-amanda-009', name: 'Brownies Kukus Amanda Cokelat (Amanda Steamed Chocolate Brownies)',
       short_desc: 'Brownies kukus lembut khas Bandung dengan cokelat premium', resource_ids: 'res-cake-brownies-amanda-009',
       price: '95000', currency: 'IDR', validity_start: '2026-04-11', validity_end: '2027-04-11',
@@ -1777,9 +1806,10 @@ function resourceToForm(r) {
 function offerToForm(o) {
   const a = o.offerAttributes || {}
   const pol = a.policies || {}, ret = pol.returns || {}, can = pol.cancellation || {}, rep = pol.replacement || {}
-  const svc = a.serviceability || {}, timing = svc.timing?.[0] || {}
+  const svc = a.serviceability || {}
   const ca = o.considerations?.[0]?.considerationAttributes || {}
-  const commission = ca.commission || {}, payout = pol.settlement || {}
+  const commissions = Array.isArray(pol.commission) ? pol.commission : ca.commission ? [{ name: 'Finder fee', ...ca.commission }] : null
+  const payout = pol.settlement || {}
   const base = (ca.breakup || []).find(b => b.type === 'BASE_PRICE')
   const tax = (ca.breakup || []).find(b => b.type === 'TAX')
   const local = iso => {
@@ -1804,28 +1834,33 @@ function offerToForm(o) {
     cancel_allowed: !!can.allowed, cancel_window: can.window || blank.cancel_window, cancel_event: can.cutoffEvent || blank.cancel_event,
     replace_allowed: !!rep.allowed, replace_window: rep.window || blank.replace_window, replace_method: rep.method || blank.replace_method,
     replace_subject_avail: rep.subjectToAvailability ?? blank.replace_subject_avail,
-    commission_type: commission.type || blank.commission_type,
-    commission_value: commission.value != null ? String(commission.value) : blank.commission_value,
-    commission_applies_to: commission.appliesTo || blank.commission_applies_to,
+    commissions: commissions
+      // ION names (feeName, feeType, feeValue), or the earlier ones (name, type, value)
+      ? commissions.map(c => {
+        const value = c.feeValue ?? c.value
+        return { name: c.feeName ?? c.name ?? '', type: c.feeType ?? c.type ?? 'PERCENT', value: value != null ? String(value) : '', applies_to: c.appliesTo || 'ITEM_TOTAL' }
+      })
+      : blank.commissions,
     settlement_basis: payout.settlementBasis || blank.settlement_basis,
     settlement_window: payout.settlementWindow || blank.settlement_window,
     cod_available: !!a.paymentConstraints?.codAvailable,
     max_distance: svc.distanceConstraint?.maxDistance != null ? String(svc.distanceConstraint.maxDistance) : '',
     distance_unit: svc.distanceConstraint?.unit || 'KM',
-    timing_days: timing.daysOfWeek || [], timing_start: timing.timeRange?.start || '09:00', timing_end: timing.timeRange?.end || '21:00',
   }
 }
 
 function buildOfferAttrs(o) {
   const hasPolicies = o.returns_allowed || o.cancel_allowed || o.replace_allowed
   const hasPayment = o.cod_available
-  const hasServiceability = o.max_distance || (o.timing_days && o.timing_days.length > 0)
+  const hasServiceability = o.max_distance
 
   // Every offer states its payout term (policies.settlement).
   const attrs = {
     '@context': o.offer_context || EMPTY_OFFER().offer_context, '@type': 'ion:IONTradeOffer',
     policies: { settlement: buildSettlementPolicy(o) },
   }
+  const commission = buildCommission(o)
+  if (commission.length) attrs.policies.commission = commission
 
   if (hasPolicies) {
     attrs.policies = {
@@ -1847,9 +1882,6 @@ function buildOfferAttrs(o) {
     attrs.serviceability = {}
     if (o.max_distance) {
       attrs.serviceability.distanceConstraint = { maxDistance: Number(o.max_distance), unit: o.distance_unit || 'KM' }
-    }
-    if (o.timing_days && o.timing_days.length > 0) {
-      attrs.serviceability.timing = [{ daysOfWeek: o.timing_days, timeRange: { start: o.timing_start || '09:00', end: o.timing_end || '21:00' } }]
     }
   }
   return attrs
@@ -1904,11 +1936,6 @@ function PublishPage({ onNav }) {
   const setField = (k, v) => setForm(f => ({ ...f, [k]: v }))
   const setResourceField = (i, k, v) => setForm(f => { const r = [...f.resources]; r[i] = { ...r[i], [k]: v }; return { ...f, resources: r } })
   const setOfferField = (i, k, v) => setForm(f => { const o = [...f.offers]; o[i] = { ...o[i], [k]: v }; return { ...f, offers: o } })
-  const toggleDay = (i, day) => setForm(f => {
-    const o = [...f.offers]; const days = o[i].timing_days
-    o[i] = { ...o[i], timing_days: days.includes(day) ? days.filter(d => d !== day) : [...days, day] }
-    return { ...f, offers: o }
-  })
   const toISO = dt => dt ? new Date(dt).toISOString() : undefined
 
   const handleSubmit = async () => {
@@ -1949,7 +1976,6 @@ function PublishPage({ onNav }) {
                   currency: o.currency,
                   ...buildPriceBreakup(o),
                   paymentMethods: o.cod_available ? ['PREPAID', 'COD', 'DIGITAL_WALLET'] : ['PREPAID', 'DIGITAL_WALLET'],
-                  commission: buildCommission(o),
                 }
               }]
             } : {}),
@@ -2264,17 +2290,17 @@ function PublishPage({ onNav }) {
                     <div><label className={labelCls}>{t('Validity End')}</label>
                       <input type="datetime-local" className={inputCls} value={o.validity_end} onChange={e => setOfferField(i, 'validity_end', e.target.value)} />
                     </div>
-                    <SettlementTermsFields offer={o} onChange={(k, v) => setOfferField(i, k, v)} labelCls={labelCls} inputCls={inputCls} />
                   </div>
 
                   {/* Policies — collapsible */}
                   <button onClick={() => setOffOpen(s => ({ ...s, [`${i}_pol`]: !s[`${i}_pol`] }))}
                     className="mt-4 w-full flex items-center justify-between text-xs font-semibold text-slate-400 hover:text-slate-200 transition-colors pt-3 border-t border-white/[0.06]">
-                    <span>📋 {t('Policies (Returns · Cancellation · Replacement)')}</span>
+                    <span>📋 {t('Policies (Settlement · Returns · Cancellation · Replacement)')}</span>
                     <ChevronRightIcon size={13} className={offOpen[`${i}_pol`] ? 'transition-transform rotate-90' : 'transition-transform'} />
                   </button>
                   {offOpen[`${i}_pol`] && (
                     <div className="mt-3 space-y-4">
+                      <SettlementTermsFields offer={o} onChange={(k, v) => setOfferField(i, k, v)} labelCls={labelCls} inputCls={inputCls} />
                       {/* Returns */}
                       <div className="p-3 rounded-lg border border-white/[0.06]" style={{ background: 'rgba(0,184,230,0.04)' }}>
                         <div className="flex items-center justify-between mb-2">
@@ -2383,30 +2409,6 @@ function PublishPage({ onNav }) {
                           </select>
                         </div>
                       </div>
-                      <div>
-                        <label className={labelCls}>{t('Delivery Days')}</label>
-                        <div className="flex flex-wrap gap-2 mt-1">
-                          {ALL_DAYS.map(day => (
-                            <button key={day} type="button"
-                              onClick={() => toggleDay(i, day)}
-                              className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition-all ${o.timing_days.includes(day)
-                                ? 'text-white border-cyan-500/40'
-                                : 'text-slate-500 border-white/[0.08] hover:border-white/20'
-                                }`}
-                              style={o.timing_days.includes(day) ? { background: 'rgba(0,184,230,0.15)' } : {}}>
-                              {t(day)}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div><label className={labelCls}>{t('Delivery Window Start')}</label>
-                          <input type="time" className={inputCls} value={o.timing_start} onChange={e => setOfferField(i, 'timing_start', e.target.value)} />
-                        </div>
-                        <div><label className={labelCls}>{t('Delivery Window End')}</label>
-                          <input type="time" className={inputCls} value={o.timing_end} onChange={e => setOfferField(i, 'timing_end', e.target.value)} />
-                        </div>
-                      </div>
                     </div>
                   )}
                 </Card>
@@ -2476,7 +2478,6 @@ function PublishPage({ onNav }) {
                           {o.cod_available && <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.06] text-slate-400">COD ✓</span>}
                           {o.returns_allowed && <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.06] text-slate-400">{t('Returns {window}', { window: o.returns_window })}</span>}
                           {o.max_distance && <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.06] text-slate-400">📍 {o.max_distance} {o.distance_unit}</span>}
-                          {o.timing_days.length < 7 && <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.06] text-slate-400">{o.timing_days.map(d => t(d)).join(', ')}</span>}
                         </div>
                       </div>
                       {o.price && <span className="shrink-0 text-xs font-bold" style={{ color: '#00b8e6' }}>{o.price} {o.currency}</span>}
@@ -2841,7 +2842,8 @@ function PayloadPanel({ message: m }) {
 
 // ─── Reconciliation ───────────────────────────────────────────────────────────
 // Settlement reconciliation with buyer apps (ION Release 1
-// core/api/v2.0.0/ion-additional.yaml in ion-specs). The buyer's payment is held at the PJP. Per BAP:
+// core/api/v2.0.0/ion-additional.yaml in ion-specs), agreed per settlement.
+// The buyer's payment is held at the PJP. Per BAP:
 // contracts due now (payout basis event + settlementWindow has passed) with
 // the summary /reconcile would carry, and a manual send; contracts still to
 // fall due; and past batches, sent or received from the buyer app.
@@ -2864,15 +2866,13 @@ function tickedSummary(rows) {
   return { contractCount: rows.length, totalOrderAmount: sum('order_amount'), totalRefund: sum('refund'), totalCommission: sum('commission'), totalNetPayable: sum('net_payable') }
 }
 
-// In a disputed batch only the contracts with accord false are in dispute;
-// last_result says which, and the figures that differ.
-const isDisputed = r => r.reconciliation_status === 'DISPUTED' && !r.last_result?.accord
-// Sent before its settlement window: the buyer app answered accord false and
-// the contract waits until it is due (no reconciliation status).
-const sentEarly = r => !r.reconciliation_status && r.last_result?.code === 'SETTLEMENT_WINDOW_NOT_REACHED'
-// Matched, but its batch was PENDING (another order wasn't due): not agreed,
-// sent again with the rest.
-const matchedPending = r => !r.reconciliation_status && r.last_result?.accord === true
+// Agreement is per settlement. A disputed contract (accord false with a
+// mismatch) is sent again once corrected; a pending one (accord false,
+// SETTLEMENT_WINDOW_NOT_REACHED or AWAITING_INFORMATION) keeps no status and
+// is sent again later. last_result says which, why, and the figures that
+// differ.
+const isDisputed = r => r.reconciliation_status === 'DISPUTED'
+const isPending = r => !r.reconciliation_status && r.last_result?.pending
 const diffOf = (r, field) => r.reconciliation_status === 'DISPUTED' && r.last_result?.diffs?.find(d => d.field === field)
 
 function DiffNote({ d }) {
@@ -2903,6 +2903,7 @@ function ReconContractsTable({ rows, now, select }) {
             )}
             <th className="text-left px-4 py-2">{t('Contract')}</th>
             <th className="text-left px-4 py-2">{t('Created')}</th>
+            <th className="text-left px-4 py-2">{t('Order date')}</th>
             <th className="text-left px-4 py-2">{t('Status')}</th>
             <th className="text-left px-4 py-2">{t('Payout clock')}</th>
             <th className="text-right px-4 py-2">{t('Paid')}</th>
@@ -2925,13 +2926,12 @@ function ReconContractsTable({ rows, now, select }) {
               )}
               <td className="px-4 py-2 font-mono text-slate-400 whitespace-nowrap" title={r.contract_id}>{String(r.contract_id).slice(0, 8)}…</td>
               <td className="px-4 py-2 text-slate-400 whitespace-nowrap">{r.created_at ? fmtDate(r.created_at) : '—'}</td>
+              <td className="px-4 py-2 text-slate-400 whitespace-nowrap" title={t('Creation date in Asia/Jakarta time (orderDate)')}>{r.order_date || '—'}</td>
               <td className="px-4 py-2 whitespace-nowrap">
                 <StatusBadge status={r.status} />
-                {isDisputed(r) && <span className="ml-1.5 text-[11px] font-semibold text-rose-300">{t('Disputed')}</span>}
-                {r.reconciliation_status === 'DISPUTED' && !isDisputed(r) && <span className="ml-1.5 text-[11px] text-slate-500">{t('Matched — batch disputed')}</span>}
-                {sentEarly(r) && <span className="ml-1.5 text-[11px] font-semibold text-amber-300" title={r.last_result.reason}>{t('Sent before settlement window')}</span>}
-                {matchedPending(r) && <span className="ml-1.5 text-[11px] text-slate-500">{t('Matched — batch pending')}</span>}
-                {sentEarly(r) && <div className="mt-0.5 text-[10px] text-amber-300/80 whitespace-normal max-w-[18rem]">{r.last_result.reason}</div>}
+                {isDisputed(r) && <span className="ml-1.5 text-[11px] font-semibold text-rose-300" title={r.last_result?.code}>{t('Disputed')}{r.last_result?.field ? ` · ${r.last_result.field}` : ''}</span>}
+                {isPending(r) && <span className="ml-1.5 text-[11px] font-semibold text-amber-300" title={r.last_result.code}>{t('Pending')} · {r.last_result.code === 'AWAITING_INFORMATION' ? t('awaiting information') : t('sent before settlement window')}</span>}
+                {isPending(r) && r.last_result.reason && <div className="mt-0.5 text-[10px] text-amber-300/80 whitespace-normal max-w-[18rem]">{r.last_result.reason}</div>}
                 {isDisputed(r) && !r.last_result?.diffs?.length && r.last_result?.reason && <div className="mt-0.5 text-[10px] text-rose-300/80 whitespace-normal max-w-[18rem]">{r.last_result.reason}</div>}
                 {r.refunded_after_payout > 0 && <span className="ml-1.5 text-[11px] text-slate-500" title={t('Refunded by you after payout — outside reconciliation')}>{t('+{amount} refunded after payout', { amount: rupiah(r.refunded_after_payout) })}</span>}
               </td>
@@ -2940,8 +2940,9 @@ function ReconContractsTable({ rows, now, select }) {
                 {r.basis_at && <> {fmtDate(r.basis_at)}</>}
                 <span className="text-slate-600"> + {r.settlement_window}</span>
                 {r.due_at && <span className={`ml-2 font-semibold ${r.due ? 'text-emerald-400' : 'text-amber-400'}`}>{untilText(r.due_at, now)}</span>}
+                {r.due_date && <div className="text-[10px] text-slate-500">{t('dueDate {date}', { date: r.due_date })}</div>}
               </td>
-              <td className="px-4 py-2 text-right tabular-nums text-slate-300 whitespace-nowrap">{rupiah(r.order_amount)}<DiffNote d={diffOf(r, 'orderAmount')} /></td>
+              <td className="px-4 py-2 text-right tabular-nums text-slate-300 whitespace-nowrap">{rupiah(r.order_amount)}<DiffNote d={diffOf(r, 'orderAmount')} /><div><CollectionChip collections={r.collections} /></div></td>
               <td className="px-4 py-2 text-right tabular-nums text-rose-300 whitespace-nowrap">{r.refund ? `− ${rupiah(r.refund)}` : '—'}<DiffNote d={diffOf(r, 'refundAmount')} /></td>
               <td className="px-4 py-2 text-right tabular-nums text-amber-300 whitespace-nowrap">{r.commission ? `− ${rupiah(r.commission)}` : '—'}<DiffNote d={diffOf(r, 'commission')} /></td>
               <td className="px-4 py-2 text-right tabular-nums font-semibold text-white whitespace-nowrap">{rupiah(r.net_payable)}<DiffNote d={diffOf(r, 'netPayable')} /></td>
@@ -3120,13 +3121,31 @@ function ReconciliationPage() {
                     className="w-full text-left px-5 py-3 flex flex-wrap items-center gap-3 hover:bg-white/[0.025]">
                     <ChevronDown size={14} className={`text-slate-500 transition-transform ${open ? 'rotate-180 text-cyan-400' : ''}`} />
                     <span className={`text-[10px] font-bold uppercase tracking-widest ${sent ? 'text-cyan-300' : 'text-slate-400'}`}>{sent ? t('Sent') : t('Received')}</span>
-                    <span className="font-mono text-xs text-slate-300 truncate max-w-[22rem]" title={b.id}>{b.id}</span>
+                    <span className="font-mono text-xs text-slate-300 truncate max-w-[22rem]" title={t('Exchange (transactionId); this app calls it {id}', { id: b.id })}>{b.transaction_id || b.id}</span>
                     <StatusBadge status={b.status} />
                     <span className="text-xs text-slate-500">{t('{count} contracts', { count: b.contract_ids?.length || 0 })}</span>
+                    {(() => {
+                      let ans = b.response_payload
+                      try { if (typeof ans === 'string') ans = JSON.parse(ans) } catch { }
+                      const a = ans?.message?.settlementSummary
+                      return a?.agreedCount != null && (
+                        <span className="text-xs">
+                          <span className="text-emerald-300">{t('{count} agreed', { count: a.agreedCount })}</span>
+                          {a.disputedCount > 0 && <span className="text-rose-300">{' · '}{t('{count} disputed', { count: a.disputedCount })}</span>}
+                          {a.pendingCount > 0 && <span className="text-amber-300">{' · '}{t('{count} pending', { count: a.pendingCount })}</span>}
+                        </span>
+                      )
+                    })()}
                     <span className="ml-auto text-xs font-semibold text-emerald-300 tabular-nums">{rupiah(sum?.totalNetPayable)}</span>
                     <span className="text-[11px] text-slate-500 whitespace-nowrap">{fmtDate(b.created_at)}</span>
                   </button>
                   {b.error_message && <p className="px-5 pb-2 -mt-1 text-xs text-red-300 break-words">{b.error_message}</p>}
+                  {open && (
+                    <div className="px-5 pb-3 space-y-3">
+                      <AnswerSummary request={b.request_payload} response={b.response_payload} />
+                      <BatchSettlements request={b.request_payload} response={b.response_payload} sent={sent} />
+                    </div>
+                  )}
                   {open && (
                     <div className="px-5 pb-4 grid grid-cols-1 lg:grid-cols-2 gap-3">
                       {[[sent ? t('/reconcile sent') : t('/reconcile received'), b.request_payload],
@@ -3952,20 +3971,19 @@ function CatalogDetailPage({ onNav, catalogId }) {
 
 // ─── Add Product Page ─────────────────────────────────────────────────────────
 
-const DAYS_OF_WEEK = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN']
 
 const PRODUCT_AUTOFILL_POOL = [
   {
     res: { id: 'item-keripik-singkong', name: 'Keripik Singkong Balado (Spicy Cassava Chips)', short_desc: 'Crispy cassava chips with balado seasoning', long_desc: 'Keripik singkong renyah dengan bumbu balado khas Minang yang pedas manis. (Crispy cassava chips with authentic Minang sweet and spicy balado seasoning.)', product_highlights: '- Terbuat dari singkong segar pilihan (Made from fresh selected cassava)\n- Bumbu balado asli minang (Authentic Minang balado seasoning)\n- Tanpa pengawet buatan (No artificial preservatives)', specifications: '- Berat Bersih (Net Weight): 150g\n- Kemasan (Packaging): Plastik Ziplock (Ziplock Plastic)\n- Bahan Utama (Main Ingredient): Singkong, Cabai (Cassava, Chili)', media_url: 'https://images.unsplash.com/photo-1621939514649-280e2ee25f60?w=400', brand: 'Chitato', origin_country: 'ID', weight_value: '150', weight_unit: 'G', color: 'Golden', material: 'Cassava' },
-    off: { id: 'offer-keripik-singkong', commission_type: 'PERCENT', commission_value: '5', commission_applies_to: 'ITEM_TOTAL', settlement_basis: 'AFTER_DELIVERY', settlement_window: 'P3D', name: 'Keripik Singkong Balado', price: '25000', currency: 'IDR', cod_available: true, returns_allowed: true, returns_window: 'P7D', returns_method: 'SELLER_PICKUP', returns_fee_type: 'PERCENTAGE', returns_fee_value: '10', cancel_allowed: true, cancel_window: 'PT2H', cancel_event: 'BEFORE_PACKING', replace_allowed: false, max_distance: '20', timing_days: ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'], timing_start: '09:00', timing_end: '21:00', offer_context: 'https://schema.ion.id/release1/schema/extension/trade/TradeOffer/v1/context.jsonld' }
+    off: { id: 'offer-keripik-singkong', commissions: [{ name: 'Finder fee', type: 'PERCENT', value: '5', applies_to: 'ITEM_TOTAL' }, { name: 'Platform fee', type: 'AMOUNT', value: '500' }], settlement_basis: 'AFTER_DELIVERY', settlement_window: 'P3D', name: 'Keripik Singkong Balado', price: '25000', currency: 'IDR', cod_available: true, returns_allowed: true, returns_window: 'P7D', returns_method: 'SELLER_PICKUP', returns_fee_type: 'PERCENTAGE', returns_fee_value: '10', cancel_allowed: true, cancel_window: 'PT2H', cancel_event: 'BEFORE_PACKING', replace_allowed: false, max_distance: '20', offer_context: 'https://schema.ion.id/release1/schema/extension/trade/TradeOffer/v1/context.jsonld' }
   },
   {
     res: { id: 'item-bolu-pisang', name: 'Bolu Pisang Cokelat (Chocolate Banana Cake)', short_desc: 'Soft banana cake with chocolate chips', long_desc: 'Bolu pisang panggang yang lembut dipadukan dengan taburan cokelat lezat di atasnya. (Soft baked banana cake topped with delicious chocolate chips.)', product_highlights: '- Dibuat dengan pisang ambon segar (Made with fresh Ambon bananas)\n- Tekstur lembut dan lumer di mulut (Soft texture that melts in the mouth)\n- Taburan cokelat premium (Premium chocolate chips)', specifications: '- Berat Bersih (Net Weight): 400g\n- Kemasan (Packaging): Kardus Makanan (Food Box)\n- Bahan Utama (Main Ingredient): Tepung, Pisang, Cokelat (Flour, Banana, Chocolate)', media_url: 'https://images.unsplash.com/photo-1578985545062-69928b1d9587?w=400', brand: 'HomeMade', origin_country: 'ID', weight_value: '400', weight_unit: 'G', color: 'Brown', material: 'Flour' },
-    off: { id: 'offer-bolu-pisang', commission_type: 'AMOUNT', commission_value: '1500', settlement_basis: 'ON_CONFIRMATION', settlement_window: 'P1D', name: 'Bolu Pisang Cokelat', price: '45000', currency: 'IDR', cod_available: true, returns_allowed: false, cancel_allowed: true, cancel_window: 'PT1H', cancel_event: 'BEFORE_PACKING', replace_allowed: false, max_distance: '10', timing_days: ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'], timing_start: '08:00', timing_end: '18:00', offer_context: 'https://schema.ion.id/release1/schema/extension/trade/TradeOffer/v1/context.jsonld' }
+    off: { id: 'offer-bolu-pisang', commissions: [{ name: 'Finder fee', type: 'AMOUNT', value: '1500' }], settlement_basis: 'ON_CONFIRMATION', settlement_window: 'P1D', name: 'Bolu Pisang Cokelat', price: '45000', currency: 'IDR', cod_available: true, returns_allowed: false, cancel_allowed: true, cancel_window: 'PT1H', cancel_event: 'BEFORE_PACKING', replace_allowed: false, max_distance: '10', offer_context: 'https://schema.ion.id/release1/schema/extension/trade/TradeOffer/v1/context.jsonld' }
   },
   {
     res: { id: 'item-teh-botol', name: 'Teh Botol Sosro (Bottled Jasmine Tea)', short_desc: 'Ready-to-drink jasmine tea', long_desc: 'Minuman teh melati siap saji legendaris Indonesia yang menyegarkan dahaga. (Legendary Indonesian ready-to-drink jasmine tea that is very refreshing.)', product_highlights: '- Terbuat dari daun teh melati asli (Made from real jasmine tea leaves)\n- Proses penyeduhan higienis (Hygienic brewing process)\n- Menyegarkan dahaga (Refreshing thirst quencher)', specifications: '- Isi Bersih (Net Volume): 350ml\n- Kemasan (Packaging): Botol Plastik PET (PET Plastic Bottle)\n- Bahan Utama (Main Ingredient): Air, Ekstrak Teh (Water, Tea Extract)', media_url: 'https://images.unsplash.com/photo-1556679343-c7306c1976bc?w=400', brand: 'Sosro', origin_country: 'ID', weight_value: '350', weight_unit: 'ML', color: 'Amber', material: 'PET Bottle' },
-    off: { id: 'offer-teh-botol', commission_type: 'PERCENT', commission_value: '2', commission_applies_to: 'ORDER_TOTAL', settlement_basis: 'AFTER_DELIVERY', settlement_window: 'P1D', name: 'Teh Botol Sosro', price: '5000', currency: 'IDR', cod_available: true, returns_allowed: false, cancel_allowed: true, cancel_window: 'PT30M', cancel_event: 'BEFORE_PACKING', replace_allowed: false, max_distance: '15', timing_days: ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'], timing_start: '07:00', timing_end: '22:00', offer_context: 'https://schema.ion.id/release1/schema/extension/trade/TradeOffer/v1/context.jsonld' }
+    off: { id: 'offer-teh-botol', commissions: [{ name: 'Finder fee', type: 'PERCENT', value: '2', applies_to: 'ORDER_TOTAL' }], settlement_basis: 'AFTER_DELIVERY', settlement_window: 'P1D', name: 'Teh Botol Sosro', price: '5000', currency: 'IDR', cod_available: true, returns_allowed: false, cancel_allowed: true, cancel_window: 'PT30M', cancel_event: 'BEFORE_PACKING', replace_allowed: false, max_distance: '15', offer_context: 'https://schema.ion.id/release1/schema/extension/trade/TradeOffer/v1/context.jsonld' }
   },
 ]
 // Next sample per CRC for the Add Product page's Auto-fill (CRC_AUTOFILL).
@@ -4039,7 +4057,6 @@ function OfferForm({ off, oSet, offOpen, setOffOpen, catalogId, lockId, showReso
         <div><label className={labelCls}>{t('Short Description')}</label>
           <input className={inputCls} value={off.short_desc} onChange={e => oSet('short_desc', e.target.value)} placeholder={t('Best seller flask')} />
         </div>
-        <SettlementTermsFields offer={off} onChange={oSet} labelCls={labelCls} inputCls={inputCls} />
       </div>
 
       {/* Policies collapsible */}
@@ -4050,6 +4067,7 @@ function OfferForm({ off, oSet, offOpen, setOffOpen, catalogId, lockId, showReso
       </button>
       {offOpen.pol && (
         <div className="mt-3 space-y-3">
+          <SettlementTermsFields offer={off} onChange={oSet} labelCls={labelCls} inputCls={inputCls} />
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {/* Returns */}
             <div className="p-3 rounded-lg bg-slate-800/50 border border-white/[0.06] space-y-2">
@@ -4122,28 +4140,6 @@ function OfferForm({ off, oSet, offOpen, setOffOpen, catalogId, lockId, showReso
                 <select className={`${inputCls.replace('w-full', 'w-20')} shrink-0`} value={off.distance_unit} onChange={e => oSet('distance_unit', e.target.value)}>
                   {['KM', 'MI'].map(u => <option key={u} className="bg-slate-900">{u}</option>)}
                 </select>
-              </div>
-            </div>
-          </div>
-          {/* Timing */}
-          <div className="p-3 rounded-lg bg-slate-800/50 border border-white/[0.06] space-y-3">
-            <p className="text-xs font-semibold text-slate-300">{t('Operating Hours')}</p>
-            <div className="flex flex-wrap gap-1.5">
-              {DAYS_OF_WEEK.map(d => (
-                <button key={d} type="button"
-                  onClick={() => oSet('timing_days', off.timing_days.includes(d) ? off.timing_days.filter(x => x !== d) : [...off.timing_days, d])}
-                  className={`px-2.5 py-1.5 rounded-md text-[11px] font-bold transition-colors ${off.timing_days.includes(d) ? 'text-white' : 'border border-white/[0.10] text-slate-500 hover:text-white'}`}
-                  style={off.timing_days.includes(d) ? { background: BRAND } : {}}>
-                  {t(d)}
-                </button>
-              ))}
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div><label className={labelCls}>{t('Opens')}</label>
-                <input type="time" className={inputCls} value={off.timing_start} onChange={e => oSet('timing_start', e.target.value)} />
-              </div>
-              <div><label className={labelCls}>{t('Closes')}</label>
-                <input type="time" className={inputCls} value={off.timing_end} onChange={e => oSet('timing_end', e.target.value)} />
               </div>
             </div>
           </div>
@@ -4578,7 +4574,6 @@ function AddOfferPage({ onNav, catalogId, preselectedResourceId, editOfferId }) 
             currency: off.currency,
             ...buildPriceBreakup(off),
             paymentMethods: off.cod_available ? ['PREPAID', 'COD', 'DIGITAL_WALLET'] : ['PREPAID', 'DIGITAL_WALLET'],
-            commission: buildCommission(off),
           },
         }],
       } : {}),

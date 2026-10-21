@@ -1,16 +1,18 @@
 // Package offerterms puts the seller's settlement terms on its offers (ION
 // Release 1; see package settlement):
 //
-//   - the commission (finder fee) the seller pays the buyer app, on each of
-//     the offer's considerations: considerationAttributes.commission
-//     (IONTradeConsideration) -- type PERCENT or AMOUNT (per unit), value,
-//     and for PERCENT appliesTo ITEM_TOTAL | ORDER_TOTAL;
+//   - the commission the seller pays the buyer app,
+//     offerAttributes.policies.commission (IONTradeOffer): named entries
+//     that add up (feeName), each feeType PERCENT or AMOUNT (per unit),
+//     feeValue, and for PERCENT appliesTo ITEM_TOTAL | ORDER_TOTAL;
 //   - the payout term, offerAttributes.policies.settlement (IONTradeOffer) --
 //     settlementBasis and settlementWindow.
 //
-// An offer published without them gets this BPP's defaults (Defaults). At
-// select, init and confirm the order's offers get the terms stored for them
-// here (Apply), so what the buyer app sends back cannot change them.
+// An offer published without them gets this BPP's defaults (Defaults). The
+// offer's considerations carry no commission (StripCommission); only the
+// contract's price does (see package settlement). At select, init and
+// confirm the order's offers get the terms stored for them here (Apply), so
+// what the buyer app sends back cannot change them.
 package offerterms
 
 import (
@@ -20,6 +22,7 @@ import (
 
 	"github.com/ion/winroom/bpp/db/sqlc"
 	"github.com/ion/winroom/bpp/internal/config"
+	"github.com/ion/winroom/bpp/internal/settlement"
 )
 
 // Defaults are the terms an offer without its own gets.
@@ -40,13 +43,16 @@ func FromConfig(cfg *config.Config) Defaults {
 	}
 }
 
-// Commission is d's commission object.
-func (d Defaults) Commission() map[string]any {
-	c := map[string]any{"type": d.CommissionType, "value": d.CommissionValue}
+// DefaultCommissionName names the default commission entry.
+const DefaultCommissionName = "Finder fee"
+
+// Commission is d's policies.commission: one entry, the finder fee.
+func (d Defaults) Commission() []any {
+	c := map[string]any{"feeName": DefaultCommissionName, "feeType": d.CommissionType, "feeValue": d.CommissionValue}
 	if d.CommissionType == "PERCENT" {
 		c["appliesTo"] = d.CommissionAppliesTo
 	}
-	return c
+	return []any{c}
 }
 
 // Policy is d's policies.settlement.
@@ -54,8 +60,9 @@ func (d Defaults) Policy() map[string]any {
 	return map[string]any{"settlementBasis": d.Basis, "settlementWindow": d.Window}
 }
 
-// FillAttributes gives offer attributes without policies.settlement d's. An
-// empty or unreadable raw is returned unchanged.
+// FillAttributes gives offer attributes without policies.settlement or
+// policies.commission d's, and renames commission entries stored under the
+// earlier field names. An empty or unreadable raw is returned unchanged.
 func FillAttributes(raw json.RawMessage, d Defaults) json.RawMessage {
 	var attrs map[string]any
 	if len(raw) == 0 || json.Unmarshal(raw, &attrs) != nil || attrs == nil {
@@ -71,16 +78,17 @@ func FillAttributes(raw json.RawMessage, d Defaults) json.RawMessage {
 	return out
 }
 
-// FillConsideration gives consideration attributes without a commission d's.
-func FillConsideration(raw json.RawMessage, d Defaults) json.RawMessage {
+// StripCommission removes a commission from an offer consideration's
+// attributes: the offer states it in policies.commission.
+func StripCommission(raw json.RawMessage) json.RawMessage {
 	var attrs map[string]any
 	if len(raw) == 0 || json.Unmarshal(raw, &attrs) != nil || attrs == nil {
 		return raw
 	}
-	if _, ok := attrs["commission"].(map[string]any); ok {
+	if _, ok := attrs["commission"]; !ok {
 		return raw
 	}
-	attrs["commission"] = d.Commission()
+	delete(attrs, "commission")
 	out, err := json.Marshal(attrs)
 	if err != nil {
 		return raw
@@ -94,8 +102,13 @@ func fillPolicy(attrs map[string]any, d Defaults) bool {
 		policies = map[string]any{}
 		attrs["policies"] = policies
 	}
+	changed := false
+	if c, _ := policies["commission"].([]any); len(c) == 0 {
+		policies["commission"], changed = d.Commission(), true
+	} else if renamed := entries(c); !reflect.DeepEqual(renamed, c) {
+		policies["commission"], changed = renamed, true // stored under the earlier field names
+	}
 	if p, ok := policies["settlement"].(map[string]any); ok && (p["settlementBasis"] != nil || p["settlementWindow"] != nil) {
-		changed := false
 		if p["settlementBasis"] == nil {
 			p["settlementBasis"], changed = d.Basis, true
 		}
@@ -116,7 +129,9 @@ type Store interface {
 
 // Apply sets the terms of each commitment's offer in contract: those stored
 // for the offer in this BPP, with d where the offer has none (an offer
-// published before the terms, or no longer stored).
+// published before the terms, or no longer stored). An offer stored with its
+// commission on its price consideration (published before the commission
+// moved to policies.commission) gives that as its one entry.
 func Apply(ctx context.Context, store Store, bppID string, contract map[string]any, d Defaults) {
 	for _, raw := range slice(contract["commitments"]) {
 		offer := asMap(asMap(raw)["offer"])
@@ -125,23 +140,25 @@ func Apply(ctx context.Context, store Store, bppID string, contract map[string]a
 		}
 		policy, commission := d.Policy(), d.Commission()
 		if id, _ := offer["id"].(string); id != "" {
+			stored := false
 			if row, err := store.GetOffer(ctx, sqlc.GetOfferParams{ID: id, BppID: bppID}); err == nil {
 				var attrs map[string]any
+				if json.Unmarshal(row.OfferAttributes, &attrs) == nil {
+					if c, _ := asMap(attrs["policies"])["commission"].([]any); len(c) > 0 {
+						commission, stored = entries(c), true
+					}
+				}
 				if json.Unmarshal(FillAttributes(row.OfferAttributes, d), &attrs) == nil {
 					if p := asMap(asMap(attrs["policies"])["settlement"]); p != nil {
 						policy = p
 					}
 				}
 			}
-			if rows, err := store.GetOfferConsiderations(ctx, sqlc.GetOfferConsiderationsParams{OfferID: id, BppID: bppID}); err == nil {
-				for _, r := range rows {
-					var attrs map[string]any
-					if json.Unmarshal(r.ConsiderationAttributes, &attrs) == nil {
-						if c := asMap(attrs["commission"]); c != nil {
-							commission = c
-							break
-						}
-					}
+			if !stored {
+				if c := priceCommission(ctx, store, id, bppID); c != nil {
+					c = settlement.CommissionEntry(c)
+					c["feeName"] = DefaultCommissionName
+					commission = []any{c}
 				}
 			}
 		}
@@ -156,16 +173,41 @@ func Apply(ctx context.Context, store Store, bppID string, contract map[string]a
 			oa["policies"] = policies
 		}
 		policies["settlement"] = policy
+		policies["commission"] = commission
 		for _, c := range slice(offer["considerations"]) {
-			cm := asMap(c)
-			ca := asMap(cm["considerationAttributes"])
-			if ca == nil {
-				ca = map[string]any{}
-				cm["considerationAttributes"] = ca
-			}
-			ca["commission"] = copyMap(commission)
+			delete(asMap(asMap(c)["considerationAttributes"]), "commission")
 		}
 	}
+}
+
+// entries is a stored policies.commission under ION's field names: an entry
+// stored under the earlier ones (name, type, value) is renamed.
+func entries(stored []any) []any {
+	out := make([]any, 0, len(stored))
+	for _, e := range stored {
+		if m := asMap(e); m != nil {
+			out = append(out, settlement.CommissionEntry(m))
+		}
+	}
+	return out
+}
+
+// priceCommission is the commission stored on an offer's price
+// consideration, from before the commission moved to policies.commission.
+func priceCommission(ctx context.Context, store Store, offerID, bppID string) map[string]any {
+	rows, err := store.GetOfferConsiderations(ctx, sqlc.GetOfferConsiderationsParams{OfferID: offerID, BppID: bppID})
+	if err != nil {
+		return nil
+	}
+	for _, r := range rows {
+		var attrs map[string]any
+		if json.Unmarshal(r.ConsiderationAttributes, &attrs) == nil {
+			if c := asMap(attrs["commission"]); c != nil {
+				return copyMap(c)
+			}
+		}
+	}
+	return nil
 }
 
 // ApplyTo applies the terms (Apply) to a typed contract v (a pointer to a

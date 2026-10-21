@@ -84,6 +84,7 @@ const (
 	BecknActionCatalogPull         BecknAction = "catalog_pull"
 	BecknActionReconcile           BecknAction = "reconcile"
 	BecknActionOnReconcile         BecknAction = "on_reconcile"
+	BecknActionCatalogRetire       BecknAction = "catalog_retire"
 )
 
 func (e *BecknAction) Scan(src interface{}) error {

@@ -59,7 +59,7 @@ func TestConfirmPaysTheSettlementKeepingTheAgreedTerms(t *testing.T) {
 	sa := asObj(asObj(asSlice(c["settlements"])[0])["settlementAttributes"])
 	sa["settlementAccounts"] = append(asSlice(sa["settlementAccounts"]), map[string]interface{}{"holderRole": "BPP", "bankCode": "BCA", "accountNumber": "2"})
 	price := asObj(asObj(asSlice(c["consideration"])[0])["considerationAttributes"])
-	asObj(price["commission"])["amount"] = 2500.0
+	asObj(price["commission"])["feeAmount"] = 2500.0
 	declaredID := asObj(asSlice(c["settlements"])[0])["id"]
 	if err := attachSettlement(c, termsConfig()); err != nil {
 		t.Fatal(err)

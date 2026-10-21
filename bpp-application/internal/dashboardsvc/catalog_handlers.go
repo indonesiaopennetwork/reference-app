@@ -616,7 +616,7 @@ func (h *Handler) insertOffer(ctx context.Context, q *dbsqlc.Queries, catalogID,
 
 	// Insert considerations.
 	for _, consid := range offer.Considerations {
-		consid.ConsiderationAttributes = offerterms.FillConsideration(consid.ConsiderationAttributes, d)
+		consid.ConsiderationAttributes = offerterms.StripCommission(consid.ConsiderationAttributes)
 		cAttrsCtx, cAttrsType := extractContextType(consid.ConsiderationAttributes)
 		if err := q.InsertOfferConsideration(ctx, dbsqlc.InsertOfferConsiderationParams{
 			OfferID:                        offer.ID,
@@ -812,7 +812,7 @@ func (h *Handler) HandlePublishCatalog(c *gin.Context) {
 				ro.offer.Considerations = append(ro.offer.Considerations, catalog.Consideration{
 					ID:                      considID,
 					Status:                  catalog.Status{Code: statusCode, Name: statusName},
-					ConsiderationAttributes: offerterms.FillConsideration(attrs, offerterms.FromConfig(h.cfg)),
+					ConsiderationAttributes: offerterms.StripCommission(attrs),
 				})
 			}
 		}
@@ -1289,7 +1289,7 @@ func (h *Handler) HandleAddOffer(c *gin.Context) {
 	}
 
 	for _, consid := range req.Considerations {
-		consid.ConsiderationAttributes = offerterms.FillConsideration(consid.ConsiderationAttributes, d)
+		consid.ConsiderationAttributes = offerterms.StripCommission(consid.ConsiderationAttributes)
 		cAttrsCtx, cAttrsType := extractContextType(consid.ConsiderationAttributes)
 		if err := qt.InsertOfferConsideration(ctx, dbsqlc.InsertOfferConsiderationParams{
 			OfferID:                        req.ID,

@@ -248,7 +248,7 @@ func (h *Handler) HandleUpdateOffer(c *gin.Context) {
 		return
 	}
 	for _, cons := range req.Considerations {
-		cons.ConsiderationAttributes = offerterms.FillConsideration(cons.ConsiderationAttributes, d)
+		cons.ConsiderationAttributes = offerterms.StripCommission(cons.ConsiderationAttributes)
 		cCtx, cType := extractContextType(cons.ConsiderationAttributes)
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO offer_considerations (offer_id, catalog_id, bpp_id, consideration_id, status_code, status_name,

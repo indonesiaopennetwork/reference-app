@@ -1,0 +1,198 @@
+# Bundled from ion-specs releases/release1/schema/extension/trade/TradeConsideration/v1/attributes.yaml
+# by scripts/bundle_ion_pack.py: components of other ION packs are
+# inlined from the local ion-specs tree; vendored Beckn refs stay remote.
+# Do not edit by hand; re-run the script (see schemas/README.md).
+openapi: 3.1.1
+info:
+  title: ION Trade Consideration Extension (v1)
+  description: 'Trade sector consideration attributes. Inherits the monetary amount, payment method, breakup,
+    voucher, and loyalty-point structures defined by RetailConsideration v2.1, refines tax details for
+    ION, and adds the commission an order comes to (IONCommission), on the contract''s price consideration.
+    Attaches to: beckn:Consideration.considerationAttributes
+
+    '
+  version: 1.0.0
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+  contact:
+    name: ION Network
+    url: https://schema.ion.id
+components:
+  schemas:
+    IONTradeConsideration:
+      type: object
+      title: IONTradeConsideration
+      description: 'ION trade consideration attributes. Inherits directly from RetailConsideration v2.1
+        and refines inherited breakup taxDetail objects with the shared IONTaxDetail schema.
+
+        '
+      x-ion-layer: ion
+      x-ion-split-version: 0.7.0
+      x-recommended-parent: Consideration.considerationAttributes
+      additionalProperties: true
+      x-jsonld:
+        '@context': https://schema.ion.id/release1/schema/extension/trade/TradeConsideration/v1/context.jsonld
+        '@type': ion:IONTradeConsideration
+      x-beckn-attaches-to: Consideration.considerationAttributes
+      x-ion-closed-extensions: false
+      allOf:
+      - $ref: https://schema.ion.id/release1/schema/vendored/beckn/schemas/RetailConsideration/2.1/attributes.yaml#/components/schemas/RetailConsideration
+      properties:
+        breakup:
+          x-attr-ion-layer: ion
+          type: array
+          description: 'Inherited RetailConsideration price breakup, refined so each taxDetail object
+            may carry IONTaxDetail classification and compliance fields.
+
+            '
+          items:
+            allOf:
+            - $ref: https://schema.ion.id/release1/schema/vendored/beckn/schemas/RetailConsideration/2.1/attributes.yaml#/components/schemas/RetailConsideration/properties/breakup/items
+            - type: object
+              properties:
+                taxDetail:
+                  allOf:
+                  - $ref: '#/components/schemas/IONTaxDetail'
+        commission:
+          x-attr-ion-layer: ion
+          allOf:
+          - $ref: '#/components/schemas/IONCommission'
+          description: 'Commission the order comes to: what the seller (BPP) pays the buyer app (BAP),
+            deducted from the seller''s payout. Not a charge to the buyer, and not part of breakup or
+            totalAmount. Set only on the contract''s price consideration in force; the offer''s commission
+            terms are IONTradeOffer.policies.commission (see IONCommission).
+
+            '
+    IONCommission:
+      type: object
+      title: IONCommission
+      description: 'The commission an order comes to: what the seller (BPP) pays the buyer app (BAP),
+        deducted from the seller''s payout at settlement. Not a charge to the buyer, and not part of breakup
+        or totalAmount. Set only on the contract''s price consideration in force; the offer''s terms are
+        the named entries of IONTradeOffer.policies.commission.
+
+        feeAmount is the total commission for the items still ordered: the sum, over every offer still
+        ordered, of all its policies.commission entries. The BPP sets it in on_select and on_init and
+        recomputes it in on_cancel and on_update after cancellations and returns.
+
+        When every offer still ordered has exactly one commission entry and they all share the same PERCENT
+        terms, the contract repeats that feeType, feeValue and appliesTo; otherwise feeType is AMOUNT
+        and feeValue is the total.
+
+        At reconciliation the settlement''s commission.value (IONSettlementReconciliation) equals feeAmount.
+
+        '
+      x-ion-layer: ion
+      additionalProperties: false
+      required:
+      - feeType
+      - feeValue
+      properties:
+        feeType:
+          type: string
+          enum:
+          - PERCENT
+          - AMOUNT
+          description: 'PERCENT repeats the shared PERCENT terms of the offers ordered. AMOUNT means feeValue
+            is the order''s total commission in the consideration currency.
+
+            '
+          example: PERCENT
+        feeValue:
+          type: number
+          minimum: 0
+          description: 'Percentage (0-100) when feeType is PERCENT; the order''s total commission in the
+            consideration currency when feeType is AMOUNT.
+
+            '
+          example: 3
+        appliesTo:
+          type: string
+          enum:
+          - ITEM_TOTAL
+          - ORDER_TOTAL
+          default: ITEM_TOTAL
+          description: 'Base for a PERCENT commission. ITEM_TOTAL is the item value excluding tax, delivery
+            and packing; ORDER_TOTAL includes tax. Only for feeType PERCENT.
+
+            '
+          example: ITEM_TOTAL
+        feeAmount:
+          type: number
+          minimum: 0
+          description: 'Total commission in the consideration currency for the items still ordered: the
+            sum over every offer still ordered of all its policies.commission entries. Equals the settlement''s
+            commission.value at reconciliation.
+
+            '
+          example: 2670
+      if:
+        properties:
+          feeType:
+            const: PERCENT
+      then:
+        properties:
+          feeValue:
+            maximum: 100
+      else:
+        not:
+          required:
+          - appliesTo
+    IONTaxDetail:
+      type: object
+      title: IONTaxDetail
+      description: 'Indonesia-specific extension of the RetailConsideration v2.1 taxDetail object. Inherits
+        rate, included, and taxableBase. The containing breakup item''s amount is the calculated tax amount.
+
+        '
+      x-ion-layer: ion
+      x-ion-split-version: 0.7.0
+      x-recommended-parent: Consideration.considerationAttributes.breakup[].taxDetail
+      x-beckn-attaches-to: Consideration.considerationAttributes.breakup[].taxDetail
+      x-jsonld:
+        '@context': https://schema.ion.id/release1/schema/common/Tax/v1/context.jsonld
+        '@type': ion:IONTaxDetail
+      additionalProperties: true
+      allOf:
+      - $ref: https://schema.ion.id/release1/schema/vendored/beckn/schemas/RetailConsideration/2.1/attributes.yaml#/components/schemas/RetailConsideration/properties/breakup/items/properties/taxDetail
+      properties:
+        taxRegime:
+          type: string
+          enum:
+          - PPN
+          - PPNBM
+          - PPH22
+          - PPH23
+          - PPN_FINAL
+          - EXEMPT
+          description: 'Indonesian tax regime applied by this tax breakup entry. PPN is value-added tax;
+            PPNBM is luxury-goods sales tax; PPH22 and PPH23 are withholding regimes; PPN_FINAL is final
+            VAT for applicable categories; EXEMPT identifies a non-taxable transaction.
+
+            '
+          example: PPN
+          x-ion-regulatory: UU 7/2021 tentang Harmonisasi Peraturan Perpajakan (HPP)
+        taxCategory:
+          type: string
+          enum:
+          - BKP
+          - JKP
+          - NON_BKP
+          description: 'Indonesian taxable-supply classification. BKP identifies taxable goods, JKP identifies
+            taxable services, and NON_BKP identifies goods or services outside those taxable categories.
+
+            '
+          example: BKP
+          x-ion-regulatory: UU 8/1983 tentang PPN Pasal 4
+        eFakturRef:
+          type:
+          - string
+          - 'null'
+          description: 'DJP e-Faktur reference for the tax entry, when an electronic Faktur Pajak has
+            been issued. Format: XXX.XXX-YY.XXXXXXXX.
+
+            '
+          example: 010.000-26.00000001
+          x-ion-regulatory: PMK 168/PMK.010/2023 tentang Faktur Pajak
+      x-ion-closed-extensions: false

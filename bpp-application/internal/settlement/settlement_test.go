@@ -2,7 +2,9 @@ package settlement
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
+	"time"
 )
 
 func contract(t *testing.T, s string) map[string]any {
@@ -162,5 +164,55 @@ func TestALegacyContextIsReplaced(t *testing.T) {
 	contract = map[string]any{"settlements": []any{map[string]any{"id": "s", "settlementAttributes": map[string]any{"@context": legacy, "@type": Type}}}}
 	if a := Normalize(contract); a["@context"] != Context {
 		t.Errorf("Normalize kept %v", a["@context"])
+	}
+}
+
+func TestOrderDateIsTheJakartaDate(t *testing.T) {
+	// 18:30 UTC is 01:30 the next day in Jakarta.
+	if got := OrderDate(time.Date(2026, 10, 18, 18, 30, 0, 0, time.UTC)); got != "2026-10-19" {
+		t.Errorf("orderDate = %s, want 2026-10-19", got)
+	}
+}
+
+func TestPendingCodes(t *testing.T) {
+	if !IsPendingCode("SETTLEMENT_WINDOW_NOT_REACHED") || !IsPendingCode("AWAITING_INFORMATION") || IsPendingCode("COMMISSION_MISMATCH") {
+		t.Error("only SETTLEMENT_WINDOW_NOT_REACHED and AWAITING_INFORMATION are pending")
+	}
+}
+
+func TestCollections(t *testing.T) {
+	prepaid := Collections(map[string]any{"method": "QRIS", "status": "PAID", "gatewayRef": "GW-1"}, 98900)
+	want := map[string]any{"method": "PREPAID", "status": "COLLECTED", "collectorRole": "PJP", "reportedCollectedAmount": 98900.0, "referenceId": "GW-1"}
+	if len(prepaid) != 1 || !reflect.DeepEqual(prepaid[0], want) {
+		t.Errorf("prepaid = %v, want %v", prepaid, want)
+	}
+	cod := Collections(map[string]any{"method": "COD", "status": "PENDING", "collectedBy": "LSP"}, 50000)
+	want = map[string]any{"method": "COD", "status": "NOT_COLLECTED", "collectorRole": "LOGISTICS"}
+	if len(cod) != 1 || !reflect.DeepEqual(cod[0], want) {
+		t.Errorf("cod = %v, want %v", cod, want)
+	}
+	if Collections(map[string]any{}, 1) != nil {
+		t.Error("no payment status means no collections")
+	}
+}
+
+func TestRefundBreakupAndAllocate(t *testing.T) {
+	c := map[string]any{"performance": []any{map[string]any{"status": map[string]any{"code": "DELIVERED"}}}, "settlements": []any{
+		map[string]any{"id": "pay", "settlementAttributes": map[string]any{}},
+		map[string]any{"id": "refund-1", "settlementAttributes": map[string]any{"refund": map[string]any{"amount": 45000.0}}},
+		map[string]any{"id": "refund-2", "settlementAttributes": map[string]any{"refund": map[string]any{"amount": 10.0, "source": "PROVIDER"}}},
+	}}
+	got := RefundBreakup(c)
+	want := []any{map[string]any{"code": "RETURN", "includedIn": "REFUND", "amount": 45000.0, "referenceId": "refund-1"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("breakup = %v, want %v", got, want)
+	}
+	accounts := []any{map[string]any{"holderRole": "BAP"}, map[string]any{"holderRole": "BPP"}}
+	out := Allocate(accounts, "BPP", "bpp.example", 96230)
+	if b := out[1].(map[string]any); b["allocationFor"] != "BPP" || b["allocatedAmount"] != 96230.0 || b["holderId"] != "bpp.example" {
+		t.Errorf("BPP account = %v", b)
+	}
+	if a := out[0].(map[string]any); a["allocationFor"] != nil || accounts[1].(map[string]any)["allocationFor"] != nil {
+		t.Error("only the BPP's own account is marked, on a copy")
 	}
 }

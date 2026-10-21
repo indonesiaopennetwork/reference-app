@@ -399,7 +399,7 @@ func replaceOffers(ctx context.Context, q *dbsqlc.Queries, bppID, catalogID stri
 		}
 
 		for _, consid := range offer.Considerations {
-			consid.ConsiderationAttributes = offerterms.FillConsideration(consid.ConsiderationAttributes, d)
+			consid.ConsiderationAttributes = offerterms.StripCommission(consid.ConsiderationAttributes)
 			attrsCtx, attrsType := extractContextType(consid.ConsiderationAttributes)
 			if err := q.InsertOfferConsideration(ctx, dbsqlc.InsertOfferConsiderationParams{
 				OfferID:                        offer.ID,
