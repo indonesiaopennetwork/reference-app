@@ -649,6 +649,15 @@ func (h *Handler) HandlePublishCatalog(c *gin.Context) {
 		return
 	}
 
+	// Optional body -- {"forceBaseline": true} skips onix-catalog-publish's
+	// diff-against-prior-state and always writes a fresh baseline for this
+	// catalog (manual compaction). Every existing caller sends no body at
+	// all, so a missing/empty body is not an error, just forceBaseline=false.
+	var publishReq struct {
+		ForceBaseline bool `json:"forceBaseline"`
+	}
+	_ = c.ShouldBindJSON(&publishReq)
+
 	if owned, err := h.catalogOwnedByProvider(ctx, catalogID, auth.ProviderIDFromContext(c)); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -852,6 +861,7 @@ func (h *Handler) HandlePublishCatalog(c *gin.Context) {
 			Catalogs:          []catalog.OnixCatalog{catalog.ToOnixCatalog(becknCat, h.cfg.BppID, h.cfg.PublishedBppURI())},
 			PublishDirectives: []catalog.OnixPublishDirective{catalog.ToOnixPublishDirective(becknCat, h.cfg.BppID)},
 		},
+		ForceBaseline: publishReq.ForceBaseline,
 	}
 
 	body, _ := json.Marshal(becknReq)
