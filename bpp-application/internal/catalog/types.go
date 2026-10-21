@@ -104,6 +104,17 @@ type OnixPublishRequest struct {
 	// Retire with an empty Message.Catalogs; the plugin accepts that as a
 	// pure retirement, no catalog content required.
 	Retire []string `json:"retire,omitempty"`
+	// ForceBaseline bypasses onix-catalog-publish's diff-against-prior-state
+	// logic and always writes a fresh baseline instead of a change file --
+	// the manual counterpart to its compactionChangeCountThreshold/
+	// compactionSizeRatioThreshold config (which trigger the same thing
+	// automatically). Deliberately a top-level sibling of context/message,
+	// not nested per-catalog under message.publishDirectives[] -- verified
+	// empirically against the actual deployed fidedocker/catalog-publisher
+	// image (2026-08-14 build): a per-directive forceBaseline was silently
+	// ignored (mode=unchanged); this top-level field produced a real
+	// mode=baseline. Applies to every catalog in this call uniformly.
+	ForceBaseline bool `json:"forceBaseline,omitempty"`
 }
 
 type OnixPublishMessage struct {

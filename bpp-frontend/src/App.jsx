@@ -9,7 +9,7 @@ import {
   ArrowRight, Circle, Star, Ticket, Ban, Wand2,
   BookOpen, Send, ArrowLeft, ExternalLink,
   ChevronDown, Copy, Check, Scale, Pencil, Compass, Lock,
-  PauseCircle, PlayCircle,
+  PauseCircle, PlayCircle, Layers,
 } from 'lucide-react'
 import { captureTokenFromUrl, getToken, getIdToken, clearToken, redirectToLogin, basePath } from './auth.js'
 import Tour from './Tour.jsx'
@@ -3643,6 +3643,7 @@ function CatalogDetailPage({ onNav, catalogId }) {
   const [publishing, setPublishing] = useState(false)
   const [togglingActive, setTogglingActive] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [compacting, setCompacting] = useState(false)
 
   const cat = data?.catalog || {}
   const resources = data?.resources || []
@@ -3681,6 +3682,21 @@ function CatalogDetailPage({ onNav, catalogId }) {
       alert(t('Publish failed: {error}', { error: e.message }))
     } finally {
       setPublishing(false)
+    }
+  }
+
+  const handleForceRepublish = async () => {
+    const name = cat.name || catalogId
+    if (!window.confirm(t('This rewrites "{name}"\'s entire change history as one fresh baseline. Useful if it has accumulated a long chain of small edits. Continue?', { name }))) return
+    setCompacting(true)
+    try {
+      await apiFetch(`/catalogs/${catalogId}/publish`, { method: 'POST', body: JSON.stringify({ forceBaseline: true }) })
+      reload()
+      alert(t('Republished with a fresh baseline!'))
+    } catch (e) {
+      alert(t('Force republish failed: {error}', { error: e.message }))
+    } finally {
+      setCompacting(false)
     }
   }
 
@@ -3811,6 +3827,14 @@ function CatalogDetailPage({ onNav, catalogId }) {
             </button>
             {catalogEmpty && (
               <p className="text-[11px] text-amber-500">{t('Add a product or offer before publishing')}</p>
+            )}
+            {cat.isPublished && !catalogEmpty && (
+              <button onClick={handleForceRepublish} disabled={compacting}
+                title={t('Rewrite this catalog\'s change history as one fresh baseline')}
+                className="flex items-center gap-1 text-[11px] text-slate-500 hover:text-slate-300 transition-colors disabled:opacity-50">
+                <Layers size={11} />
+                {compacting ? t('Rewriting…') : t('Manual Compaction')}
+              </button>
             )}
           </div>
         </div>
