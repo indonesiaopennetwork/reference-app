@@ -3,14 +3,21 @@ package reconcilesvc
 import (
 	"context"
 	"encoding/json"
+
+	"github.com/ion/winroom/bap/internal/settlement"
 )
 
-// Result is how a contract fared in the disputed batch it was last in: in an
-// all-or-nothing batch most contracts may match, and only those with accord
-// false are the dispute.
+// Result is how a contract fared in the batch it was last in, when that left
+// it unresolved: disputed, or pending (sent before its settlement window, or
+// awaiting information).
 type Result struct {
-	Accord bool   `json:"accord"`
-	Code   string `json:"code,omitempty"`
+	Accord bool `json:"accord"`
+	// Pending: accord false with a pending code; the contract is sent again
+	// later rather than disputed.
+	Pending bool   `json:"pending,omitempty"`
+	Code    string `json:"code,omitempty"`
+	// Field is the figure the dispute names (dispute.field), when it does.
+	Field  string `json:"field,omitempty"`
 	Reason string `json:"reason,omitempty"`
 	// Diffs are the figures the two participants differ on.
 	Diffs []Diff `json:"diffs,omitempty"`
@@ -50,7 +57,8 @@ func batchResults(request, response json.RawMessage, outbound bool) map[string]*
 	for id, ans := range answered {
 		accord, _ := ans["accord"].(bool)
 		dispute := asMap(ans["dispute"])
-		r := &Result{Accord: accord, Code: str(dispute["code"]), Reason: str(dispute["description"])}
+		r := &Result{Accord: accord, Code: str(dispute["code"]), Field: str(dispute["field"]), Reason: str(dispute["description"])}
+		r.Pending = !accord && settlement.IsPendingCode(r.Code)
 		ours, theirs := sent[id], ans
 		if !outbound {
 			ours, theirs = ans, sent[id]

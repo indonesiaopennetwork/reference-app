@@ -3,17 +3,17 @@
 // The terms are the seller's, published on each offer and carried on the
 // order's commitments:
 //
-//   - the commission (finder fee) the seller pays the buyer app:
-//     offer.considerations[].considerationAttributes.commission (ION
-//     IONTradeConsideration) -- PERCENT of the offer's item value
-//     (ITEM_TOTAL, excluding tax) or of its total (ORDER_TOTAL), or a fixed
-//     AMOUNT per unit sold;
+//   - the commission the seller pays the buyer app:
+//     offer.offerAttributes.policies.commission (ION IONTradeOffer), named
+//     entries that add up (a finder fee, a platform fee, ...) -- each
+//     PERCENT of the offer's item value (ITEM_TOTAL, excluding tax) or of
+//     its total (ORDER_TOTAL), or a fixed AMOUNT per unit sold;
 //   - the payout terms: offer.offerAttributes.policies.settlement (ION
 //     IONTradeOffer) -- settlementBasis and settlementWindow. With several
 //     offers, the term giving the latest due date applies.
 //
 // The contract's price consideration carries the commission the order comes
-// to (commission.amount), set by the BPP in on_select / on_init and
+// to (commission.feeAmount), set by the BPP in on_select / on_init and
 // recomputed after cancellations and returns (Refresh).
 //
 // The settlement object is ION Release 1 IONSettlementReconciliation
@@ -44,6 +44,7 @@ package settlement
 import (
 	"math"
 	"strings"
+	"time"
 )
 
 const (
@@ -101,15 +102,50 @@ func OfferTerm(offer map[string]any) (t Term, ok bool) {
 	return t, t.Basis != "" || t.Window != ""
 }
 
-// OfferCommission is an offer's commission terms (type, value, appliesTo),
-// from the first of its considerations that states one; nil when none does.
-func OfferCommission(offer map[string]any) map[string]any {
+// OfferCommission is an offer's commission: the entries of its
+// offerAttributes.policies.commission (feeName, feeType, feeValue,
+// appliesTo), which add up. An offer published while the commission sat on
+// its price consideration (considerationAttributes.commission) gives that one
+// entry. Entries are returned in CommissionEntry form. nil when the offer
+// states none.
+func OfferCommission(offer map[string]any) []map[string]any {
+	var entries []map[string]any
+	for _, e := range slice(asMap(asMap(asMap(offer["offerAttributes"])["policies"]))["commission"]) {
+		if m := asMap(e); m != nil {
+			entries = append(entries, CommissionEntry(m))
+		}
+	}
+	if len(entries) > 0 {
+		return entries
+	}
 	for _, c := range slice(offer["considerations"]) {
 		if m := asMap(asMap(asMap(c)["considerationAttributes"])["commission"]); m != nil {
-			return m
+			return []map[string]any{CommissionEntry(m)}
 		}
 	}
 	return nil
+}
+
+// commissionKeys map the commission fields' earlier names (name, type,
+// value, amount) to ION's (feeName, feeType, feeValue, feeAmount).
+var commissionKeys = map[string]string{"name": "feeName", "type": "feeType", "value": "feeValue", "amount": "feeAmount"}
+
+// CommissionEntry is a commission object (an offer's policies.commission
+// entry or a consideration's commission) under ION's field names; one stored
+// under the earlier names (name, type, value, amount) is renamed. The
+// result is a new map.
+func CommissionEntry(m map[string]any) map[string]any {
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		if to, ok := commissionKeys[k]; ok {
+			if _, has := m[to]; has {
+				continue
+			}
+			k = to
+		}
+		out[k] = v
+	}
+	return out
 }
 
 // PayoutTerms are the contract's payout terms: those of the offers still
@@ -139,12 +175,13 @@ func PayoutTerms(contract map[string]any) []Term {
 
 // OfferCommissionOf works out the commission the contract's offers come to,
 // as the contract consideration's commission object: the offers' own terms
-// when every offer still ordered has the same PERCENT terms, otherwise type
-// AMOUNT with value the order's total; amount is the total either way. Each
-// offer's fee is on its own items: PERCENT of the unit price (ITEM_TOTAL) or
-// of the unit total with tax (ORDER_TOTAL), or the AMOUNT, times the
-// quantity still ordered. ok is false when no offer states a commission (an
-// order placed before the commission moved to the offer).
+// when every offer still ordered has one commission entry with the same
+// PERCENT terms, otherwise feeType AMOUNT with feeValue the order's total;
+// feeAmount is the total either way. Each entry of an offer's commission applies to
+// that offer's own items: PERCENT of the unit price (ITEM_TOTAL) or of the
+// unit total with tax (ORDER_TOTAL), or the AMOUNT, times the quantity still
+// ordered; the entries add up. ok is false when no offer states a
+// commission (an order placed before the commission moved to the offer).
 func OfferCommissionOf(contract map[string]any) (commission map[string]any, ok bool) {
 	for _, cm := range allCommitments(contract) {
 		if OfferCommission(asMap(cm["offer"])) != nil {
@@ -159,40 +196,45 @@ func OfferCommissionOf(contract map[string]any) (commission map[string]any, ok b
 	same := true
 	for _, cm := range activeCommitments(contract) {
 		offer := asMap(cm["offer"])
-		terms := OfferCommission(offer)
-		if terms == nil {
+		entries := OfferCommission(offer)
+		if len(entries) != 1 {
 			same = false
-			continue
 		}
 		qty := commitmentQty(cm)
-		value := num(terms["value"])
-		if str(terms["type"]) == "AMOUNT" {
-			total += value * qty
-		} else if str(terms["appliesTo"]) == "ORDER_TOTAL" {
-			total += unitTotal(offer) * qty * value / 100
-		} else {
-			total += unitPrice(cm) * qty * value / 100
-		}
-		if str(terms["type"]) == "AMOUNT" {
-			same = false
-		} else if shared == nil {
-			shared = terms
-		} else if num(shared["value"]) != value || appliesTo(shared) != appliesTo(terms) {
-			same = false
+		for _, terms := range entries {
+			value := num(terms["feeValue"])
+			switch {
+			case str(terms["feeType"]) == "AMOUNT":
+				total += value * qty
+				same = false
+			case str(terms["appliesTo"]) == "ORDER_TOTAL":
+				total += unitTotal(offer) * qty * value / 100
+			default:
+				total += unitPrice(cm) * qty * value / 100
+			}
+			if str(terms["feeType"]) == "AMOUNT" {
+				continue
+			}
+			if shared == nil {
+				shared = terms
+			} else if num(shared["feeValue"]) != value || appliesTo(shared) != appliesTo(terms) {
+				same = false
+			}
 		}
 	}
 	total = round2(total)
 	if same && shared != nil {
-		return map[string]any{"type": "PERCENT", "value": num(shared["value"]), "appliesTo": appliesTo(shared), "amount": total}, true
+		return map[string]any{"feeType": "PERCENT", "feeValue": num(shared["feeValue"]), "appliesTo": appliesTo(shared), "feeAmount": total}, true
 	}
-	return map[string]any{"type": "AMOUNT", "value": total, "amount": total}, true
+	return map[string]any{"feeType": "AMOUNT", "feeValue": total, "feeAmount": total}, true
 }
 
-// StatedCommission is the commission.amount on the contract's price
-// consideration in force; ok is false when none states one.
+// StatedCommission is the commission.feeAmount on the contract's price
+// consideration in force (amount, for one stated under the earlier name); ok
+// is false when none states one.
 func StatedCommission(contract map[string]any) (amount float64, ok bool) {
 	for _, c := range priceConsiderations(contract) {
-		if v, ok := asMap(asMap(c["considerationAttributes"])["commission"])["amount"].(float64); ok {
+		if v, ok := CommissionEntry(asMap(asMap(c["considerationAttributes"])["commission"]))["feeAmount"].(float64); ok {
 			return v, true
 		}
 	}
@@ -432,7 +474,7 @@ func Compute(contract map[string]any, recomputeFee bool) Amounts {
 		if stated, ok := StatedCommission(contract); ok && !recomputeFee {
 			a.Commission = stated
 		} else {
-			a.Commission = num(commission["amount"])
+			a.Commission = num(commission["feeAmount"])
 		}
 	} else {
 		_, _, fee := LegacyTerms(contract)
@@ -461,9 +503,9 @@ func Refresh(contract map[string]any) Amounts {
 	attrs := Normalize(contract)
 	a := Compute(contract, true)
 	if commission, ok := OfferCommissionOf(contract); ok {
-		commission["amount"] = a.Commission
-		if str(commission["type"]) == "AMOUNT" {
-			commission["value"] = a.Commission
+		commission["feeAmount"] = a.Commission
+		if str(commission["feeType"]) == "AMOUNT" {
+			commission["feeValue"] = a.Commission
 		}
 		for _, c := range priceConsiderations(contract) {
 			ca := asMap(c["considerationAttributes"])
@@ -573,3 +615,129 @@ func slice(v any) []any          { s, _ := v.([]any); return s }
 func str(v any) string           { s, _ := v.(string); return s }
 func num(v any) float64          { f, _ := v.(float64); return f }
 func round2(f float64) float64   { return math.Round(f*100) / 100 }
+
+// jakarta is ION's business timezone: an order's orderDate is its creation
+// date there.
+var jakarta = func() *time.Location {
+	if l, err := time.LoadLocation("Asia/Jakarta"); err == nil {
+		return l
+	}
+	return time.FixedZone("WIB", 7*60*60)
+}()
+
+// Date is t's date in Asia/Jakarta time (UTC+07:00), ION's business
+// timezone: an order's orderDate is the Date it was created, a settlement's
+// dueDate the Date it falls due.
+func Date(t time.Time) string {
+	return t.In(jakarta).Format("2006-01-02")
+}
+
+// OrderDate is the orderDate of an order created at t.
+func OrderDate(t time.Time) string { return Date(t) }
+
+// Delivered reports whether the contract records a delivery: a performance
+// whose status is DELIVERED.
+func Delivered(contract map[string]any) bool {
+	for _, raw := range slice(contract["performance"]) {
+		st := asMap(asMap(raw)["status"])
+		code := str(st["code"])
+		if code == "" {
+			code = str(asMap(st["descriptor"])["code"])
+		}
+		if strings.EqualFold(code, "DELIVERED") {
+			return true
+		}
+	}
+	return false
+}
+
+// Dispute codes that leave a settlement pending (sent again later) rather
+// than disputed.
+const (
+	CodeBeforeWindow        = "SETTLEMENT_WINDOW_NOT_REACHED"
+	CodeAwaitingInformation = "AWAITING_INFORMATION"
+)
+
+// IsPendingCode reports whether a dispute code makes a settlement pending:
+// SETTLEMENT_WINDOW_NOT_REACHED or AWAITING_INFORMATION. Every other code
+// makes it disputed.
+func IsPendingCode(code string) bool {
+	return code == CodeBeforeWindow || code == CodeAwaitingInformation
+}
+
+// collectorRoles map the payment's collectedBy (IONPayment) to a
+// collections[].collectorRole.
+var collectorRoles = map[string]string{"BAP": "BAP", "BPP": "BPP", "LSP": "LOGISTICS"}
+
+// Collections is the settlement object's collections: who collected the
+// buyer's money, as the payment fields (method, status, collectedBy,
+// gatewayRef) say. Cash on delivery is collected by the collectedBy party
+// (the BPP when unstated); any other method is prepaid into the PJP. An
+// unpaid payment is NOT_COLLECTED. orderAmount is what was paid. nil when the
+// object carries no payment status.
+func Collections(attrs map[string]any, orderAmount float64) []any {
+	status := str(attrs["status"])
+	if status == "" {
+		return nil
+	}
+	c := map[string]any{"method": "PREPAID", "status": "NOT_COLLECTED", "collectorRole": "PJP"}
+	if str(attrs["method"]) == "COD" {
+		c["method"] = "COD"
+		c["collectorRole"] = "BPP"
+		if role, ok := collectorRoles[str(attrs["collectedBy"])]; ok {
+			c["collectorRole"] = role
+		}
+	}
+	switch status {
+	case "PAID":
+		c["status"] = "COLLECTED"
+		c["reportedCollectedAmount"] = round2(orderAmount)
+	case "REFUNDED":
+		c["status"] = "REVERSED"
+	}
+	if ref := str(attrs["gatewayRef"]); ref != "" {
+		c["referenceId"] = ref
+	}
+	return []any{c}
+}
+
+// RefundBreakup itemizes refundAmount: one breakup entry (includedIn
+// REFUND) per pre-payout refund settlement counted in it -- RETURN once the
+// order was delivered (Delivered), otherwise CANCELLATION -- with the refund
+// settlement's id as referenceId. nil when there is none.
+func RefundBreakup(contract map[string]any) []any {
+	code := "CANCELLATION"
+	if Delivered(contract) {
+		code = "RETURN"
+	}
+	var out []any
+	for _, raw := range slice(contract["settlements"]) {
+		st := asMap(raw)
+		refund := asMap(asMap(st["settlementAttributes"])["refund"])
+		if refund == nil || str(refund["source"]) == "PROVIDER" {
+			continue
+		}
+		out = append(out, map[string]any{
+			"code": code, "includedIn": "REFUND", "amount": round2(num(refund["amount"])), "referenceId": str(st["id"]),
+		})
+	}
+	return out
+}
+
+// Allocate marks the account of role (BAP or BPP) in accounts with the share
+// it receives: allocationFor role, and allocatedAmount -- the commission for
+// the BAP, netPayable for the BPP, which keeps its whole share as it has no
+// seller accounts to split it among. holderId is the participant's
+// subscriber ID. Each participant marks only its own account: the BPP's split
+// is the BPP's to declare. The accounts are copied.
+func Allocate(accounts []any, role, holderID string, amount float64) []any {
+	out := make([]any, 0, len(accounts))
+	for _, raw := range accounts {
+		a := copyMap(asMap(raw))
+		if str(a["holderRole"]) == role {
+			a["holderId"], a["allocationFor"], a["allocatedAmount"] = holderID, role, round2(amount)
+		}
+		out = append(out, a)
+	}
+	return out
+}

@@ -2,9 +2,6 @@
 .env
 bap-application/cmd/server/.env
 bpp-application/cmd/server/.env
-config/local-simple-bap.yaml
-config/local-simple-bpp.yaml
-config/catalog-publish.yaml
 dedi-onboarding-files/.env.local
 scripts/seed-secrets.env
 .zitadel-machinekey/
@@ -22,3 +19,5 @@ node_modules/
 dist/
 .DS_Store
 file-onboarding-and-catalog-publish/
+.problems/
+.gitignore

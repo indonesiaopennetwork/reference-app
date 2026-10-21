@@ -20,21 +20,21 @@ func ids(batch []DueContract) []string {
 	return out
 }
 
-func TestABatchIsAgreedOnlyAsAWhole(t *testing.T) {
-	if batchStatus(3, 3) != "AGREED" || batchStatus(2, 3) != "DISPUTED" || batchStatus(0, 3) != "DISPUTED" || batchStatus(0, 0) != "DISPUTED" {
-		t.Error("only a batch agreed in full is AGREED")
+func TestEachSettlementHasItsOwnOutcome(t *testing.T) {
+	if settlementOutcome(true, "") != "AGREED" || settlementOutcome(false, "COMMISSION_MISMATCH") != "DISPUTED" {
+		t.Error("accord true is AGREED, a mismatch DISPUTED")
 	}
-	if contractOutcome("AGREED") != "AGREED" || contractOutcome("DISPUTED") != "DISPUTED" || contractOutcome("PARTIALLY_AGREED") != "DISPUTED" {
-		t.Error("a contract is agreed only with its batch")
+	if settlementOutcome(false, "SETTLEMENT_WINDOW_NOT_REACHED") != "" || settlementOutcome(false, "AWAITING_INFORMATION") != "" {
+		t.Error("a pending code leaves the settlement pending")
 	}
 }
 
-func TestADisputedBatchIsSentAgainInFull(t *testing.T) {
+func TestOnlyTheUnresolvedSettlementsAreSentAgain(t *testing.T) {
 	mine := "recon-2026-10-13T100000Z-" + self
 	due := []DueContract{
 		dueContract("00000000-0000-0000-0000-000000000001", "DISPUTED", mine),
-		dueContract("00000000-0000-0000-0000-000000000002", "", ""), // fell due since: waits
-		dueContract("00000000-0000-0000-0000-000000000003", "DISPUTED", mine),
+		dueContract("00000000-0000-0000-0000-000000000002", "", ""),   // fell due since: waits
+		dueContract("00000000-0000-0000-0000-000000000003", "", mine), // pending in it, due now
 	}
 	id, batch := nextBatch(due, self)
 	if id != mine || len(batch) != 2 || ids(batch)[0] != "1" || ids(batch)[1] != "3" {
@@ -87,29 +87,19 @@ func TestChooseSelected(t *testing.T) {
 	}
 }
 
-func TestEarlyContractsDoNotCount(t *testing.T) {
+func TestTheAnswerStatusSummarizes(t *testing.T) {
 	for _, c := range []struct {
-		agreed, counted, early int
-		want                   string
+		agreed, disputed, pending int
+		want                      string
 	}{
-		{0, 0, 3, "PENDING"},  // all sent before their window
-		{1, 1, 2, "PENDING"},  // the due one matches, two early: nothing agreed
-		{1, 2, 1, "DISPUTED"}, // a due one disputed, one early
-		{0, 1, 2, "DISPUTED"},
-		{3, 3, 0, "AGREED"},
-		{2, 3, 0, "DISPUTED"},
-		{0, 0, 0, "DISPUTED"}, // nothing in the batch
+		{3, 0, 0, "AGREED"},
+		{2, 1, 0, "DISPUTED"},
+		{2, 0, 1, "PENDING"},
+		{1, 1, 1, "DISPUTED"},
+		{0, 0, 3, "PENDING"}, // all sent before their window
 	} {
-		if got := batchOutcome(c.agreed, c.counted, c.early); got != c.want {
-			t.Errorf("batchOutcome(%d, %d, %d) = %s, want %s", c.agreed, c.counted, c.early, got, c.want)
-		}
-	}
-}
-
-func TestContractOutcomeFollowsTheBatch(t *testing.T) {
-	for batch, want := range map[string]string{"AGREED": "AGREED", "PENDING": "", "DISPUTED": "DISPUTED"} {
-		if got := contractOutcome(batch); got != want {
-			t.Errorf("contractOutcome(%s) = %q, want %q", batch, got, want)
+		if got := answerStatus(c.agreed, c.disputed, c.pending); got != c.want {
+			t.Errorf("answerStatus(%d, %d, %d) = %s, want %s", c.agreed, c.disputed, c.pending, got, c.want)
 		}
 	}
 }

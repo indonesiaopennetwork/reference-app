@@ -35,16 +35,41 @@ func TestFillAttributesKeepsTheSellersPolicy(t *testing.T) {
 	}
 }
 
-func TestFillConsideration(t *testing.T) {
-	got := decode(t, FillConsideration(json.RawMessage(`{"totalAmount": 1}`), d))["commission"].(map[string]any)
-	if got["type"] != "PERCENT" || got["value"] != 3.0 || got["appliesTo"] != "ITEM_TOTAL" {
-		t.Errorf("commission = %v", got)
+func TestFillAttributesAddsTheDefaultCommission(t *testing.T) {
+	got := decode(t, FillAttributes(json.RawMessage(`{"policies": {}}`), d))["policies"].(map[string]any)["commission"].([]any)
+	want := map[string]any{"feeName": "Finder fee", "feeType": "PERCENT", "feeValue": 3.0, "appliesTo": "ITEM_TOTAL"}
+	if len(got) != 1 || !equal(got[0].(map[string]any), want) {
+		t.Errorf("commission = %v, want [%v]", got, want)
 	}
-	own := json.RawMessage(`{"commission": {"type": "AMOUNT", "value": 500}}`)
-	if string(FillConsideration(own, d)) != string(own) {
+	own := `{"policies": {"commission": [{"feeName": "Platform fee", "feeType": "AMOUNT", "feeValue": 500}],
+	  "settlement": {"settlementBasis": "AFTER_DELIVERY", "settlementWindow": "P1D"}}}`
+	if string(FillAttributes(json.RawMessage(own), d)) != own {
 		t.Error("a seller's own commission must be kept")
 	}
-	if amount := (Defaults{CommissionType: "AMOUNT", CommissionValue: 500}).Commission(); amount["appliesTo"] != nil {
+	earlier := `{"policies": {"commission": [{"name": "Platform fee", "type": "AMOUNT", "value": 500}],
+	  "settlement": {"settlementBasis": "AFTER_DELIVERY", "settlementWindow": "P1D"}}}`
+	renamed := decode(t, FillAttributes(json.RawMessage(earlier), d))["policies"].(map[string]any)["commission"].([]any)
+	if !equal(renamed[0].(map[string]any), map[string]any{"feeName": "Platform fee", "feeType": "AMOUNT", "feeValue": 500.0}) {
+		t.Errorf("commission stored under the earlier names = %v, want it renamed", renamed)
+	}
+	if amount := (Defaults{CommissionType: "AMOUNT", CommissionValue: 500}).Commission()[0].(map[string]any); amount["appliesTo"] != nil {
 		t.Errorf("an AMOUNT commission has no appliesTo: %v", amount)
 	}
+}
+
+func TestStripCommission(t *testing.T) {
+	got := decode(t, StripCommission(json.RawMessage(`{"totalAmount": 1, "commission": {"type": "PERCENT", "value": 3}}`)))
+	if _, ok := got["commission"]; ok || got["totalAmount"] != 1.0 {
+		t.Errorf("attrs = %v, want the commission gone and the rest kept", got)
+	}
+	plain := json.RawMessage(`{"totalAmount": 1}`)
+	if string(StripCommission(plain)) != string(plain) {
+		t.Error("attributes without a commission must be unchanged")
+	}
+}
+
+func equal(a, b map[string]any) bool {
+	x, _ := json.Marshal(a)
+	y, _ := json.Marshal(b)
+	return string(x) == string(y)
 }

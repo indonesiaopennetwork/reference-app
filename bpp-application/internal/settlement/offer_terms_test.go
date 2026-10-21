@@ -16,17 +16,16 @@ func offerOrder(t *testing.T, kerCommission, tehCommission, tehPolicy string) ma
      "commitmentAttributes": {"price": {"value": 25000}},
      "offer": {"id": "offer-ker",
        "considerations": [{"id": "p", "considerationAttributes": {"totalAmount": 27750,
-         "breakup": [{"type": "BASE_PRICE", "amount": 25000}, {"type": "TAX", "amount": 2750}],
-         "commission": `+kerCommission+`}}],
-       "offerAttributes": {"policies": {"settlement": {"settlementBasis": "AFTER_DELIVERY", "settlementWindow": "P1D"}}}}},
+         "breakup": [{"type": "BASE_PRICE", "amount": 25000}, {"type": "TAX", "amount": 2750}]}}],
+       "offerAttributes": {"policies": {"commission": [`+kerCommission+`],
+         "settlement": {"settlementBasis": "AFTER_DELIVERY", "settlementWindow": "P1D"}}}}},
     {"id": "c-teh", "status": {"descriptor": {"code": "ACTIVE"}},
      "resources": [{"id": "teh", "quantity": {"unitQuantity": 3}}],
      "commitmentAttributes": {"price": {"value": 5000}},
      "offer": {"id": "offer-teh",
        "considerations": [{"id": "p", "considerationAttributes": {"totalAmount": 5550,
-         "breakup": [{"type": "BASE_PRICE", "amount": 5000}, {"type": "TAX", "amount": 550}],
-         "commission": `+tehCommission+`}}],
-       "offerAttributes": {"policies": {"settlement": `+tehPolicy+`}}}}],
+         "breakup": [{"type": "BASE_PRICE", "amount": 5000}, {"type": "TAX", "amount": 550}]}}],
+       "offerAttributes": {"policies": {"commission": [`+tehCommission+`], "settlement": `+tehPolicy+`}}}}],
   "consideration": [{"id": "price-1", "status": {"code": "QUOTED"}, "considerationAttributes": {"totalAmount": 72150,
     "breakup": [{"type": "BASE_PRICE", "amount": 50000}, {"type": "TAX", "amount": 5500},
                 {"type": "BASE_PRICE", "amount": 15000}, {"type": "TAX", "amount": 1650}]}}],
@@ -37,9 +36,9 @@ func offerOrder(t *testing.T, kerCommission, tehCommission, tehPolicy string) ma
 }
 
 const (
-	pct3   = `{"type": "PERCENT", "value": 3, "appliesTo": "ITEM_TOTAL"}`
-	pct3OT = `{"type": "PERCENT", "value": 3, "appliesTo": "ORDER_TOTAL"}`
-	amt200 = `{"type": "AMOUNT", "value": 200}`
+	pct3   = `{"feeName": "Finder fee", "feeType": "PERCENT", "feeValue": 3, "appliesTo": "ITEM_TOTAL"}`
+	pct3OT = `{"feeName": "Finder fee", "feeType": "PERCENT", "feeValue": 3, "appliesTo": "ORDER_TOTAL"}`
+	amt200 = `{"feeName": "Finder fee", "feeType": "AMOUNT", "feeValue": 200}`
 	pol1D  = `{"settlementBasis": "AFTER_DELIVERY", "settlementWindow": "P1D"}`
 	pol3D  = `{"settlementBasis": "AFTER_RETURN_WINDOW", "settlementWindow": "P3D"}`
 )
@@ -47,7 +46,7 @@ const (
 func TestSameOfferTermsCarryOverToTheContract(t *testing.T) {
 	c := offerOrder(t, pct3, pct3, pol1D)
 	got, ok := OfferCommissionOf(c)
-	want := map[string]any{"type": "PERCENT", "value": 3.0, "appliesTo": "ITEM_TOTAL", "amount": 1950.0} // 3% of 50000 + 15000
+	want := map[string]any{"feeType": "PERCENT", "feeValue": 3.0, "appliesTo": "ITEM_TOTAL", "feeAmount": 1950.0} // 3% of 50000 + 15000
 	if !ok || !reflect.DeepEqual(got, want) {
 		t.Errorf("commission = %v, %v; want %v", got, ok, want)
 	}
@@ -57,7 +56,7 @@ func TestMixedOfferTermsBecomeAnAmount(t *testing.T) {
 	c := offerOrder(t, pct3OT, amt200, pol1D)
 	got, _ := OfferCommissionOf(c)
 	// 3% of 2 x 27750 = 1665, plus 200 per unit x 3 = 600.
-	want := map[string]any{"type": "AMOUNT", "value": 2265.0, "amount": 2265.0}
+	want := map[string]any{"feeType": "AMOUNT", "feeValue": 2265.0, "feeAmount": 2265.0}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("commission = %v, want %v", got, want)
 	}
@@ -101,7 +100,7 @@ func TestCommissionFollowsAPartialCancellation(t *testing.T) {
 		t.Errorf("commission = %v, want 1500", a.Commission)
 	}
 	replacement := asMap(asMap(slice(c["consideration"])[1])["considerationAttributes"])["commission"]
-	want := map[string]any{"type": "PERCENT", "value": 3.0, "appliesTo": "ITEM_TOTAL", "amount": 1500.0}
+	want := map[string]any{"feeType": "PERCENT", "feeValue": 3.0, "appliesTo": "ITEM_TOTAL", "feeAmount": 1500.0}
 	if !reflect.DeepEqual(replacement, want) {
 		t.Errorf("replacement commission = %v, want %v", replacement, want)
 	}
@@ -110,9 +109,14 @@ func TestCommissionFollowsAPartialCancellation(t *testing.T) {
 func TestComputeKeepsTheStatedCommission(t *testing.T) {
 	c := offerOrder(t, pct3, pct3, pol1D)
 	Refresh(c)
-	asMap(asMap(slice(c["consideration"])[0])["considerationAttributes"])["commission"].(map[string]any)["amount"] = 1900.0
+	asMap(asMap(slice(c["consideration"])[0])["considerationAttributes"])["commission"].(map[string]any)["feeAmount"] = 1900.0
 	if a := Compute(c, false); a.Commission != 1900 {
 		t.Errorf("commission = %v, want the stated 1900", a.Commission)
+	}
+	// A commission stated under its earlier name (amount) still counts.
+	asMap(asMap(slice(c["consideration"])[0])["considerationAttributes"])["commission"] = map[string]any{"type": "AMOUNT", "value": 1800.0, "amount": 1800.0}
+	if a := Compute(c, false); a.Commission != 1800 {
+		t.Errorf("commission = %v, want the stated 1800 (earlier field names)", a.Commission)
 	}
 	if a := Compute(c, true); a.Commission != 1950 {
 		t.Errorf("recomputed commission = %v, want 1950", a.Commission)
@@ -148,5 +152,30 @@ func TestALegacyOrderKeepsItsFinderFee(t *testing.T) {
 	_, attrs := Of(c)
 	if asMap(attrs["finderFee"])["feeAmount"] != 2670.0 {
 		t.Errorf("finderFee = %v", attrs["finderFee"])
+	}
+}
+
+func TestNamedCommissionEntriesAddUp(t *testing.T) {
+	// Keripik: a 3% finder fee and a 200-per-unit platform fee; teh: 3%.
+	c := offerOrder(t, pct3+`, {"feeName": "Platform fee", "feeType": "AMOUNT", "feeValue": 200}`, pct3, pol1D)
+	got, _ := OfferCommissionOf(c)
+	// 3% of 50000 + 200 x 2 + 3% of 15000 = 1500 + 400 + 450.
+	want := map[string]any{"feeType": "AMOUNT", "feeValue": 2350.0, "feeAmount": 2350.0}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("commission = %v, want %v", got, want)
+	}
+}
+
+func TestACommissionOnTheOfferPriceStillCounts(t *testing.T) {
+	// An offer published while the commission sat on its price consideration.
+	offer := map[string]any{"considerations": []any{map[string]any{"considerationAttributes": map[string]any{
+		"commission": map[string]any{"type": "PERCENT", "value": 4.0}}}}}
+	if got := OfferCommission(offer); len(got) != 1 || got[0]["feeValue"] != 4.0 {
+		t.Errorf("commission = %v, want the price consideration's", got)
+	}
+	offer["offerAttributes"] = map[string]any{"policies": map[string]any{"commission": []any{
+		map[string]any{"feeName": "Finder fee", "feeType": "PERCENT", "feeValue": 5.0}}}}
+	if got := OfferCommission(offer); len(got) != 1 || got[0]["feeValue"] != 5.0 {
+		t.Errorf("commission = %v, want the policy's", got)
 	}
 }
