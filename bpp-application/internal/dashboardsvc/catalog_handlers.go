@@ -2,6 +2,7 @@ package dashboardsvc
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -1072,6 +1073,103 @@ func (h *Handler) HandleDeleteCatalog(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"status": "deleted"})
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/catalog-index  — proxy the published Beckn catalog index
+// GET /api/v1/catalogs/:id/latest-file  — proxy one catalog's latest published file
+//
+// Both read from h.cfg.CatalogFilesURL(), not directly from the browser:
+// locally that's catalog-files, an internal-network-only nginx container
+// with no host port, no CORS headers, and no Content-Encoding: gzip on its
+// .json.gz files -- a browser fetch() can't reach it at all. Proxying here
+// also means the exact same frontend code works unchanged once deployed,
+// where CatalogFilesURL() falls back to the real public domain.
+// ---------------------------------------------------------------------------
+
+func (h *Handler) HandleGetCatalogIndex(c *gin.Context) {
+	base := h.cfg.CatalogFilesURL()
+	if base == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "CATALOG_FILES_BASE_URL/CATALOG_BASE_URL not configured"})
+		return
+	}
+	body, status, err := fetchCatalogFile(c.Request.Context(), base+"/index/becknCatalogs.index.json", false)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	if status == http.StatusNotFound {
+		c.JSON(http.StatusNotFound, gin.H{"error": "no catalog has been published yet"})
+		return
+	}
+	if status < 200 || status >= 300 {
+		c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("catalog file store returned %d", status)})
+		return
+	}
+	c.Data(http.StatusOK, "application/json", body)
+}
+
+func (h *Handler) HandleGetCatalogLatestFile(c *gin.Context) {
+	catalogID := c.Param("id")
+	ctx := c.Request.Context()
+
+	if !h.ownedCatalog(c, catalogID) {
+		return
+	}
+
+	base := h.cfg.CatalogFilesURL()
+	if base == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "CATALOG_FILES_BASE_URL/CATALOG_BASE_URL not configured"})
+		return
+	}
+	body, status, err := fetchCatalogFile(ctx, base+"/catalogs/"+catalogID+".latest.json.gz", true)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	if status == http.StatusNotFound {
+		c.JSON(http.StatusNotFound, gin.H{"error": "this catalog has not been published yet"})
+		return
+	}
+	if status < 200 || status >= 300 {
+		c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("catalog file store returned %d", status)})
+		return
+	}
+	c.Data(http.StatusOK, "application/json", body)
+}
+
+// fetchCatalogFile GETs url and, if gunzip is true, decompresses the body
+// (the catalog-publisher plugin's .json.gz files carry no Content-Encoding
+// header, so this is always a manual gunzip, never something net/http's
+// client would do for us). Returns the raw status code uninterpreted so
+// callers can turn a 404 into a friendly "not published yet" message.
+func fetchCatalogFile(ctx context.Context, url string, gunzip bool) ([]byte, int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, 0, fmt.Errorf("build request: %w", err)
+	}
+	httpClient := httpclient.New(15 * time.Second)
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, 0, fmt.Errorf("fetch failed: %w", err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, resp.StatusCode, nil
+	}
+
+	if !gunzip {
+		body, err := io.ReadAll(resp.Body)
+		return body, resp.StatusCode, err
+	}
+	gz, err := gzip.NewReader(resp.Body)
+	if err != nil {
+		return nil, 0, fmt.Errorf("gunzip: %w", err)
+	}
+	defer gz.Close() //nolint:errcheck
+	body, err := io.ReadAll(gz)
+	return body, resp.StatusCode, err
 }
 
 // ---------------------------------------------------------------------------

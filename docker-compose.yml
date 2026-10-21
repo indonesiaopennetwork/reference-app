@@ -466,6 +466,15 @@ services:
       # BppCallerURL is the ONIX BPP caller base URL used for outbound on_* callbacks.
       BPP_CALLER_URL: http://onix-bpp:8082/bpp/caller
       CDS_PUBLISH_URL: http://onix-catalog-publish:8085/catalog/publish
+      # Where onix-catalog-publish actually wrote the index/catalog files --
+      # same value as its own catalogBaseURL (config/catalog-publish.yaml).
+      # Deliberately a SEPARATE var from CATALOG_BASE_URL (unset locally):
+      # that one also feeds PublishedBppURI()'s bppUri fallback, and locally
+      # the static file server (catalog-files) is not the same host as the
+      # real BPP receiver (onix-bpp), unlike in the cloud where one domain
+      # serves both -- setting CATALOG_BASE_URL here would silently break
+      # the bppUri stamped on every published catalog.
+      CATALOG_FILES_BASE_URL: http://catalog-files
 
       # Default settlement terms for offers published without their own, and
       # this BPP's payout account (see .env.example).
