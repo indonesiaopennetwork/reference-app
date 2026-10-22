@@ -768,6 +768,20 @@ full mapping.
     (`docker build`/`docker push` directly, or a full `build-and-push.sh`
     run) before applying it. Hit this adding `onix-catalog-publish` and
     `dedi-static-server`.
+14. **Cloud Run rejects *updating* a multi-container service whose
+    containers' images come from different external registries** ("Mixing
+    ghcr.io container images with images from other registries, no-build,
+    or Cloud Build is not supported"). `zitadel` (`ghcr.io/zitadel/zitadel`)
+    + its `cloudsql-proxy` sidecar (`gcr.io/cloud-sql-connectors/cloud-sql-proxy`)
+    hit this: the very first `terraform apply` that *created* the service
+    succeeded fine, but every update since failed this check, even one
+    that doesn't touch either image — Cloud Run re-validates the whole
+    containers spec on any update. Fixed by mirroring both images into
+    this project's own Artifact Registry (`local.registry` in
+    `images.tf`, the same repo every other image already uses) and
+    pointing `cloudsql_proxy_image`/`zitadel_image` there instead of at
+    the raw external registries — see the re-mirroring steps in those two
+    locals' comments in `images.tf` for upgrading either one later.
 
 ## Zitadel-specific notes (design assumptions — verify at first apply, not yet confirmed in practice)
 
