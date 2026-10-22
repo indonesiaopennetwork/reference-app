@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"reflect"
 
 	"github.com/remiges-tech/logharbour/logharbour"
 	"github.com/remiges-tushar/discovery-service/internal/beckn"
@@ -306,9 +307,38 @@ func (c *Crawler) fetchChangeFile(ctx context.Context, catalogID string, ref Cha
 
 // applyChange merges delta's upserts/removals onto base, replacing any
 // catalog-level fields delta declares.
+//
+// delta.Catalog is a PARTIAL document: a Provider Node only includes the
+// catalog-level fields that actually changed (e.g. a pure pause/resume
+// toggle publishes {"isActive": true} alone, omitting descriptor/provider
+// since they didn't change). Each field below is therefore merged onto
+// base individually -- applied only when delta.Catalog actually declares
+// it (non-nil pointer, non-empty string, or non-zero struct) -- rather
+// than replacing base wholesale, which would wipe out every field the
+// delta omitted.
 func applyChange(base beckn.Catalog, delta CatalogChangeFile) beckn.Catalog {
 	if delta.Catalog != nil {
-		base = *delta.Catalog
+		if delta.Catalog.ID != "" {
+			base.ID = delta.Catalog.ID
+		}
+		if delta.Catalog.BppID != "" {
+			base.BppID = delta.Catalog.BppID
+		}
+		if delta.Catalog.BppURI != "" {
+			base.BppURI = delta.Catalog.BppURI
+		}
+		if delta.Catalog.IsActive != nil {
+			base.IsActive = delta.Catalog.IsActive
+		}
+		if !reflect.DeepEqual(delta.Catalog.Descriptor, beckn.Descriptor{}) {
+			base.Descriptor = delta.Catalog.Descriptor
+		}
+		if !reflect.DeepEqual(delta.Catalog.Provider, beckn.Provider{}) {
+			base.Provider = delta.Catalog.Provider
+		}
+		if delta.Catalog.Validity != nil {
+			base.Validity = delta.Catalog.Validity
+		}
 	}
 
 	resources := make(map[string]beckn.Resource, len(base.Resources))

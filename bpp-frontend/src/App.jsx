@@ -3773,16 +3773,24 @@ function CatalogDetailPage({ onNav, catalogId }) {
 
   const handleToggleActive = async () => {
     const next = !cat.isActive
-    const msg = next
-      ? t('Resume this catalog? It will be marked active on the next publish.')
-      : t('Pause this catalog? It stays fully intact, but will be excluded from search once you publish this change.')
+    const msg = !cat.isPublished
+      ? (next ? t('Resume this catalog?') : t('Pause this catalog? It stays fully intact, but will be excluded from search once published.'))
+      : (next
+        ? t('Resume this catalog? It will be searchable again immediately.')
+        : t('Pause this catalog? It will be excluded from search immediately.'))
     if (!window.confirm(msg)) return
     setTogglingActive(true)
     try {
-      await apiFetch(`/catalogs/${catalogId}/active`, {
+      const res = await apiFetch(`/catalogs/${catalogId}/active`, {
         method: 'PATCH',
         body: JSON.stringify({ isActive: next }),
       })
+      if (res?.published === false) {
+        alert(t('Catalog {state} locally, but republishing failed: {error} — click Publish to retry.', {
+          state: next ? t('resumed') : t('paused'),
+          error: res.publishError || t('unknown error'),
+        }))
+      }
       reload().catch(err => console.error(err))
     } catch (e) {
       alert(t('Update failed: {error}', { error: e.message }))
