@@ -21,13 +21,6 @@ Beckn core `v2.0.0-lts`, unchanged). The adapters fetch the settlement pack,
 like every other ION `@context` type, from schema.ion.id. A change to either belongs in ion-specs; restart the adapters
 to pick it up.
 
-**For now (local compose only)** the adapters validate against ion-specs PR #25
-(`feat/recon-per-settlement`, which includes PR #24), not yet published: a
-bundled `schemas/ion-additional.yaml` (`auxiliaryTypes: "file"`) and bundled
-`IONSettlementReconciliation`, `IONTradeOffer` and `IONTradeConsideration`
-packs in `schemas/` -- see `schemas/README.md`. Switch back once both PRs are
-merged and published.
-
 ## Money model: the PJP holds the payment
 
 The buyer pays into the PJP (Penyelenggara Jasa Pembayaran), which **holds**
@@ -184,7 +177,7 @@ states. An order placed before the commission moved to the offer uses its
 
 ## Examples
 
-In the shape the apps build, validated against ion-specs PR #25's
+In the shape the apps build, validated against the published
 `ion-additional.yaml` and the vendored Beckn `beckn.yaml`:
 `examples/reconcile.json` (the BPP's batch for 2026-09-30, with its own
 account's allocation and the order-day counts) and `examples/on_reconcile.json`
