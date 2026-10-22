@@ -2,8 +2,10 @@ package dashboardsvc
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	dbsqlc "github.com/ion/winroom/bpp/db/sqlc"
@@ -460,8 +463,14 @@ func (h *Handler) HandleGetCatalog(c *gin.Context) {
 // isActive is a freely-reversible ACTIVE<->PAUSED toggle (Beckn protocol
 // NFH-014 Catalog_Publishing_and_Discovery.md §10.4), distinct from
 // retiring a catalog: pausing never deletes or locks its data, it only
-// changes what the next publish advertises. The seller must click Publish
-// again afterwards for the change to reach the network.
+// changes what's advertised on the network. If the catalog has already
+// been published, this handler auto-republishes right away (via
+// publishCatalogToCDS) so the toggle takes effect immediately without a
+// separate manual Publish click -- a republish failure is reported back
+// as published:false/publishError rather than failing the toggle itself,
+// since the local state change must never be blocked by a network hiccup.
+// A catalog that has never been published is left as a DB-only change, the
+// same as before.
 // ---------------------------------------------------------------------------
 
 type SetCatalogActiveRequest struct {
@@ -478,19 +487,32 @@ func (h *Handler) HandleSetCatalogActive(c *gin.Context) {
 	if !h.ownedCatalog(c, catalogID) {
 		return
 	}
-	tag, err := h.pool.Exec(c.Request.Context(), `
+	ctx := c.Request.Context()
+	var publishedAt pgtype.Timestamptz
+	err := h.pool.QueryRow(ctx, `
 		UPDATE catalogs SET is_active = $1, updated_at = NOW()
-		 WHERE id = $2 AND bpp_id = $3 AND deleted_at IS NULL`,
-		*req.IsActive, catalogID, h.cfg.BppID)
+		 WHERE id = $2 AND bpp_id = $3 AND deleted_at IS NULL
+		 RETURNING network_published_at`,
+		*req.IsActive, catalogID, h.cfg.BppID,
+	).Scan(&publishedAt)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "catalog not found"})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	if tag.RowsAffected() == 0 {
-		c.JSON(http.StatusNotFound, gin.H{"error": "catalog not found"})
-		return
+
+	resp := gin.H{"status": "updated", "isActive": *req.IsActive}
+	if publishedAt.Valid {
+		res := h.publishCatalogToCDS(ctx, catalogID, false)
+		resp["published"] = res.ok()
+		if !res.ok() {
+			resp["publishError"] = res.errMessage()
+		}
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "updated", "isActive": *req.IsActive})
+	c.JSON(http.StatusOK, resp)
 }
 
 // ---------------------------------------------------------------------------
@@ -644,10 +666,14 @@ func (h *Handler) HandlePublishCatalog(c *gin.Context) {
 	catalogID := c.Param("id")
 	ctx := c.Request.Context()
 
-	if h.cfg.CDSPublishURL == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "CDS_PUBLISH_URL not configured"})
-		return
+	// Optional body -- {"forceBaseline": true} skips onix-catalog-publish's
+	// diff-against-prior-state and always writes a fresh baseline for this
+	// catalog (manual compaction). Every existing caller sends no body at
+	// all, so a missing/empty body is not an error, just forceBaseline=false.
+	var publishReq struct {
+		ForceBaseline bool `json:"forceBaseline"`
 	}
+	_ = c.ShouldBindJSON(&publishReq)
 
 	if owned, err := h.catalogOwnedByProvider(ctx, catalogID, auth.ProviderIDFromContext(c)); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -655,6 +681,39 @@ func (h *Handler) HandlePublishCatalog(c *gin.Context) {
 	} else if !owned {
 		c.JSON(http.StatusNotFound, gin.H{"error": "catalog not found"})
 		return
+	}
+
+	res := h.publishCatalogToCDS(ctx, catalogID, publishReq.ForceBaseline)
+	c.JSON(res.status, res.body)
+}
+
+// publishResult is the outcome of an attempt to publish a catalog to CDS.
+// Used directly as HandlePublishCatalog's HTTP response, and folded into
+// HandleSetCatalogActive's own response (as published/publishError) when a
+// pause/resume toggle auto-republishes -- a network-side publish failure
+// there must never fail the toggle itself, just be reported alongside it.
+type publishResult struct {
+	status int
+	body   gin.H
+}
+
+func (r publishResult) ok() bool { return r.status >= 200 && r.status < 300 }
+
+// errMessage returns r.body's "error" field, or "" if there is none.
+func (r publishResult) errMessage() string {
+	msg, _ := r.body["error"].(string)
+	return msg
+}
+
+// publishCatalogToCDS builds catalogID's current state from the DB,
+// forwards it to onix-catalog-publish, and stamps network_published_at on
+// success. Ownership must already be checked by the caller -- this is just
+// the publishing mechanics, shared by HandlePublishCatalog (the explicit
+// Publish/Manual Compaction buttons) and HandleSetCatalogActive
+// (auto-republish after a pause/resume toggle).
+func (h *Handler) publishCatalogToCDS(ctx context.Context, catalogID string, forceBaseline bool) publishResult {
+	if h.cfg.CDSPublishURL == "" {
+		return publishResult{http.StatusBadRequest, gin.H{"error": "CDS_PUBLISH_URL not configured"}}
 	}
 
 	// Read catalog.
@@ -680,8 +739,7 @@ func (h *Handler) HandlePublishCatalog(c *gin.Context) {
 	).Scan(&cat.DescriptorName, &cat.DescriptorShortDesc, &cat.DescriptorLongDesc,
 		&cat.ProviderID, &cat.ProviderName, &cat.CatalogType, &cat.ValidityStart, &cat.ValidityEnd, &cat.IsActive)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "catalog not found"})
-		return
+		return publishResult{http.StatusNotFound, gin.H{"error": "catalog not found"}}
 	}
 
 	// Build catalog.Catalog from DB rows.
@@ -716,8 +774,7 @@ func (h *Handler) HandlePublishCatalog(c *gin.Context) {
 		WHERE r.catalog_id = $1 AND r.bpp_id = $2 AND r.deleted_at IS NULL`,
 		catalogID, h.cfg.BppID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+		return publishResult{http.StatusInternalServerError, gin.H{"error": err.Error()}}
 	}
 	defer resRows.Close()
 
@@ -754,8 +811,7 @@ func (h *Handler) HandlePublishCatalog(c *gin.Context) {
 		WHERE o.catalog_id = $1 AND o.bpp_id = $2 AND o.deleted_at IS NULL`,
 		catalogID, h.cfg.BppID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+		return publishResult{http.StatusInternalServerError, gin.H{"error": err.Error()}}
 	}
 	defer offerRows.Close()
 
@@ -828,8 +884,7 @@ func (h *Handler) HandlePublishCatalog(c *gin.Context) {
 	// reject here with a clear message instead of forwarding an empty
 	// catalog and relaying the CDS's own cryptic schema-validation error.
 	if len(becknCat.Resources) == 0 && len(becknCat.Offers) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "catalog has no products or offers to publish"})
-		return
+		return publishResult{http.StatusBadRequest, gin.H{"error": "catalog has no products or offers to publish"}}
 	}
 
 	// Forward to CDS using the same CDSCatalog stripping logic.
@@ -852,6 +907,7 @@ func (h *Handler) HandlePublishCatalog(c *gin.Context) {
 			Catalogs:          []catalog.OnixCatalog{catalog.ToOnixCatalog(becknCat, h.cfg.BppID, h.cfg.PublishedBppURI())},
 			PublishDirectives: []catalog.OnixPublishDirective{catalog.ToOnixPublishDirective(becknCat, h.cfg.BppID)},
 		},
+		ForceBaseline: forceBaseline,
 	}
 
 	body, _ := json.Marshal(becknReq)
@@ -892,16 +948,14 @@ func (h *Handler) HandlePublishCatalog(c *gin.Context) {
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, h.cfg.CDSPublishURL, bytes.NewReader(body))
 	if err != nil {
 		callErr = fmt.Errorf("build CDS request: %w", err)
-		c.JSON(http.StatusBadGateway, gin.H{"error": callErr.Error()})
-		return
+		return publishResult{http.StatusBadGateway, gin.H{"error": callErr.Error()}}
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	if h.cfg.BppPrivateKey != "" {
 		authHeader, authErr := catalog.BuildAuthHeader(body, h.cfg.BppKeyID, h.cfg.BppPrivateKey)
 		if authErr != nil {
 			callErr = fmt.Errorf("build auth header: %w", authErr)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": callErr.Error()})
-			return
+			return publishResult{http.StatusInternalServerError, gin.H{"error": callErr.Error()}}
 		}
 		httpReq.Header.Set("Authorization", authHeader)
 	}
@@ -910,16 +964,14 @@ func (h *Handler) HandlePublishCatalog(c *gin.Context) {
 	resp, err := httpClient.Do(httpReq)
 	if err != nil {
 		callErr = fmt.Errorf("CDS call failed: %w", err)
-		c.JSON(http.StatusBadGateway, gin.H{"error": callErr.Error()})
-		return
+		return publishResult{http.StatusBadGateway, gin.H{"error": callErr.Error()}}
 	}
 	defer resp.Body.Close() //nolint:errcheck
 	respBody, _ = io.ReadAll(resp.Body)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		callErr = fmt.Errorf("CDS returned %d: %s", resp.StatusCode, string(respBody))
-		c.JSON(http.StatusBadGateway, gin.H{"error": callErr.Error()})
-		return
+		return publishResult{http.StatusBadGateway, gin.H{"error": callErr.Error()}}
 	}
 
 	// Stamp the successful publish time.
@@ -927,7 +979,7 @@ func (h *Handler) HandlePublishCatalog(c *gin.Context) {
 		`UPDATE catalogs SET network_published_at = NOW() WHERE id = $1 AND bpp_id = $2`,
 		catalogID, h.cfg.BppID)
 
-	c.JSON(http.StatusOK, gin.H{"status": "ACK", "message": "Catalog published to CDS"})
+	return publishResult{http.StatusOK, gin.H{"status": "ACK", "message": "Catalog published to CDS"}}
 }
 
 // ---------------------------------------------------------------------------
@@ -1062,6 +1114,103 @@ func (h *Handler) HandleDeleteCatalog(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"status": "deleted"})
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/catalog-index  — proxy the published Beckn catalog index
+// GET /api/v1/catalogs/:id/latest-file  — proxy one catalog's latest published file
+//
+// Both read from h.cfg.CatalogFilesURL(), not directly from the browser:
+// locally that's catalog-files, an internal-network-only nginx container
+// with no host port, no CORS headers, and no Content-Encoding: gzip on its
+// .json.gz files -- a browser fetch() can't reach it at all. Proxying here
+// also means the exact same frontend code works unchanged once deployed,
+// where CatalogFilesURL() falls back to the real public domain.
+// ---------------------------------------------------------------------------
+
+func (h *Handler) HandleGetCatalogIndex(c *gin.Context) {
+	base := h.cfg.CatalogFilesURL()
+	if base == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "CATALOG_FILES_BASE_URL/CATALOG_BASE_URL not configured"})
+		return
+	}
+	body, status, err := fetchCatalogFile(c.Request.Context(), base+"/index/becknCatalogs.index.json", false)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	if status == http.StatusNotFound {
+		c.JSON(http.StatusNotFound, gin.H{"error": "no catalog has been published yet"})
+		return
+	}
+	if status < 200 || status >= 300 {
+		c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("catalog file store returned %d", status)})
+		return
+	}
+	c.Data(http.StatusOK, "application/json", body)
+}
+
+func (h *Handler) HandleGetCatalogLatestFile(c *gin.Context) {
+	catalogID := c.Param("id")
+	ctx := c.Request.Context()
+
+	if !h.ownedCatalog(c, catalogID) {
+		return
+	}
+
+	base := h.cfg.CatalogFilesURL()
+	if base == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "CATALOG_FILES_BASE_URL/CATALOG_BASE_URL not configured"})
+		return
+	}
+	body, status, err := fetchCatalogFile(ctx, base+"/catalogs/"+catalogID+".latest.json.gz", true)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	if status == http.StatusNotFound {
+		c.JSON(http.StatusNotFound, gin.H{"error": "this catalog has not been published yet"})
+		return
+	}
+	if status < 200 || status >= 300 {
+		c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("catalog file store returned %d", status)})
+		return
+	}
+	c.Data(http.StatusOK, "application/json", body)
+}
+
+// fetchCatalogFile GETs url and, if gunzip is true, decompresses the body
+// (the catalog-publisher plugin's .json.gz files carry no Content-Encoding
+// header, so this is always a manual gunzip, never something net/http's
+// client would do for us). Returns the raw status code uninterpreted so
+// callers can turn a 404 into a friendly "not published yet" message.
+func fetchCatalogFile(ctx context.Context, url string, gunzip bool) ([]byte, int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, 0, fmt.Errorf("build request: %w", err)
+	}
+	httpClient := httpclient.New(15 * time.Second)
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, 0, fmt.Errorf("fetch failed: %w", err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, resp.StatusCode, nil
+	}
+
+	if !gunzip {
+		body, err := io.ReadAll(resp.Body)
+		return body, resp.StatusCode, err
+	}
+	gz, err := gzip.NewReader(resp.Body)
+	if err != nil {
+		return nil, 0, fmt.Errorf("gunzip: %w", err)
+	}
+	defer gz.Close() //nolint:errcheck
+	body, err := io.ReadAll(gz)
+	return body, resp.StatusCode, err
 }
 
 // ---------------------------------------------------------------------------

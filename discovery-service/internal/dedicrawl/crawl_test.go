@@ -3,6 +3,8 @@ package dedicrawl
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/remiges-tushar/discovery-service/internal/beckn"
 )
 
 // setup builds a full working fixture: one MASTER-less REGULAR catalog
@@ -163,6 +165,75 @@ func TestCrawlAll_DecodesGzipCompressedFiles(t *testing.T) {
 	catalogs, anySuccess := crawler.CrawlAll(t.Context(), []string{indexSrv.URL + "/index.json.gz"})
 	if !anySuccess || len(catalogs) != 1 || catalogs[0].ID != "cat-7" {
 		t.Fatalf("expected one gzip-decoded catalog cat-7, got catalogs=%+v anySuccess=%v", catalogs, anySuccess)
+	}
+}
+
+// TestApplyChange_IsActiveOnlyDiffPreservesContent reproduces a real bug:
+// pausing then resuming a catalog publishes two change files that each
+// only declare {"isActive": ...} (descriptor/provider/resources omitted
+// since they didn't change). applyChange must merge that partial delta
+// onto the prior content, not replace it wholesale -- otherwise the
+// catalog survives with isActive:true but empty content forever, and can
+// never be found by search again.
+func TestApplyChange_IsActiveOnlyDiffPreservesContent(t *testing.T) {
+	baseline := CatalogFile{CatalogID: "cat-9", Version: 1, Catalog: sampleCatalog("cat-9")}
+	rawBaseline := marshalFile(t, baseline)
+	baselineRef := FileRef{Version: 1, URL: "/baseline.json", Size: int64(len(rawBaseline)), Digest: Digest(rawBaseline)}
+
+	falseVal, trueVal := false, true
+	pauseChange := CatalogChangeFile{CatalogID: "cat-9", FromVersion: 1, ToVersion: 2, Catalog: &beckn.Catalog{IsActive: &falseVal}}
+	rawPause := marshalFile(t, pauseChange)
+	resumeChange := CatalogChangeFile{CatalogID: "cat-9", FromVersion: 2, ToVersion: 3, Catalog: &beckn.Catalog{IsActive: &trueVal}}
+	rawResume := marshalFile(t, resumeChange)
+
+	srv := fileServer(t, map[string][]byte{
+		"/baseline.json": rawBaseline,
+		"/pause.json":    rawPause,
+		"/resume.json":   rawResume,
+	})
+	baselineRef.URL = srv.URL + "/baseline.json"
+	pauseRef := ChangeRef{FromVersion: 1, ToVersion: 2, URL: srv.URL + "/pause.json", Size: int64(len(rawPause)), Digest: Digest(rawPause)}
+	resumeRef := ChangeRef{FromVersion: 2, ToVersion: 3, URL: srv.URL + "/resume.json", Size: int64(len(rawResume)), Digest: Digest(rawResume)}
+
+	index := func(entryVersion int, isActive bool, changes []ChangeRef) []byte {
+		entry := IndexEntry{
+			CatalogID: "cat-9", EntryVersion: entryVersion, CatalogType: CatalogTypeRegular,
+			IsActive: isActive, Baseline: baselineRef, Changes: changes,
+		}
+		return marshalFile(t, CatalogIndex{NodeID: "pn-9", Catalogs: []IndexEntry{entry}})
+	}
+
+	currentIndex := index(1, true, nil)
+	indexSrv := fileServerDynamic(t, "/idx.json", func() []byte { return currentIndex })
+	indexURL := indexSrv.URL + "/idx.json"
+
+	crawler := NewCrawler(srv.Client(), testLogger(), nil, nil, 0.5)
+
+	if catalogs, _ := crawler.CrawlAll(t.Context(), []string{indexURL}); len(catalogs) != 1 || catalogs[0].Descriptor.Name == "" {
+		t.Fatalf("expected cat-9 indexed with full content, got %+v", catalogs)
+	}
+
+	// Pause: isActive-only change file (v1 -> v2).
+	currentIndex = index(2, false, []ChangeRef{pauseRef})
+	if catalogs, _ := crawler.CrawlAll(t.Context(), []string{indexURL}); len(catalogs) != 0 {
+		t.Fatalf("expected cat-9 excluded while paused, got %+v", catalogs)
+	}
+	paused, _ := crawler.cursor.get("cat-9")
+	if paused.catalog.Descriptor.Name == "" {
+		t.Fatal("pausing wiped the catalog's descriptor -- applyChange should merge, not replace")
+	}
+
+	// Resume: another isActive-only change file (v2 -> v3).
+	currentIndex = index(3, true, []ChangeRef{pauseRef, resumeRef})
+	catalogs, _ := crawler.CrawlAll(t.Context(), []string{indexURL})
+	if len(catalogs) != 1 {
+		t.Fatalf("expected cat-9 included again after resume, got %+v", catalogs)
+	}
+	if catalogs[0].Descriptor.Name == "" {
+		t.Fatal("resuming left the catalog's descriptor empty -- applyChange wiped content on an earlier isActive-only diff")
+	}
+	if len(catalogs[0].Resources) != 1 {
+		t.Fatalf("expected cat-9's resources to survive the isActive-only diffs, got %+v", catalogs[0].Resources)
 	}
 }
 
