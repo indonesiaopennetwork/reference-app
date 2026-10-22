@@ -87,6 +87,12 @@ modules:
             # catalog file gzip-compressed (.json.gz).
             publishLatest: "true"
             gzip: "true"
+            # compactionChangeCountThreshold/compactionSizeRatioThreshold:
+            # automatically fold a long chain of pending change files back
+            # into a fresh baseline once either is crossed, instead of
+            # growing the change chain forever. Either alone triggers it.
+            compactionChangeCountThreshold: "20"
+            compactionSizeRatioThreshold: "0.5"
         # Validates submitted catalogs before they're published against
         # catalog/publish's real schema (protocol-specifications-v2 beckn.yaml).
         schemaValidator:
