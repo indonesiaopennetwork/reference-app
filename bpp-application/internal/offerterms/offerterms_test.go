@@ -35,36 +35,41 @@ func TestFillAttributesKeepsTheSellersPolicy(t *testing.T) {
 	}
 }
 
-func TestFillAttributesAddsTheDefaultCommission(t *testing.T) {
-	got := decode(t, FillAttributes(json.RawMessage(`{"policies": {}}`), d))["policies"].(map[string]any)["commission"].([]any)
-	want := map[string]any{"feeName": "Finder fee", "feeType": "PERCENT", "feeValue": 3.0, "appliesTo": "ITEM_TOTAL"}
-	if len(got) != 1 || !equal(got[0].(map[string]any), want) {
-		t.Errorf("commission = %v, want [%v]", got, want)
-	}
-	own := `{"policies": {"commission": [{"feeName": "Platform fee", "feeType": "AMOUNT", "feeValue": 500}],
-	  "settlement": {"settlementBasis": "AFTER_DELIVERY", "settlementWindow": "P1D"}}}`
-	if string(FillAttributes(json.RawMessage(own), d)) != own {
-		t.Error("a seller's own commission must be kept")
-	}
-	earlier := `{"policies": {"commission": [{"name": "Platform fee", "type": "AMOUNT", "value": 500}],
-	  "settlement": {"settlementBasis": "AFTER_DELIVERY", "settlementWindow": "P1D"}}}`
-	renamed := decode(t, FillAttributes(json.RawMessage(earlier), d))["policies"].(map[string]any)["commission"].([]any)
-	if !equal(renamed[0].(map[string]any), map[string]any{"feeName": "Platform fee", "feeType": "AMOUNT", "feeValue": 500.0}) {
-		t.Errorf("commission stored under the earlier names = %v, want it renamed", renamed)
-	}
-	if amount := (Defaults{CommissionType: "AMOUNT", CommissionValue: 500}).Commission()[0].(map[string]any); amount["appliesTo"] != nil {
-		t.Errorf("an AMOUNT commission has no appliesTo: %v", amount)
+func TestFillAttributesDropsPoliciesCommission(t *testing.T) {
+	got := decode(t, FillAttributes(json.RawMessage(`{"policies": {"commission": [{"feeName": "Finder fee", "feeType": "PERCENT", "feeValue": 5}],
+	  "settlement": {"settlementBasis": "AFTER_DELIVERY", "settlementWindow": "P1D"}}}`), d))
+	if _, ok := got["policies"].(map[string]any)["commission"]; ok {
+		t.Errorf("policies.commission must go (the fee is on the consideration): %v", got)
 	}
 }
 
-func TestStripCommission(t *testing.T) {
-	got := decode(t, StripCommission(json.RawMessage(`{"totalAmount": 1, "commission": {"type": "PERCENT", "value": 3}}`)))
-	if _, ok := got["commission"]; ok || got["totalAmount"] != 1.0 {
-		t.Errorf("attrs = %v, want the commission gone and the rest kept", got)
+func TestFillFee(t *testing.T) {
+	fee := func(raw, offer string) map[string]any {
+		return decode(t, FillFee(json.RawMessage(raw), json.RawMessage(offer), d))["buyerFinderFee"].(map[string]any)
 	}
-	plain := json.RawMessage(`{"totalAmount": 1}`)
-	if string(StripCommission(plain)) != string(plain) {
-		t.Error("attributes without a commission must be unchanged")
+	want := map[string]any{"feeType": "PERCENT", "feeValue": 3.0, "appliesTo": "ITEM_TOTAL"}
+	if got := fee(`{"totalAmount": 1}`, `{}`); !equal(got, want) {
+		t.Errorf("default fee = %v, want %v", got, want)
+	}
+	own := `{"totalAmount": 1, "buyerFinderFee": {"feeType": "AMOUNT", "feeValue": 500}}`
+	if string(FillFee(json.RawMessage(own), nil, d)) != own {
+		t.Error("a seller's own fee must be kept unchanged")
+	}
+	// Stored the earlier ways: as the consideration's commission, or as the
+	// offer's policies.commission entries (the first is the fee).
+	if got := fee(`{"totalAmount": 1, "commission": {"type": "AMOUNT", "value": 700}}`, `{}`); !equal(got, map[string]any{"feeType": "AMOUNT", "feeValue": 700.0}) {
+		t.Errorf("fee from the consideration's commission = %v", got)
+	}
+	got := decode(t, FillFee(json.RawMessage(`{"totalAmount": 1, "commission": {"type": "AMOUNT", "value": 700}}`), nil, d))
+	if _, ok := got["commission"]; ok {
+		t.Error("the consideration's commission must go")
+	}
+	offer := `{"policies": {"commission": [{"feeName": "Finder fee", "feeType": "PERCENT", "feeValue": 4}, {"feeName": "Platform fee", "feeType": "AMOUNT", "feeValue": 250}]}}`
+	if got := fee(`{"totalAmount": 1}`, offer); !equal(got, map[string]any{"feeType": "PERCENT", "feeValue": 4.0, "appliesTo": "ITEM_TOTAL"}) {
+		t.Errorf("fee from policies.commission = %v", got)
+	}
+	if amount := (Defaults{CommissionType: "AMOUNT", CommissionValue: 500}).Fee(); amount["appliesTo"] != nil {
+		t.Errorf("an AMOUNT fee has no appliesTo: %v", amount)
 	}
 }
 

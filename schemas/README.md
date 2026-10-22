@@ -10,7 +10,7 @@ in ion-specs but not yet published.
 |---|---|---|
 | `IONTradeResource` | ion-specs branch `feat/trade-resource-crc-attributes`, `releases/release1/schema/extension/trade/TradeResource/v1/attributes.yaml` | Extended `fashion` and `electronics` attributes and `additionalAttributes[]`, used by the seller app's CRC forms. schema.ion.id's version rejects them (`fashion` and `electronics` are closed objects). |
 | `IONSettlementReconciliation` | ion-specs PR #25 (`feat/recon-per-settlement`), `schema/common/Settlement/v1/attributes.yaml`, **bundled** | Per-settlement reconciliation: `orderDate`, `breakup`, `collections`, `settlementObligations`, dispute codes, and `SettlementAccount`'s `holderId` / `allocationFor` / `allocatedAmount` (inlined from the PR's Payment pack). |
-| `IONTradeOffer`, `IONTradeConsideration` | ion-specs PR #24 (`feat/offer-settlement-policy`, included in #25), **bundled** | `policies.settlement` and `policies.commission` on the offer; commission fields `feeName`, `feeType`, `feeValue`, `feeAmount`. |
+| `IONTradeOffer`, `IONTradeConsideration` | ion-specs PR #24 (`feat/offer-settlement-policy`, included in #25), **bundled** | `policies.settlement` on the offer; the buyer finder fee on the offer's consideration (`buyerFinderFee`: `feeType`, `feeValue`, `appliesTo`) and its total on the contract's (`feeAmount`). |
 | `ion-additional.yaml` (not a pack: the onix `auxiliaryLocations`) | ion-specs PR #25, `schema/core/api/v2.0.0/ion-additional.yaml`, **bundled** | `/reconcile` and `/on_reconcile` without `reconciliationId`, agreed per settlement, with the new summary fields. |
 
 Refresh a copy after changing the pack in ion-specs, and delete it once the

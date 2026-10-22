@@ -1464,22 +1464,20 @@ const SETTLEMENT_WINDOWS = [
   ['P7D', '7 days'], ['P14D', '14 days'], ['P30D', '30 days'],
 ]
 
-// A new commission entry of an offer form.
-const NEW_COMMISSION = () => ({ name: '', type: 'PERCENT', value: '', applies_to: 'ITEM_TOTAL' })
+// The offer form's buyer finder fee (one per offer; the form keeps it as
+// commissions[0]).
+const NEW_FEE = () => ({ type: 'PERCENT', value: '', applies_to: 'ITEM_TOTAL' })
 
-// The commission the seller pays the buyer app, as the offer's
-// policies.commission (IONTradeOffer): named entries that add up, each
-// PERCENT of the item value without tax (ITEM_TOTAL) or with tax
-// (ORDER_TOTAL), or a fixed AMOUNT per unit sold. Entries without a value are
-// left out.
-function buildCommission(o) {
-  return (o.commissions || [])
-    .filter(c => c.value !== '' && c.value != null)
-    .map(c => {
-      const entry = { feeName: (c.name || '').trim() || 'Finder fee', feeType: c.type === 'AMOUNT' ? 'AMOUNT' : 'PERCENT', feeValue: Number(c.value) || 0 }
-      if (entry.feeType === 'PERCENT') entry.appliesTo = c.applies_to || 'ITEM_TOTAL'
-      return entry
-    })
+// The buyer finder fee the seller pays the buyer app, on the offer's
+// consideration (IONTradeConsideration buyerFinderFee): PERCENT of the item
+// value without tax (ITEM_TOTAL) or with tax (ORDER_TOTAL), or a fixed AMOUNT
+// per unit sold. null without a value.
+function buildBuyerFinderFee(o) {
+  const c = (o.commissions || [])[0]
+  if (!c || c.value === '' || c.value == null) return null
+  const fee = { feeType: c.type === 'AMOUNT' ? 'AMOUNT' : 'PERCENT', feeValue: Number(c.value) || 0 }
+  if (fee.feeType === 'PERCENT') fee.appliesTo = c.applies_to || 'ITEM_TOTAL'
+  return fee
 }
 
 // The offer's payout term, policies.settlement.
@@ -1487,63 +1485,51 @@ function buildSettlementPolicy(o) {
   return { settlementBasis: o.settlement_basis || 'AFTER_DELIVERY', settlementWindow: o.settlement_window || 'P1D' }
 }
 
-// Commission entries and payout term of an offer form, with what the
-// commission comes to per unit at the offer's price.
+// Buyer finder fee and payout term of an offer form, with what the fee comes
+// to per unit at the offer's price.
 function SettlementTermsFields({ offer, onChange, labelCls, inputCls }) {
   const { t } = useI18n()
   const commissions = offer.commissions || []
   const price = Number(offer.price) || 0
   const withTax = offer.price ? buildPriceBreakup(offer).totalAmount : 0
-  const perUnit = commissions.reduce((sum, c) => {
+  const perUnit = commissions.slice(0, 1).reduce((sum, c) => {
     const v = Number(c.value) || 0
     if (c.type === 'AMOUNT') return sum + v
     return sum + (c.applies_to === 'ORDER_TOTAL' ? withTax : price) * v / 100
   }, 0)
-  const setEntry = (i, k, v) => onChange('commissions', commissions.map((c, j) => (j === i ? { ...c, [k]: v } : c)))
+  const setFee = (k, v) => onChange('commissions', [{ ...(commissions[0] || NEW_FEE()), [k]: v }])
   const windows = SETTLEMENT_WINDOWS.some(([v]) => v === offer.settlement_window) || !offer.settlement_window
     ? SETTLEMENT_WINDOWS : [...SETTLEMENT_WINDOWS, [offer.settlement_window, offer.settlement_window]]
   return (
     <div className="p-3 rounded-lg bg-slate-800/50 border border-white/[0.06] space-y-2" data-tour="offer-settlement">
       <p className="text-xs font-semibold text-slate-300">💸 {t('Settlement terms')}</p>
-      <p className="text-[11px] text-slate-500">{t('Commission to buyer app')}</p>
-      {commissions.map((c, i) => {
+      <p className="text-[11px] text-slate-500">{t('Buyer finder fee (paid to the buyer app)')}</p>
+      {(() => {
+        const c = commissions[0] || NEW_FEE()
         const percent = c.type !== 'AMOUNT'
         return (
-          // Editable rows: the name is typed in place, so the position is the key.
-          <div key={i} className="grid grid-cols-1 sm:grid-cols-[1.4fr_1fr_0.8fr_1.2fr_auto] gap-2 items-end">
-            <div><label className={labelCls}>{t('Name')}</label>
-              <input className={inputCls} value={c.name} onChange={e => setEntry(i, 'name', e.target.value)} placeholder={t('Finder fee')} />
-            </div>
+          <div className="grid grid-cols-1 sm:grid-cols-[1fr_0.8fr_1.2fr] gap-2 items-end">
             <div><label className={labelCls}>{t('Type')}</label>
-              <select className={inputCls} value={c.type} onChange={e => setEntry(i, 'type', e.target.value)}>
+              <select className={inputCls} value={c.type} onChange={e => setFee('type', e.target.value)}>
                 <option value="PERCENT" className="bg-slate-900">{t('Percent')}</option>
                 <option value="AMOUNT" className="bg-slate-900">{t('Fixed amount per unit')}</option>
               </select>
             </div>
             <div><label className={labelCls}>{percent ? t('Value (%)') : t('Value ({currency})', { currency: offer.currency || 'IDR' })}</label>
               <input className={inputCls} type="number" min="0" max={percent ? 100 : undefined} step="0.01" required
-                value={c.value} onChange={e => setEntry(i, 'value', e.target.value)} placeholder={percent ? '3' : '1000'} />
+                value={c.value} onChange={e => setFee('value', e.target.value)} placeholder={percent ? '3' : '1000'} />
             </div>
             {percent ? (
-              <div><label className={labelCls}>{t('Commission on')}</label>
-                <select className={inputCls} value={c.applies_to} onChange={e => setEntry(i, 'applies_to', e.target.value)}>
+              <div><label className={labelCls}>{t('Fee on')}</label>
+                <select className={inputCls} value={c.applies_to} onChange={e => setFee('applies_to', e.target.value)}>
                   <option value="ITEM_TOTAL" className="bg-slate-900">{t('Item price (without tax)')}</option>
                   <option value="ORDER_TOTAL" className="bg-slate-900">{t('Price with tax')}</option>
                 </select>
               </div>
             ) : <div />}
-            <button type="button" title={t('Remove commission')} disabled={commissions.length === 1}
-              onClick={() => onChange('commissions', commissions.filter((_, j) => j !== i))}
-              className="p-2 rounded-lg border border-white/[0.08] text-slate-500 hover:text-red-400 disabled:opacity-30 disabled:hover:text-slate-500 transition-colors">
-              <Trash2 size={14} />
-            </button>
           </div>
         )
-      })}
-      <button type="button" onClick={() => onChange('commissions', [...commissions, NEW_COMMISSION()])}
-        className="flex items-center gap-1.5 text-xs font-semibold text-slate-400 hover:text-white transition-colors">
-        <Plus size={13} /> {t('Add commission')}
-      </button>
+      })()}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
         <div><label className={labelCls}>{t('Payout starts')}</label>
           <select className={inputCls} value={offer.settlement_basis} onChange={e => onChange('settlement_basis', e.target.value)}>
@@ -1557,7 +1543,7 @@ function SettlementTermsFields({ offer, onChange, labelCls, inputCls }) {
         </div>
       </div>
       <p className="text-[10px] text-slate-600">
-        {price > 0 ? t('Commission ≈ {currency} {amount} per unit at this price, deducted from your payout.', { currency: offer.currency || 'IDR', amount: Math.round(perUnit * 100) / 100 }) + ' ' : ''}
+        {price > 0 ? t('Buyer finder fee ≈ {currency} {amount} per unit at this price, deducted from your payout.', { currency: offer.currency || 'IDR', amount: Math.round(perUnit * 100) / 100 }) + ' ' : ''}
         {t('The payout is due this long after the event; with several offers in one order, the latest due date applies.')}
       </p>
     </div>
@@ -1855,7 +1841,10 @@ function offerToForm(o) {
   const pol = a.policies || {}, ret = pol.returns || {}, can = pol.cancellation || {}, rep = pol.replacement || {}
   const svc = a.serviceability || {}
   const ca = o.considerations?.[0]?.considerationAttributes || {}
-  const commissions = Array.isArray(pol.commission) ? pol.commission : ca.commission ? [{ name: 'Finder fee', ...ca.commission }] : null
+  // The buyer finder fee: on the consideration (buyerFinderFee), or stored
+  // the earlier ways (policies.commission entries, consideration commission).
+  const fee = ca.buyerFinderFee || (Array.isArray(pol.commission) ? pol.commission[0] : ca.commission)
+  const commissions = fee ? [fee] : null
   const payout = pol.settlement || {}
   const base = (ca.breakup || []).find(b => b.type === 'BASE_PRICE')
   const tax = (ca.breakup || []).find(b => b.type === 'TAX')
@@ -1882,10 +1871,10 @@ function offerToForm(o) {
     replace_allowed: !!rep.allowed, replace_window: rep.window || blank.replace_window, replace_method: rep.method || blank.replace_method,
     replace_subject_avail: rep.subjectToAvailability ?? blank.replace_subject_avail,
     commissions: commissions
-      // ION names (feeName, feeType, feeValue), or the earlier ones (name, type, value)
+      // ION names (feeType, feeValue), or the earlier ones (type, value)
       ? commissions.map(c => {
         const value = c.feeValue ?? c.value
-        return { name: c.feeName ?? c.name ?? '', type: c.feeType ?? c.type ?? 'PERCENT', value: value != null ? String(value) : '', applies_to: c.appliesTo || 'ITEM_TOTAL' }
+        return { type: c.feeType ?? c.type ?? 'PERCENT', value: value != null ? String(value) : '', applies_to: c.appliesTo || 'ITEM_TOTAL' }
       })
       : blank.commissions,
     settlement_basis: payout.settlementBasis || blank.settlement_basis,
@@ -1906,8 +1895,6 @@ function buildOfferAttrs(o) {
     '@context': o.offer_context || EMPTY_OFFER().offer_context, '@type': 'ion:IONTradeOffer',
     policies: { settlement: buildSettlementPolicy(o) },
   }
-  const commission = buildCommission(o)
-  if (commission.length) attrs.policies.commission = commission
 
   if (hasPolicies) {
     attrs.policies = {
@@ -2022,6 +2009,7 @@ function PublishPage({ onNav }) {
                   '@type': 'ion:IONTradeConsideration',
                   currency: o.currency,
                   ...buildPriceBreakup(o),
+                  ...(buildBuyerFinderFee(o) ? { buyerFinderFee: buildBuyerFinderFee(o) } : {}),
                   paymentMethods: o.cod_available ? ['PREPAID', 'COD', 'DIGITAL_WALLET'] : ['PREPAID', 'DIGITAL_WALLET'],
                 }
               }]
@@ -4101,7 +4089,7 @@ function CatalogDetailPage({ onNav, catalogId }) {
 const PRODUCT_AUTOFILL_POOL = [
   {
     res: { id: 'item-keripik-singkong', name: 'Keripik Singkong Balado (Spicy Cassava Chips)', short_desc: 'Crispy cassava chips with balado seasoning', long_desc: 'Keripik singkong renyah dengan bumbu balado khas Minang yang pedas manis. (Crispy cassava chips with authentic Minang sweet and spicy balado seasoning.)', product_highlights: '- Terbuat dari singkong segar pilihan (Made from fresh selected cassava)\n- Bumbu balado asli minang (Authentic Minang balado seasoning)\n- Tanpa pengawet buatan (No artificial preservatives)', specifications: '- Berat Bersih (Net Weight): 150g\n- Kemasan (Packaging): Plastik Ziplock (Ziplock Plastic)\n- Bahan Utama (Main Ingredient): Singkong, Cabai (Cassava, Chili)', media_url: 'https://images.unsplash.com/photo-1621939514649-280e2ee25f60?w=400', brand: 'Chitato', origin_country: 'ID', weight_value: '150', weight_unit: 'G', color: 'Golden', material: 'Cassava' },
-    off: { id: 'offer-keripik-singkong', commissions: [{ name: 'Finder fee', type: 'PERCENT', value: '5', applies_to: 'ITEM_TOTAL' }, { name: 'Platform fee', type: 'AMOUNT', value: '500' }], settlement_basis: 'AFTER_DELIVERY', settlement_window: 'P3D', name: 'Keripik Singkong Balado', price: '25000', currency: 'IDR', cod_available: true, returns_allowed: true, returns_window: 'P7D', returns_method: 'SELLER_PICKUP', returns_fee_type: 'PERCENTAGE', returns_fee_value: '10', cancel_allowed: true, cancel_window: 'PT2H', cancel_event: 'BEFORE_PACKING', replace_allowed: false, max_distance: '20', offer_context: 'https://schema.ion.id/release1/schema/extension/trade/TradeOffer/v1/context.jsonld' }
+    off: { id: 'offer-keripik-singkong', commissions: [{ name: 'Finder fee', type: 'PERCENT', value: '5', applies_to: 'ITEM_TOTAL' }], settlement_basis: 'AFTER_DELIVERY', settlement_window: 'P3D', name: 'Keripik Singkong Balado', price: '25000', currency: 'IDR', cod_available: true, returns_allowed: true, returns_window: 'P7D', returns_method: 'SELLER_PICKUP', returns_fee_type: 'PERCENTAGE', returns_fee_value: '10', cancel_allowed: true, cancel_window: 'PT2H', cancel_event: 'BEFORE_PACKING', replace_allowed: false, max_distance: '20', offer_context: 'https://schema.ion.id/release1/schema/extension/trade/TradeOffer/v1/context.jsonld' }
   },
   {
     res: { id: 'item-bolu-pisang', name: 'Bolu Pisang Cokelat (Chocolate Banana Cake)', short_desc: 'Soft banana cake with chocolate chips', long_desc: 'Bolu pisang panggang yang lembut dipadukan dengan taburan cokelat lezat di atasnya. (Soft baked banana cake topped with delicious chocolate chips.)', product_highlights: '- Dibuat dengan pisang ambon segar (Made with fresh Ambon bananas)\n- Tekstur lembut dan lumer di mulut (Soft texture that melts in the mouth)\n- Taburan cokelat premium (Premium chocolate chips)', specifications: '- Berat Bersih (Net Weight): 400g\n- Kemasan (Packaging): Kardus Makanan (Food Box)\n- Bahan Utama (Main Ingredient): Tepung, Pisang, Cokelat (Flour, Banana, Chocolate)', media_url: 'https://images.unsplash.com/photo-1578985545062-69928b1d9587?w=400', brand: 'HomeMade', origin_country: 'ID', weight_value: '400', weight_unit: 'G', color: 'Brown', material: 'Flour' },
@@ -4699,6 +4687,7 @@ function AddOfferPage({ onNav, catalogId, preselectedResourceId, editOfferId }) 
             '@type': 'ion:IONTradeConsideration',
             currency: off.currency,
             ...buildPriceBreakup(off),
+            ...(buildBuyerFinderFee(off) ? { buyerFinderFee: buildBuyerFinderFee(off) } : {}),
             paymentMethods: off.cod_available ? ['PREPAID', 'COD', 'DIGITAL_WALLET'] : ['PREPAID', 'DIGITAL_WALLET'],
           },
         }],

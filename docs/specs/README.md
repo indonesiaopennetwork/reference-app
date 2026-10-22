@@ -50,30 +50,30 @@ log; payout status comes back through the PJP's webhook, outside this API.
 The seller publishes its terms on every offer (ion-specs
 `feat/offer-settlement-policy`):
 
-- the **commission** it pays the buyer app, `offerAttributes.policies.commission`
-  (IONTradeOffer): named entries that add up (a "Finder fee", a "Platform
-  fee", ...: `feeName`), each `feeType` `PERCENT` of the offer's item value
-  without tax (`appliesTo: ITEM_TOTAL`) or with tax (`ORDER_TOTAL`), or a fixed
-  `AMOUNT` per unit sold, of `feeValue`. The offer's own price consideration
-  carries no commission;
+- the **buyer finder fee** it pays the buyer app, on the offer's
+  consideration: `considerationAttributes.buyerFinderFee`
+  (IONTradeConsideration), one per offer -- `feeType` `PERCENT` of the offer's
+  item value without tax (`appliesTo: ITEM_TOTAL`) or with tax
+  (`ORDER_TOTAL`), or a fixed `AMOUNT` per unit sold, of `feeValue`;
 - the **payout term**, `offerAttributes.policies.settlement` (IONTradeOffer)
   -- `settlementBasis` and `settlementWindow`.
 
 The seller sets them per offer on the Add Offer form (under Policies); an
-offer without them gets the BPP's defaults (a single "Finder fee" entry) (env `COMMISSION_TYPE`, `COMMISSION_VALUE`,
+offer without them gets the BPP's defaults (env `COMMISSION_TYPE`, `COMMISSION_VALUE`,
 `COMMISSION_APPLIES_TO`, `SETTLEMENT_BASIS`, `SETTLEMENT_WINDOW`) when it is
 saved, published or ordered. At `select`, `init` and `confirm` the BPP puts the
 terms stored for each offer on the order's commitments, so the buyer app can't
-change them. The buyer app takes the seller's commission as it is.
+change them. The buyer app takes the seller's fee as it is.
 
-The contract's price consideration carries the commission the order comes to
-(`commission.feeAmount`): each offer's commission entries on its own items
-still ordered, summed. When every offer has one entry with the same `PERCENT`
-terms the contract repeats them; otherwise it is `feeType: AMOUNT` with
-`feeValue` the total. With several offers, the payout term giving the latest
-due date applies. Offers and orders stored under the earlier field names
-(`name`, `type`, `value`, `amount`) are still read, and renamed when the
-offer is next saved or published.
+The contract's price consideration carries the order's total fee
+(`buyerFinderFee.feeAmount`): each offer's fee on its own items still ordered,
+summed; the settlement's `commission` equals it. With several offers, the
+payout term giving the latest due date applies. Offers and orders stored the
+earlier ways -- the fee as `policies.commission` entries or as a
+consideration's `commission`, under the field names `name`, `type`, `value`,
+`amount` -- are still read; migration 038 moves stored offers' fees onto their
+considerations, and an offer is rewritten when it is next saved or
+published.
 
 ## One settlement object, from init to reconcile
 
@@ -174,12 +174,11 @@ exchange the participant started -- only those, in the same exchange: same
 batch's settlements open to show both sides' attributes. Escalation to
 `/raise` comes later.
 
-The commission is computed from the contract: each offer's `policies.commission`
-entries on its own items still ordered -- a `PERCENT` entry on the unit price
-(`ITEM_TOTAL`) or unit total with tax (`ORDER_TOTAL`), an `AMOUNT` per unit --
-summed; a fully cancelled order has none. The result is the price
-consideration's `commission.feeAmount`, and a settlement's `commission`
-equals it, so the two apps compare the commission each copy of the contract
+The commission is computed from the contract: each offer's buyer finder fee on
+its own items still ordered -- a `PERCENT` fee on the unit price (`ITEM_TOTAL`)
+or unit total with tax (`ORDER_TOTAL`), an `AMOUNT` per unit -- summed; a fully
+cancelled order has none. The result is the price consideration's
+`buyerFinderFee.feeAmount`, and a settlement's `commission` equals it, so the two apps compare the commission each copy of the contract
 states. An order placed before the commission moved to the offer uses its
 `finderFee` by the same rule.
 

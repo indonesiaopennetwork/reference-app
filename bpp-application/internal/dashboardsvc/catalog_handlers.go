@@ -611,6 +611,7 @@ func (h *Handler) insertOffer(ctx context.Context, q *dbsqlc.Queries, catalogID,
 
 	// Insert offer, with this seller's default terms where it has none.
 	d := offerterms.FromConfig(h.cfg)
+	origAttrs := offer.OfferAttributes
 	offer.OfferAttributes = offerterms.FillAttributes(offer.OfferAttributes, d)
 	oAttrsCtx, oAttrsType := extractContextType(offer.OfferAttributes)
 	var validityStart, validityEnd pgtype.Timestamptz
@@ -638,7 +639,7 @@ func (h *Handler) insertOffer(ctx context.Context, q *dbsqlc.Queries, catalogID,
 
 	// Insert considerations.
 	for _, consid := range offer.Considerations {
-		consid.ConsiderationAttributes = offerterms.StripCommission(consid.ConsiderationAttributes)
+		consid.ConsiderationAttributes = offerterms.FillFee(consid.ConsiderationAttributes, origAttrs, d)
 		cAttrsCtx, cAttrsType := extractContextType(consid.ConsiderationAttributes)
 		if err := q.InsertOfferConsideration(ctx, dbsqlc.InsertOfferConsiderationParams{
 			OfferID:                        offer.ID,
@@ -819,6 +820,9 @@ func (h *Handler) publishCatalogToCDS(ctx context.Context, catalogID string, for
 		offer catalog.Offer
 	}
 	offerMap := map[string]*rawOffer{}
+	// The offers' attributes as stored, for a fee stored the earlier way
+	// (policies.commission) that FillFee carries over to the considerations.
+	origAttrs := map[string]json.RawMessage{}
 	offerOrder := []string{}
 
 	for offerRows.Next() {
@@ -830,6 +834,7 @@ func (h *Handler) publishCatalogToCDS(ctx context.Context, catalogID string, for
 			&rids, &o.OfferAttributes, &vs, &ve, &provName, &provID); err != nil {
 			continue
 		}
+		origAttrs[o.ID] = o.OfferAttributes
 		o.OfferAttributes = offerterms.FillAttributes(o.OfferAttributes, offerterms.FromConfig(h.cfg))
 		o.ResourceIDs = rids
 		if provID != "" {
@@ -868,7 +873,7 @@ func (h *Handler) publishCatalogToCDS(ctx context.Context, catalogID string, for
 				ro.offer.Considerations = append(ro.offer.Considerations, catalog.Consideration{
 					ID:                      considID,
 					Status:                  catalog.Status{Code: statusCode, Name: statusName},
-					ConsiderationAttributes: offerterms.StripCommission(attrs),
+					ConsiderationAttributes: offerterms.FillFee(attrs, origAttrs[offerID], offerterms.FromConfig(h.cfg)),
 				})
 			}
 		}
@@ -1410,6 +1415,7 @@ func (h *Handler) HandleAddOffer(c *gin.Context) {
 	}
 
 	d := offerterms.FromConfig(h.cfg)
+	origAttrs := req.OfferAttributes
 	req.OfferAttributes = offerterms.FillAttributes(req.OfferAttributes, d)
 	oAttrsCtx, oAttrsType := extractContextType(req.OfferAttributes)
 	var validityStart, validityEnd pgtype.Timestamptz
@@ -1438,7 +1444,7 @@ func (h *Handler) HandleAddOffer(c *gin.Context) {
 	}
 
 	for _, consid := range req.Considerations {
-		consid.ConsiderationAttributes = offerterms.StripCommission(consid.ConsiderationAttributes)
+		consid.ConsiderationAttributes = offerterms.FillFee(consid.ConsiderationAttributes, origAttrs, d)
 		cAttrsCtx, cAttrsType := extractContextType(consid.ConsiderationAttributes)
 		if err := qt.InsertOfferConsideration(ctx, dbsqlc.InsertOfferConsiderationParams{
 			OfferID:                        req.ID,
