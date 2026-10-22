@@ -19,15 +19,15 @@ func (store) GetOffer(_ context.Context, arg sqlc.GetOfferParams) (sqlc.Offer, e
 		return sqlc.Offer{}, errors.New("no rows")
 	}
 	return sqlc.Offer{ID: "offer-1", OfferAttributes: json.RawMessage(
-		`{"policies": {"commission": [{"feeName": "Finder fee", "feeType": "PERCENT", "feeValue": 5, "appliesTo": "ITEM_TOTAL"}],
-		  "settlement": {"settlementBasis": "AFTER_DELIVERY", "settlementWindow": "P2D"}}}`)}, nil
+		`{"policies": {"settlement": {"settlementBasis": "AFTER_DELIVERY", "settlementWindow": "P2D"}}}`)}, nil
 }
 
 func (store) GetOfferConsiderations(_ context.Context, arg sqlc.GetOfferConsiderationsParams) ([]sqlc.OfferConsideration, error) {
 	if arg.OfferID != "offer-1" {
 		return nil, nil
 	}
-	return []sqlc.OfferConsideration{{ConsiderationAttributes: json.RawMessage(`{"totalAmount": 98900}`)}}, nil
+	return []sqlc.OfferConsideration{{ConsiderationAttributes: json.RawMessage(
+		`{"totalAmount": 98900, "buyerFinderFee": {"feeType": "PERCENT", "feeValue": 5, "appliesTo": "ITEM_TOTAL"}}`)}}, nil
 }
 
 var cfg = &config.Config{BppID: "bpp", SettlementBasis: "AFTER_DELIVERY", SettlementWindow: "P1D",
@@ -76,17 +76,19 @@ func TestApplySellerTermsUsesTheStoredOfferTerms(t *testing.T) {
 	if policy["settlementWindow"] != "P2D" {
 		t.Errorf("offer policy = %v, want the stored P2D", policy)
 	}
-	offerFee := offer["offerAttributes"].(map[string]any)["policies"].(map[string]any)["commission"].([]any)
-	if len(offerFee) != 1 || offerFee[0].(map[string]any)["feeValue"] != 5.0 || offerFee[0].(map[string]any)["feeName"] != "Finder fee" {
-		t.Errorf("offer commission = %v, want the stored 5%% finder fee (not the BAP's 1%%)", offerFee)
+	if _, ok := offer["offerAttributes"].(map[string]any)["policies"].(map[string]any)["commission"]; ok {
+		t.Error("the offer's policies must carry no commission")
 	}
-	if _, ok := offer["considerations"].([]any)[0].(map[string]any)["considerationAttributes"].(map[string]any)["commission"]; ok {
+	offerCA := offer["considerations"].([]any)[0].(map[string]any)["considerationAttributes"].(map[string]any)
+	if fee := offerCA["buyerFinderFee"].(map[string]any); fee["feeValue"] != 5.0 || fee["feeType"] != "PERCENT" {
+		t.Errorf("offer fee = %v, want the stored 5%% (not the BAP's 1%%)", fee)
+	}
+	if _, ok := offerCA["commission"]; ok {
 		t.Error("the offer's price must carry no commission")
 	}
 	price := decode(t, c.Consideration[0].ConsiderationAttributes)
-	want := map[string]any{"feeType": "PERCENT", "feeValue": 5.0, "appliesTo": "ITEM_TOTAL", "feeAmount": 4450.0}
-	if got := price["commission"].(map[string]any); !equal(got, want) {
-		t.Errorf("price commission = %v, want %v", got, want)
+	if got := price["buyerFinderFee"].(map[string]any); !equal(got, map[string]any{"feeAmount": 4450.0}) {
+		t.Errorf("price buyerFinderFee = %v, want feeAmount 4450", got)
 	}
 	attrs := decode(t, c.Settlements[0])["settlementAttributes"].(map[string]any)
 	for _, k := range []string{"finderFee", "settlementBasis", "settlementWindow"} {
@@ -109,7 +111,7 @@ func TestAnOfferWithoutStoredTermsGetsTheDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	price := decode(t, c.Consideration[0].ConsiderationAttributes)
-	if got := price["commission"].(map[string]any)["feeAmount"]; got != 2670.0 {
+	if got := price["buyerFinderFee"].(map[string]any)["feeAmount"]; got != 2670.0 {
 		t.Errorf("commission = %v, want the default 3%% of 89,000", got)
 	}
 }

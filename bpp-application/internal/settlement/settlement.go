@@ -3,18 +3,19 @@
 // The terms are the seller's, published on each offer and carried on the
 // order's commitments:
 //
-//   - the commission the seller pays the buyer app:
-//     offer.offerAttributes.policies.commission (ION IONTradeOffer), named
-//     entries that add up (a finder fee, a platform fee, ...) -- each
-//     PERCENT of the offer's item value (ITEM_TOTAL, excluding tax) or of
-//     its total (ORDER_TOTAL), or a fixed AMOUNT per unit sold;
+//   - the buyer finder fee the seller pays the buyer app: on the offer's
+//     consideration, considerationAttributes.buyerFinderFee (ION
+//     IONTradeConsideration) -- PERCENT of the offer's item value
+//     (ITEM_TOTAL, excluding tax) or of its total (ORDER_TOTAL), or a fixed
+//     AMOUNT per unit sold;
 //   - the payout terms: offer.offerAttributes.policies.settlement (ION
 //     IONTradeOffer) -- settlementBasis and settlementWindow. With several
 //     offers, the term giving the latest due date applies.
 //
-// The contract's price consideration carries the commission the order comes
-// to (commission.feeAmount), set by the BPP in on_select / on_init and
-// recomputed after cancellations and returns (Refresh).
+// The contract's price consideration carries the order's total buyer finder
+// fee (buyerFinderFee.feeAmount), set by the BPP in on_select / on_init and
+// recomputed after cancellations and returns (Refresh). The settlement's
+// commission equals it.
 //
 // The settlement object is ION Release 1 IONSettlementReconciliation
 // (common/Settlement/v1), the settlementAttributes of the contract's payment
@@ -102,13 +103,17 @@ func OfferTerm(offer map[string]any) (t Term, ok bool) {
 	return t, t.Basis != "" || t.Window != ""
 }
 
-// OfferCommission is an offer's commission: the entries of its
-// offerAttributes.policies.commission (feeName, feeType, feeValue,
-// appliesTo), which add up. An offer published while the commission sat on
-// its price consideration (considerationAttributes.commission) gives that one
-// entry. Entries are returned in CommissionEntry form. nil when the offer
-// states none.
+// OfferCommission is an offer's buyer finder fee terms (feeType, feeValue,
+// appliesTo): its consideration's buyerFinderFee. An offer stored the
+// earlier ways gives its policies.commission entries (which add up), or the
+// commission on its price consideration. Entries are returned in
+// CommissionEntry form. nil when the offer states none.
 func OfferCommission(offer map[string]any) []map[string]any {
+	for _, c := range slice(offer["considerations"]) {
+		if m := asMap(asMap(asMap(c)["considerationAttributes"])["buyerFinderFee"]); m != nil && m["feeType"] != nil {
+			return []map[string]any{CommissionEntry(m)}
+		}
+	}
 	var entries []map[string]any
 	for _, e := range slice(asMap(asMap(asMap(offer["offerAttributes"])["policies"]))["commission"]) {
 		if m := asMap(e); m != nil {
@@ -173,15 +178,12 @@ func PayoutTerms(contract map[string]any) []Term {
 	return terms
 }
 
-// OfferCommissionOf works out the commission the contract's offers come to,
-// as the contract consideration's commission object: the offers' own terms
-// when every offer still ordered has one commission entry with the same
-// PERCENT terms, otherwise feeType AMOUNT with feeValue the order's total;
-// feeAmount is the total either way. Each entry of an offer's commission applies to
-// that offer's own items: PERCENT of the unit price (ITEM_TOTAL) or of the
-// unit total with tax (ORDER_TOTAL), or the AMOUNT, times the quantity still
-// ordered; the entries add up. ok is false when no offer states a
-// commission (an order placed before the commission moved to the offer).
+// OfferCommissionOf works out the buyer finder fee the contract's offers
+// come to, as the contract price consideration's buyerFinderFee: feeAmount,
+// the sum of each offer's fee on its own items still ordered -- PERCENT of
+// the unit price (ITEM_TOTAL) or of the unit total with tax (ORDER_TOTAL), or
+// the AMOUNT, times the quantity still ordered. ok is false when no offer
+// states a fee (an order placed before the fee moved to the offer).
 func OfferCommissionOf(contract map[string]any) (commission map[string]any, ok bool) {
 	for _, cm := range allCommitments(contract) {
 		if OfferCommission(asMap(cm["offer"])) != nil {
@@ -192,49 +194,34 @@ func OfferCommissionOf(contract map[string]any) (commission map[string]any, ok b
 		return nil, false
 	}
 	var total float64
-	var shared map[string]any
-	same := true
 	for _, cm := range activeCommitments(contract) {
 		offer := asMap(cm["offer"])
-		entries := OfferCommission(offer)
-		if len(entries) != 1 {
-			same = false
-		}
 		qty := commitmentQty(cm)
-		for _, terms := range entries {
+		for _, terms := range OfferCommission(offer) {
 			value := num(terms["feeValue"])
 			switch {
 			case str(terms["feeType"]) == "AMOUNT":
 				total += value * qty
-				same = false
 			case str(terms["appliesTo"]) == "ORDER_TOTAL":
 				total += unitTotal(offer) * qty * value / 100
 			default:
 				total += unitPrice(cm) * qty * value / 100
 			}
-			if str(terms["feeType"]) == "AMOUNT" {
-				continue
-			}
-			if shared == nil {
-				shared = terms
-			} else if num(shared["feeValue"]) != value || appliesTo(shared) != appliesTo(terms) {
-				same = false
-			}
 		}
 	}
-	total = round2(total)
-	if same && shared != nil {
-		return map[string]any{"feeType": "PERCENT", "feeValue": num(shared["feeValue"]), "appliesTo": appliesTo(shared), "feeAmount": total}, true
-	}
-	return map[string]any{"feeType": "AMOUNT", "feeValue": total, "feeAmount": total}, true
+	return map[string]any{"feeAmount": round2(total)}, true
 }
 
-// StatedCommission is the commission.feeAmount on the contract's price
-// consideration in force (amount, for one stated under the earlier name); ok
-// is false when none states one.
+// StatedCommission is the buyerFinderFee.feeAmount on the contract's price
+// consideration in force -- or, for a contract stated the earlier way, its
+// commission's feeAmount (amount); ok is false when none states one.
 func StatedCommission(contract map[string]any) (amount float64, ok bool) {
 	for _, c := range priceConsiderations(contract) {
-		if v, ok := CommissionEntry(asMap(asMap(c["considerationAttributes"])["commission"]))["feeAmount"].(float64); ok {
+		ca := asMap(c["considerationAttributes"])
+		if v, ok := asMap(ca["buyerFinderFee"])["feeAmount"].(float64); ok {
+			return v, true
+		}
+		if v, ok := CommissionEntry(asMap(ca["commission"]))["feeAmount"].(float64); ok {
 			return v, true
 		}
 	}
@@ -494,7 +481,7 @@ func Compute(contract map[string]any, recomputeFee bool) Amounts {
 }
 
 // Refresh recomputes the contract's commission and figures as it stands and
-// returns the figures: the commission on its price considerations in force,
+// returns the figures: buyerFinderFee.feeAmount on its price considerations in force,
 // and orderAmount, commission, withholdingAmount, refundAmount, netPayable on
 // its settlement object. An order placed before the commission moved to the
 // offer keeps its finderFee, with feeAmount recomputed. A contract without a
@@ -504,16 +491,14 @@ func Refresh(contract map[string]any) Amounts {
 	a := Compute(contract, true)
 	if commission, ok := OfferCommissionOf(contract); ok {
 		commission["feeAmount"] = a.Commission
-		if str(commission["feeType"]) == "AMOUNT" {
-			commission["feeValue"] = a.Commission
-		}
 		for _, c := range priceConsiderations(contract) {
 			ca := asMap(c["considerationAttributes"])
 			if ca == nil {
 				ca = map[string]any{}
 				c["considerationAttributes"] = ca
 			}
-			ca["commission"] = copyMap(commission)
+			ca["buyerFinderFee"] = copyMap(commission)
+			delete(ca, "commission") // stated the earlier way
 		}
 		for _, k := range termFields {
 			delete(attrs, k) // the terms are the offers' now

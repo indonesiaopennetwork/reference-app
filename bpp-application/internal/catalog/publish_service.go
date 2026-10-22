@@ -371,6 +371,7 @@ func replaceOffers(ctx context.Context, q *dbsqlc.Queries, bppID, catalogID stri
 			offerProviderID = strPtr(offer.Provider.ID)
 		}
 
+		origAttrs := offer.OfferAttributes
 		offer.OfferAttributes = offerterms.FillAttributes(offer.OfferAttributes, d)
 		attrsCtx, attrsType := extractContextType(offer.OfferAttributes)
 
@@ -399,7 +400,7 @@ func replaceOffers(ctx context.Context, q *dbsqlc.Queries, bppID, catalogID stri
 		}
 
 		for _, consid := range offer.Considerations {
-			consid.ConsiderationAttributes = offerterms.StripCommission(consid.ConsiderationAttributes)
+			consid.ConsiderationAttributes = offerterms.FillFee(consid.ConsiderationAttributes, origAttrs, d)
 			attrsCtx, attrsType := extractContextType(consid.ConsiderationAttributes)
 			if err := q.InsertOfferConsideration(ctx, dbsqlc.InsertOfferConsiderationParams{
 				OfferID:                        offer.ID,

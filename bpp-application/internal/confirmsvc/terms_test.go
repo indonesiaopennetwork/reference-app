@@ -74,7 +74,7 @@ func TestConfirmRestatesTheSellersCommission(t *testing.T) {
 	}
 	var price map[string]any
 	_ = json.Unmarshal(c.Consideration[0].ConsiderationAttributes, &price)
-	if got := price["commission"].(map[string]any)["feeAmount"]; got != 600.0 {
+	if got := price["buyerFinderFee"].(map[string]any)["feeAmount"]; got != 600.0 {
 		t.Errorf("commission = %v, want the seller's 3%% of 20,000, not the buyer app's 50%%", got)
 	}
 	if got := settlementAttrs(t, c)["netPayable"].(map[string]any)["value"]; got != 21400.0 {
