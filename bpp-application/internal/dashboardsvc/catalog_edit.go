@@ -214,6 +214,7 @@ func (h *Handler) HandleUpdateOffer(c *gin.Context) {
 	}
 	ctx := c.Request.Context()
 	d := offerterms.FromConfig(h.cfg)
+	origAttrs := req.OfferAttributes
 	req.OfferAttributes = offerterms.FillAttributes(req.OfferAttributes, d)
 	oAttrsCtx, oAttrsType := extractContextType(req.OfferAttributes)
 	var vs, ve pgtype.Timestamptz
@@ -248,7 +249,7 @@ func (h *Handler) HandleUpdateOffer(c *gin.Context) {
 		return
 	}
 	for _, cons := range req.Considerations {
-		cons.ConsiderationAttributes = offerterms.FillConsideration(cons.ConsiderationAttributes, d)
+		cons.ConsiderationAttributes = offerterms.FillFee(cons.ConsiderationAttributes, origAttrs, d)
 		cCtx, cType := extractContextType(cons.ConsiderationAttributes)
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO offer_considerations (offer_id, catalog_id, bpp_id, consideration_id, status_code, status_name,

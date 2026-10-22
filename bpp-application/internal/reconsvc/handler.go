@@ -76,7 +76,11 @@ func (h *Handler) HandleOverview(c *gin.Context) {
 		}
 		g.ResendID = resendID
 		if len(batch) > 0 {
-			sm := summarize(g.BapID, h.svc.cfg.BppID, batch, now.Format("2006-01-02"))
+			contracts := make([]any, 0, len(batch))
+			for _, d := range batch {
+				contracts = append(contracts, snapshot(d.contract, d.Figures, d.Figures.bag()))
+			}
+			sm := summaryOf(g.BapID, h.svc.cfg.BppID, now.Format("2006-01-02"), contracts)
 			g.Summary = &sm
 		}
 		list = append(list, g)
