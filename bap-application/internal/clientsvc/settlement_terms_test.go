@@ -11,14 +11,14 @@ func termsConfig() *config.Config {
 }
 
 // pricedContract is a quote (on_select) for one unit of an offer whose
-// seller pays a 3% commission on the item total.
+// seller pays a 3% buyer finder fee on the item total.
 func pricedContract() map[string]interface{} {
 	return map[string]interface{}{
 		"commitments": []interface{}{map[string]interface{}{"id": "c1",
 			"commitmentAttributes": map[string]interface{}{"price": map[string]interface{}{"value": 90000.0}},
 			"offer": map[string]interface{}{"id": "o1", "considerations": []interface{}{map[string]interface{}{"id": "p",
 				"considerationAttributes": map[string]interface{}{"totalAmount": 99900.0,
-					"commission": map[string]interface{}{"type": "PERCENT", "value": 3.0, "appliesTo": "ITEM_TOTAL"}}}}}}},
+					"buyerFinderFee": map[string]interface{}{"feeType": "PERCENT", "feeValue": 3.0, "appliesTo": "ITEM_TOTAL"}}}}}}},
 		"consideration": []interface{}{map[string]interface{}{"id": "price-1",
 			"considerationAttributes": map[string]interface{}{"totalAmount": 99900.0, "currency": "IDR",
 				"breakup": []interface{}{map[string]interface{}{"type": "BASE_PRICE", "amount": 90000.0}}}}}}
@@ -59,7 +59,7 @@ func TestConfirmPaysTheSettlementKeepingTheAgreedTerms(t *testing.T) {
 	sa := asObj(asObj(asSlice(c["settlements"])[0])["settlementAttributes"])
 	sa["settlementAccounts"] = append(asSlice(sa["settlementAccounts"]), map[string]interface{}{"holderRole": "BPP", "bankCode": "BCA", "accountNumber": "2"})
 	price := asObj(asObj(asSlice(c["consideration"])[0])["considerationAttributes"])
-	asObj(price["commission"])["amount"] = 2500.0
+	asObj(price["buyerFinderFee"])["feeAmount"] = 2500.0
 	declaredID := asObj(asSlice(c["settlements"])[0])["id"]
 	if err := attachSettlement(c, termsConfig()); err != nil {
 		t.Fatal(err)

@@ -15,6 +15,8 @@
     "version": "2.0.0"
   },
   "message": {
+    "settlementDate": "2026-09-30",
+    "reconciliationStatus": "AGREED",
     "contracts": [
       {
         "commitments": [
@@ -49,19 +51,12 @@
             "settlementAttributes": {
               "@context": "https://schema.ion.id/release1/schema/common/Settlement/v1/context.jsonld",
               "@type": "ion:IONSettlementReconciliation",
-              "accord": true,
               "collectedBy": "BAP",
               "commission": {
                 "value": 2400
               },
               "currency": "IDR",
-              "dueDate": "2026-09-30",
-              "finderFee": {
-                "appliesTo": "ITEM_TOTAL",
-                "feeType": "PERCENT",
-                "feeValue": 3,
-                "feeAmount": 2400
-              },
+              "orderDate": "2026-09-28",
               "netPayable": {
                 "value": 87600
               },
@@ -76,7 +71,10 @@
                   "accountName": "onix-bap.example",
                   "accountNumber": "1370000000001",
                   "bankCode": "MANDIRI",
-                  "holderRole": "BAP"
+                  "holderRole": "BAP",
+                  "holderId": "onix-bap.example",
+                  "allocationFor": "BAP",
+                  "allocatedAmount": 2400
                 },
                 {
                   "accountName": "onix-bpp.example",
@@ -85,11 +83,19 @@
                   "holderRole": "BPP"
                 }
               ],
-              "settlementBasis": "AFTER_DELIVERY",
-              "settlementWindow": "P1D",
               "withholdingAmount": {
                 "value": 0
-              }
+              },
+              "collections": [
+                {
+                  "method": "PREPAID",
+                  "status": "COLLECTED",
+                  "collectorRole": "PJP",
+                  "reportedCollectedAmount": 90000
+                }
+              ],
+              "accord": true,
+              "dueDate": "2026-09-30"
             }
           }
         ]
@@ -127,19 +133,12 @@
             "settlementAttributes": {
               "@context": "https://schema.ion.id/release1/schema/common/Settlement/v1/context.jsonld",
               "@type": "ion:IONSettlementReconciliation",
-              "accord": true,
               "collectedBy": "BAP",
               "commission": {
                 "value": 1200
               },
               "currency": "IDR",
-              "dueDate": "2026-09-30",
-              "finderFee": {
-                "appliesTo": "ITEM_TOTAL",
-                "feeType": "PERCENT",
-                "feeValue": 3,
-                "feeAmount": 1200
-              },
+              "orderDate": "2026-09-28",
               "netPayable": {
                 "value": 43800
               },
@@ -154,7 +153,10 @@
                   "accountName": "onix-bap.example",
                   "accountNumber": "1370000000001",
                   "bankCode": "MANDIRI",
-                  "holderRole": "BAP"
+                  "holderRole": "BAP",
+                  "holderId": "onix-bap.example",
+                  "allocationFor": "BAP",
+                  "allocatedAmount": 1200
                 },
                 {
                   "accountName": "onix-bpp.example",
@@ -163,11 +165,27 @@
                   "holderRole": "BPP"
                 }
               ],
-              "settlementBasis": "AFTER_DELIVERY",
-              "settlementWindow": "P1D",
               "withholdingAmount": {
                 "value": 0
-              }
+              },
+              "collections": [
+                {
+                  "method": "PREPAID",
+                  "status": "COLLECTED",
+                  "collectorRole": "PJP",
+                  "reportedCollectedAmount": 90000
+                }
+              ],
+              "breakup": [
+                {
+                  "code": "CANCELLATION",
+                  "includedIn": "REFUND",
+                  "amount": 45000,
+                  "referenceId": "refund-7b2e4f6a-c1"
+                }
+              ],
+              "accord": true,
+              "dueDate": "2026-09-30"
             }
           }
         ]
@@ -205,19 +223,12 @@
             "settlementAttributes": {
               "@context": "https://schema.ion.id/release1/schema/common/Settlement/v1/context.jsonld",
               "@type": "ion:IONSettlementReconciliation",
-              "accord": true,
               "collectedBy": "BAP",
               "commission": {
                 "value": 0
               },
               "currency": "IDR",
-              "dueDate": "2026-09-30",
-              "finderFee": {
-                "appliesTo": "ITEM_TOTAL",
-                "feeType": "PERCENT",
-                "feeValue": 3,
-                "feeAmount": 0
-              },
+              "orderDate": "2026-09-28",
               "netPayable": {
                 "value": 200
               },
@@ -232,7 +243,10 @@
                   "accountName": "onix-bap.example",
                   "accountNumber": "1370000000001",
                   "bankCode": "MANDIRI",
-                  "holderRole": "BAP"
+                  "holderRole": "BAP",
+                  "holderId": "onix-bap.example",
+                  "allocationFor": "BAP",
+                  "allocatedAmount": 0
                 },
                 {
                   "accountName": "onix-bpp.example",
@@ -241,31 +255,54 @@
                   "holderRole": "BPP"
                 }
               ],
-              "settlementBasis": "AFTER_DELIVERY",
-              "settlementWindow": "P1D",
               "withholdingAmount": {
                 "value": 0
-              }
+              },
+              "collections": [
+                {
+                  "method": "PREPAID",
+                  "status": "COLLECTED",
+                  "collectorRole": "PJP",
+                  "reportedCollectedAmount": 90000
+                }
+              ],
+              "breakup": [
+                {
+                  "code": "RETURN",
+                  "includedIn": "REFUND",
+                  "amount": 89800,
+                  "referenceId": "refund-9d8c7b6a-c1"
+                }
+              ],
+              "accord": true,
+              "dueDate": "2026-09-30"
             }
           }
         ]
       }
     ],
-    "reconciliationId": "recon-2026-09-30T170000Z-onix-bpp.example",
-    "reconciliationStatus": "AGREED",
     "settlementSummary": {
       "bapId": "onix-bap.example",
       "bppId": "onix-bpp.example",
       "currency": "IDR",
       "settlementDate": "2026-09-30",
       "contractCount": 3,
+      "settlementCount": 3,
       "agreedCount": 3,
       "disputedCount": 0,
+      "pendingCount": 0,
+      "agreedSettlementCount": 3,
+      "disputedSettlementCount": 0,
+      "pendingSettlementCount": 0,
       "totalOrderAmount": 270000,
       "totalCommission": 3600,
       "totalWithholding": 0,
       "totalRefund": 134800,
-      "totalNetPayable": 131600
+      "totalNetPayable": 131600,
+      "totalAgreedCommission": 3600,
+      "totalUnreconciledCommission": 0,
+      "totalAgreedNetPayable": 131600,
+      "totalUnreconciledNetPayable": 0
     }
   }
 }
