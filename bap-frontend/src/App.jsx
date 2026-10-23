@@ -5,7 +5,7 @@ import {
   ShoppingCart, Search, X, Package, CheckCircle2, Loader2,
   ArrowRight, ChevronRight, Minus, Plus, Sparkles, Tag,
   RotateCcw, CreditCard, ShieldCheck, Clock,
-  Star, Info, Receipt, Store, MapPin, Calendar, Zap,
+  Star, Info, Receipt, Store, MapPin, Calendar, Zap, Truck, HandCoins,
   User, Phone, Home, ChevronLeft, Banknote,
   Ban, MessageSquare, RefreshCw, ThumbsUp,
   History, Wand2, ExternalLink, ChevronDown,
@@ -127,6 +127,12 @@ function parseCatalogs(data) {
         bppUri,
         offerAttr: oa,
         offerConsiderations: offer.considerations || [],
+        // The seller's delivery charge per order (IONTradeConsideration
+        // deliveryFee); null when the offer states none.
+        deliveryFee: cons.deliveryFee?.amount ?? null,
+        // The fee the seller pays this buyer app (IONTradeConsideration
+        // buyerFinderFee: feeType, feeValue, appliesTo); null when none.
+        finderFee: cons.buyerFinderFee?.feeType ? cons.buyerFinderFee : null,
         // The resource as discover returned it, sent on in select.
         resourceDetail: { descriptor: res.descriptor, resourceAttributes: res.resourceAttributes },
         breakup,
@@ -185,6 +191,7 @@ function parseOnSelectContract(contract) {
     total: ca.totalAmount,
     currency: ca.currency || 'IDR',
     breakup: combineTax(ca.breakup),
+    finderFee: ca.buyerFinderFee?.feeAmount ?? null,
     paymentMethods: ca.paymentMethods || [],
     codAvailable: commitment?.offer?.offerAttributes?.paymentConstraints?.codAvailable,
     seller: commitment?.offer?.provider?.descriptor?.name,
@@ -270,12 +277,36 @@ function SkeletonCard() {
   );
 }
 
+/* ─────────────────────────── FinderFeeRow ───────────────────────────────── */
+// The buyer finder fee on an order: what the seller pays this app. It is not
+// part of the buyer's total.
+function FinderFeeRow({ amount, currency, className = 'text-xs' }) {
+  const { t } = useI18n();
+  if (amount == null) return null;
+  return (
+    <div className={`flex justify-between ${className} text-slate-500`} title={t('Paid by the seller to this app; not added to your total')}>
+      <span className="flex items-center gap-1"><HandCoins className="w-3 h-3" /> {t('Buyer finder fee (paid by seller)')}</span>
+      <span>{fmt(amount, currency)}</span>
+    </div>
+  );
+}
+
+// The offer's buyer finder fee terms, e.g. "3% of item total".
+function finderFeeTerms(fee, currency, t) {
+  if (fee.feeType === 'PERCENT') {
+    return fee.appliesTo === 'ORDER_TOTAL'
+      ? t('{pct}% of order total', { pct: fee.feeValue })
+      : t('{pct}% of item total', { pct: fee.feeValue });
+  }
+  return t('{amount} per unit', { amount: fmt(fee.feeValue, currency) });
+}
+
 /* ─────────────────────────── OfferInfoPanel ─────────────────────────────── */
 // Shows catalog offer details: price breakdown, seller, policies, serviceability
 function OfferInfoPanel({ product }) {
   const { breakup, currency, price, sellerName, sellerAddress,
     returnPolicy, cancelPolicy, codAvailable,
-    deliveryRange, deliveryHours, offerName, offerValidity } = product;
+    deliveryRange, deliveryHours, offerName, offerValidity, deliveryFee, finderFee } = product;
   const { t } = useI18n();
 
   const shortAddr = sellerAddress
@@ -324,6 +355,25 @@ function OfferInfoPanel({ product }) {
           )}
         </div>
       </div>
+
+      {/* The seller's delivery fee: once per order, added to the quote. */}
+      {deliveryFee != null && (
+        <div className="flex items-center justify-between px-4 py-2.5 rounded-xl border border-white/10 bg-white/[0.03] text-sm">
+          <span className="flex items-center gap-2 text-slate-400"><Truck className="w-4 h-4" /> {t('Delivery fee (per order)')}</span>
+          <span className="text-slate-200">{deliveryFee > 0 ? fmt(deliveryFee, currency) : t('Free delivery')}</span>
+        </div>
+      )}
+
+      {/* The fee the seller pays this app; not charged to the buyer. */}
+      {finderFee && (
+        <div className="px-4 py-2.5 rounded-xl border border-white/10 bg-white/[0.03] text-sm">
+          <div className="flex items-center justify-between">
+            <span className="flex items-center gap-2 text-slate-400"><HandCoins className="w-4 h-4" /> {t('Buyer finder fee')}</span>
+            <span className="text-slate-200">{finderFeeTerms(finderFee, currency, t)}</span>
+          </div>
+          <p className="text-[11px] text-slate-500 mt-1">{t('Paid by the seller to this app; not added to your total')}</p>
+        </div>
+      )}
 
       {/* Seller */}
       {sellerName && (
@@ -375,7 +425,7 @@ function ConfirmedQuotePanel({ quote, onInit, isLoading, nameOf }) {
   if (!quote) return null;
   if (quoteBlocked(quote)) return <UnavailablePanel quote={quote} nameOf={nameOf} />;
   const { total, currency, breakup, paymentMethods, codAvailable,
-    seller, returnPolicy } = quote;
+    seller, returnPolicy, finderFee } = quote;
   return (
     <motion.div
       initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
@@ -401,6 +451,7 @@ function ConfirmedQuotePanel({ quote, onInit, isLoading, nameOf }) {
               <span className="text-slate-200">{t('Total')}</span>
               <span className="text-emerald-300 text-lg">{fmt(total, currency)}</span>
             </div>
+            <FinderFeeRow amount={finderFee} currency={currency} />
           </div>
         )}
         <div className="flex flex-wrap gap-1.5 pt-1">
@@ -723,6 +774,7 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
                       <span className="text-emerald-300 text-lg">{fmt(confirmedQuote.total, currency)}</span>
                     </div>
                   )}
+                  <FinderFeeRow amount={confirmedQuote.finderFee} currency={currency} />
                   <div className="flex flex-wrap gap-1.5 pt-1">
                     {confirmedQuote.codAvailable && (
                       <span className="text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded-full flex items-center gap-1">
@@ -1311,6 +1363,7 @@ function parseContractDetail(contract) {
   return {
     items, price: fullyCancelled && consideration?.status?.code === 'CANCELLED' ? 0 : price,
     currency, breakup: fullyCancelled ? [] : breakup, fees, refunds, returns,
+    finderFee: fullyCancelled ? null : consAttr.buyerFinderFee?.feeAmount ?? null,
     buyer, seller, statusCode, fulfillmentStatus, id: contract.id,
   };
 }
@@ -1718,6 +1771,7 @@ function OrderDetailPanel({ txnId, onBack }) {
               <span className="text-sm font-bold text-white">{t('Total')}</span>
               <span className="text-sm font-bold text-emerald-300">{fmt(bestContract.price, bestContract.currency)}</span>
             </div>
+            <FinderFeeRow amount={bestContract.finderFee} currency={bestContract.currency} />
           </div>
         </div>
       )}
@@ -2905,6 +2959,12 @@ export default function App() {
                             </p>
                           )}
                           <div className="flex gap-1.5 flex-wrap">
+                            {product.deliveryFee != null && (
+                              <span className="text-[10px] text-slate-400 flex items-center gap-0.5">
+                                <Truck className="w-2.5 h-2.5" />
+                                {product.deliveryFee > 0 ? t('Delivery {amount}', { amount: fmt(product.deliveryFee, product.currency) }) : t('Free delivery')}
+                              </span>
+                            )}
                             {product.deliveryRange && (
                               <span className="text-[10px] text-blue-400 flex items-center gap-0.5">
                                 <MapPin className="w-2.5 h-2.5" />{product.deliveryRange}

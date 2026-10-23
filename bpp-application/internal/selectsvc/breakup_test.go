@@ -40,3 +40,33 @@ func TestUnitBreakupFallsBackToTotalAmount(t *testing.T) {
 		t.Fatalf("unitBreakup = %+v, want single BASE_PRICE of 25000", lines)
 	}
 }
+
+func feeOffer(attrs string) Commitment {
+	return Commitment{Offer: &Offer{Considerations: []OfferConsideration{{ConsiderationAttributes: []byte(attrs)}}}}
+}
+
+func TestDeliveryLineIsTheHighestFeeOnce(t *testing.T) {
+	cms := []Commitment{
+		feeOffer(`{"totalAmount":25000,"deliveryFee":{"amount":8000}}`),
+		feeOffer(`{"totalAmount":40000,"deliveryFee":{"amount":12000}}`),
+		feeOffer(`{"totalAmount":10000}`),
+	}
+	line, ok := deliveryLine(cms, nil)
+	if !ok || line.Type != "DELIVERY_CHARGE" || line.Amount != 12000 {
+		t.Fatalf("deliveryLine = %+v, %v; want one DELIVERY_CHARGE of 12000", line, ok)
+	}
+}
+
+func TestDeliveryLineNoneWithoutFeeOrForPickup(t *testing.T) {
+	if _, ok := deliveryLine([]Commitment{feeOffer(`{"totalAmount":10000}`)}, nil); ok {
+		t.Error("an order with no deliveryFee got a delivery line")
+	}
+	pickup := []Performance{{PerformanceAttributes: []byte(`{"performanceMode":"SELF_PICKUP"}`)}}
+	if _, ok := deliveryLine([]Commitment{feeOffer(`{"deliveryFee":{"amount":5000}}`)}, pickup); ok {
+		t.Error("a SELF_PICKUP order got a delivery line")
+	}
+	free, ok := deliveryLine([]Commitment{feeOffer(`{"deliveryFee":{"amount":0}}`)}, nil)
+	if !ok || free.Amount != 0 {
+		t.Errorf("free delivery = %+v, %v; want a 0 line", free, ok)
+	}
+}
