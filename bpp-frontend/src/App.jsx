@@ -1480,6 +1480,29 @@ function buildBuyerFinderFee(o) {
   return fee
 }
 
+// The seller's delivery charge per order, on the offer's consideration
+// (IONTradeConsideration deliveryFee). The BPP charges the highest one among
+// the offers ordered, once, as a DELIVERY_CHARGE line. null without a value.
+function buildDeliveryFee(o) {
+  if (o.delivery_fee === '' || o.delivery_fee == null) return null
+  return { amount: Number(o.delivery_fee) || 0 }
+}
+
+// The delivery fee field of an offer form.
+function DeliveryFeeField({ offer, onChange, labelCls, inputCls }) {
+  const { t } = useI18n()
+  return (
+    <div className="p-3 rounded-lg bg-slate-800/50 border border-white/[0.06] space-y-2">
+      <p className="text-xs font-semibold text-slate-300">🚚 {t('Delivery fee')}</p>
+      <div><label className={labelCls}>{t('Per order ({currency})', { currency: offer.currency || 'IDR' })}</label>
+        <input className={inputCls} type="number" min="0" step="1" value={offer.delivery_fee ?? ''}
+          onChange={e => onChange('delivery_fee', e.target.value)} placeholder={t('Empty: no delivery fee')} />
+      </div>
+      <p className="text-[10px] text-slate-600">{t('Charged once per order for your own delivery; with several offers in one order, the highest fee applies. 0 is free delivery.')}</p>
+    </div>
+  )
+}
+
 // The offer's payout term, policies.settlement.
 function buildSettlementPolicy(o) {
   return { settlementBasis: o.settlement_basis || 'AFTER_DELIVERY', settlementWindow: o.settlement_window || 'P1D' }
@@ -1587,7 +1610,7 @@ const RETURN_METHODS = ['SELLER_PICKUP', 'BUYER_SHIP', 'DROP_OFF']
 const FEE_TYPES = ['PERCENTAGE', 'FIXED']
 
 const EMPTY_OFFER = () => ({
-  id: '', name: '', short_desc: '', resource_ids: '', price: '', currency: 'IDR',
+  id: '', name: '', short_desc: '', resource_ids: '', price: '', currency: 'IDR', delivery_fee: '',
   // tax (price is pre-tax; see buildPriceBreakup)
   tax_regime: 'PPN', tax_category: 'BKP', tax_rate: '12',
   validity_start: '', validity_end: '',
@@ -1613,6 +1636,15 @@ const CATALOG_TYPES = ['', 'regular']
 // Auto-fill seed data — pool of real Indonesian snack products.
 // Each entry maps 1:1 to a complete form state (catalog + 1 resource + 1 offer).
 // ---------------------------------------------------------------------------
+// A sample validity period for Auto-fill: from now for a year, in the
+// datetime-local form (local time, YYYY-MM-DDTHH:mm).
+const sampleValidity = () => {
+  const local = d => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
+  const now = new Date(), end = new Date(now)
+  end.setFullYear(end.getFullYear() + 1)
+  return { validity_start: local(now), validity_end: local(end) }
+}
+
 const AUTO_FILL_POOL = [
   {
     catalog_id: 'cat-khong-guan-001', catalog_name: 'Toko Camilan Nusantara', catalog_type: '',
@@ -1635,7 +1667,7 @@ const AUTO_FILL_POOL = [
       commissions: [{ name: 'Finder fee', type: 'PERCENT', value: '3', applies_to: 'ITEM_TOTAL' }], settlement_basis: 'AFTER_DELIVERY', settlement_window: 'P1D',
       id: 'offer-biscuit-khong-guan-001', name: 'Biskuit Kaleng Khong Guan (Khong Guan Assorted Biscuits Tin)',
       short_desc: 'Aneka biskuit renyah dalam kaleng ikonik', resource_ids: 'res-biscuit-khong-guan-001',
-      price: '185000', currency: 'IDR', validity_start: '2026-04-11', validity_end: '2027-04-11',
+      price: '185000', currency: 'IDR', delivery_fee: '10000', validity_start: '2026-04-11', validity_end: '2027-04-11',
     }],
   },
   {
@@ -1659,7 +1691,7 @@ const AUTO_FILL_POOL = [
       commissions: [{ name: 'Finder fee', type: 'PERCENT', value: '4', applies_to: 'ORDER_TOTAL' }, { name: 'Platform fee', type: 'PERCENT', value: '1', applies_to: 'ITEM_TOTAL' }], settlement_basis: 'AFTER_DELIVERY', settlement_window: 'P3D',
       id: 'offer-chips-chitato-sapi-003', name: 'Keripik Chitato Rasa Sapi Panggang (Chitato Beef BBQ Potato Chips)',
       short_desc: 'Keripik kentang gurih rasa sapi panggang', resource_ids: 'res-chips-chitato-sapi-003',
-      price: '12000', currency: 'IDR', validity_start: '2026-04-11', validity_end: '2027-04-11',
+      price: '12000', currency: 'IDR', delivery_fee: '8000', validity_start: '2026-04-11', validity_end: '2027-04-11',
       returns_allowed: false, replace_window: 'P3D',
     }],
   },
@@ -1684,7 +1716,7 @@ const AUTO_FILL_POOL = [
       commissions: [{ name: 'Finder fee', type: 'AMOUNT', value: '5000' }], settlement_basis: 'AFTER_RETURN_WINDOW', settlement_window: 'P1D',
       id: 'offer-cake-lapis-legit-005', name: 'Kue Lapis Legit Premium (Premium Spekkoek Layered Cake)',
       short_desc: 'Kue lapis klasik Belanda-Indonesia', resource_ids: 'res-cake-lapis-legit-005',
-      price: '185000', currency: 'IDR', validity_start: '2026-04-11', validity_end: '2027-04-11',
+      price: '185000', currency: 'IDR', delivery_fee: '0', validity_start: '2026-04-11', validity_end: '2027-04-11',
       returns_allowed: false, replace_allowed: false, max_distance: '10',
     }],
   },
@@ -1709,7 +1741,7 @@ const AUTO_FILL_POOL = [
       commissions: [{ name: 'Finder fee', type: 'PERCENT', value: '2.5', applies_to: 'ITEM_TOTAL' }], settlement_basis: 'ON_CONFIRMATION', settlement_window: 'P7D',
       id: 'offer-biscuit-monde-butter-007', name: 'Biskuit Monde Butter Cookies (Monde Butter Cookies)',
       short_desc: 'Kue kering butter premium dalam kaleng cantik', resource_ids: 'res-biscuit-monde-butter-007',
-      price: '120000', currency: 'IDR', validity_start: '2026-04-11', validity_end: '2027-04-11',
+      price: '120000', currency: 'IDR', delivery_fee: '12000', validity_start: '2026-04-11', validity_end: '2027-04-11',
     }],
   },
   {
@@ -1733,7 +1765,7 @@ const AUTO_FILL_POOL = [
       commissions: [{ name: 'Finder fee', type: 'AMOUNT', value: '2000' }], settlement_basis: 'AFTER_SHIPMENT', settlement_window: 'P3D',
       id: 'offer-cake-brownies-amanda-009', name: 'Brownies Kukus Amanda Cokelat (Amanda Steamed Chocolate Brownies)',
       short_desc: 'Brownies kukus lembut khas Bandung dengan cokelat premium', resource_ids: 'res-cake-brownies-amanda-009',
-      price: '95000', currency: 'IDR', validity_start: '2026-04-11', validity_end: '2027-04-11',
+      price: '95000', currency: 'IDR', delivery_fee: '15000', validity_start: '2026-04-11', validity_end: '2027-04-11',
       returns_allowed: false, replace_allowed: false, max_distance: '10',
     }],
   },
@@ -1860,6 +1892,7 @@ function offerToForm(o) {
     resource_ids: (o.resourceIds || []).join(', '),
     price: base ? String(base.amount) : ca.totalAmount != null ? String(ca.totalAmount) : '',
     currency: ca.currency || 'IDR',
+    delivery_fee: ca.deliveryFee?.amount != null ? String(ca.deliveryFee.amount) : '',
     tax_regime: tax?.taxDetail?.taxRegime || (tax ? 'PPN' : 'EXEMPT'),
     tax_category: tax?.taxDetail?.taxCategory || 'BKP',
     tax_rate: tax?.taxDetail?.rate != null ? String(Math.round(tax.taxDetail.rate * 10000) / 100) : blank.tax_rate,
@@ -1950,11 +1983,13 @@ function PublishPage({ onNav }) {
 
     setForm({
       ...seed,
+      ...sampleValidity(),
       ...(ownProvider ? { provider_id: ownProvider.id, provider_name: ownProvider.name } : {}),
       catalog_id: uid(seed.catalog_id),
       resources: seed.resources.map(r => ({ ...r, id: uid(r.id) })),
       offers: seed.offers.map(o => ({
         ...o,
+        ...sampleValidity(),
         id: uid(o.id),
         resource_ids: o.resource_ids.split(',').map(rid => uid(rid.trim())).join(', '),
       })),
@@ -2010,6 +2045,7 @@ function PublishPage({ onNav }) {
                   currency: o.currency,
                   ...buildPriceBreakup(o),
                   ...(buildBuyerFinderFee(o) ? { buyerFinderFee: buildBuyerFinderFee(o) } : {}),
+                  ...(buildDeliveryFee(o) ? { deliveryFee: buildDeliveryFee(o) } : {}),
                   paymentMethods: o.cod_available ? ['PREPAID', 'COD', 'DIGITAL_WALLET'] : ['PREPAID', 'DIGITAL_WALLET'],
                 }
               }]
@@ -2336,6 +2372,7 @@ function PublishPage({ onNav }) {
                   {offOpen[`${i}_pol`] && (
                     <div className="mt-3 space-y-4">
                       <SettlementTermsFields offer={o} onChange={(k, v) => setOfferField(i, k, v)} labelCls={labelCls} inputCls={inputCls} />
+                      <DeliveryFeeField offer={o} onChange={(k, v) => setOfferField(i, k, v)} labelCls={labelCls} inputCls={inputCls} />
                       {/* Returns */}
                       <div className="p-3 rounded-lg border border-white/[0.06]" style={{ background: 'rgba(0,184,230,0.04)' }}>
                         <div className="flex items-center justify-between mb-2">
@@ -4089,15 +4126,15 @@ function CatalogDetailPage({ onNav, catalogId }) {
 const PRODUCT_AUTOFILL_POOL = [
   {
     res: { id: 'item-keripik-singkong', name: 'Keripik Singkong Balado (Spicy Cassava Chips)', short_desc: 'Crispy cassava chips with balado seasoning', long_desc: 'Keripik singkong renyah dengan bumbu balado khas Minang yang pedas manis. (Crispy cassava chips with authentic Minang sweet and spicy balado seasoning.)', product_highlights: '- Terbuat dari singkong segar pilihan (Made from fresh selected cassava)\n- Bumbu balado asli minang (Authentic Minang balado seasoning)\n- Tanpa pengawet buatan (No artificial preservatives)', specifications: '- Berat Bersih (Net Weight): 150g\n- Kemasan (Packaging): Plastik Ziplock (Ziplock Plastic)\n- Bahan Utama (Main Ingredient): Singkong, Cabai (Cassava, Chili)', media_url: 'https://images.unsplash.com/photo-1621939514649-280e2ee25f60?w=400', brand: 'Chitato', origin_country: 'ID', weight_value: '150', weight_unit: 'G', color: 'Golden', material: 'Cassava' },
-    off: { id: 'offer-keripik-singkong', commissions: [{ name: 'Finder fee', type: 'PERCENT', value: '5', applies_to: 'ITEM_TOTAL' }], settlement_basis: 'AFTER_DELIVERY', settlement_window: 'P3D', name: 'Keripik Singkong Balado', price: '25000', currency: 'IDR', cod_available: true, returns_allowed: true, returns_window: 'P7D', returns_method: 'SELLER_PICKUP', returns_fee_type: 'PERCENTAGE', returns_fee_value: '10', cancel_allowed: true, cancel_window: 'PT2H', cancel_event: 'BEFORE_PACKING', replace_allowed: false, max_distance: '20', offer_context: 'https://schema.ion.id/release1/schema/extension/trade/TradeOffer/v1/context.jsonld' }
+    off: { id: 'offer-keripik-singkong', delivery_fee: '10000', commissions: [{ name: 'Finder fee', type: 'PERCENT', value: '5', applies_to: 'ITEM_TOTAL' }], settlement_basis: 'AFTER_DELIVERY', settlement_window: 'P3D', name: 'Keripik Singkong Balado', price: '25000', currency: 'IDR', cod_available: true, returns_allowed: true, returns_window: 'P7D', returns_method: 'SELLER_PICKUP', returns_fee_type: 'PERCENTAGE', returns_fee_value: '10', cancel_allowed: true, cancel_window: 'PT2H', cancel_event: 'BEFORE_PACKING', replace_allowed: false, max_distance: '20', offer_context: 'https://schema.ion.id/release1/schema/extension/trade/TradeOffer/v1/context.jsonld' }
   },
   {
     res: { id: 'item-bolu-pisang', name: 'Bolu Pisang Cokelat (Chocolate Banana Cake)', short_desc: 'Soft banana cake with chocolate chips', long_desc: 'Bolu pisang panggang yang lembut dipadukan dengan taburan cokelat lezat di atasnya. (Soft baked banana cake topped with delicious chocolate chips.)', product_highlights: '- Dibuat dengan pisang ambon segar (Made with fresh Ambon bananas)\n- Tekstur lembut dan lumer di mulut (Soft texture that melts in the mouth)\n- Taburan cokelat premium (Premium chocolate chips)', specifications: '- Berat Bersih (Net Weight): 400g\n- Kemasan (Packaging): Kardus Makanan (Food Box)\n- Bahan Utama (Main Ingredient): Tepung, Pisang, Cokelat (Flour, Banana, Chocolate)', media_url: 'https://images.unsplash.com/photo-1578985545062-69928b1d9587?w=400', brand: 'HomeMade', origin_country: 'ID', weight_value: '400', weight_unit: 'G', color: 'Brown', material: 'Flour' },
-    off: { id: 'offer-bolu-pisang', commissions: [{ name: 'Finder fee', type: 'AMOUNT', value: '1500' }], settlement_basis: 'ON_CONFIRMATION', settlement_window: 'P1D', name: 'Bolu Pisang Cokelat', price: '45000', currency: 'IDR', cod_available: true, returns_allowed: false, cancel_allowed: true, cancel_window: 'PT1H', cancel_event: 'BEFORE_PACKING', replace_allowed: false, max_distance: '10', offer_context: 'https://schema.ion.id/release1/schema/extension/trade/TradeOffer/v1/context.jsonld' }
+    off: { id: 'offer-bolu-pisang', delivery_fee: '15000', commissions: [{ name: 'Finder fee', type: 'AMOUNT', value: '1500' }], settlement_basis: 'ON_CONFIRMATION', settlement_window: 'P1D', name: 'Bolu Pisang Cokelat', price: '45000', currency: 'IDR', cod_available: true, returns_allowed: false, cancel_allowed: true, cancel_window: 'PT1H', cancel_event: 'BEFORE_PACKING', replace_allowed: false, max_distance: '10', offer_context: 'https://schema.ion.id/release1/schema/extension/trade/TradeOffer/v1/context.jsonld' }
   },
   {
     res: { id: 'item-teh-botol', name: 'Teh Botol Sosro (Bottled Jasmine Tea)', short_desc: 'Ready-to-drink jasmine tea', long_desc: 'Minuman teh melati siap saji legendaris Indonesia yang menyegarkan dahaga. (Legendary Indonesian ready-to-drink jasmine tea that is very refreshing.)', product_highlights: '- Terbuat dari daun teh melati asli (Made from real jasmine tea leaves)\n- Proses penyeduhan higienis (Hygienic brewing process)\n- Menyegarkan dahaga (Refreshing thirst quencher)', specifications: '- Isi Bersih (Net Volume): 350ml\n- Kemasan (Packaging): Botol Plastik PET (PET Plastic Bottle)\n- Bahan Utama (Main Ingredient): Air, Ekstrak Teh (Water, Tea Extract)', media_url: 'https://images.unsplash.com/photo-1556679343-c7306c1976bc?w=400', brand: 'Sosro', origin_country: 'ID', weight_value: '350', weight_unit: 'ML', color: 'Amber', material: 'PET Bottle' },
-    off: { id: 'offer-teh-botol', commissions: [{ name: 'Finder fee', type: 'PERCENT', value: '2', applies_to: 'ORDER_TOTAL' }], settlement_basis: 'AFTER_DELIVERY', settlement_window: 'P1D', name: 'Teh Botol Sosro', price: '5000', currency: 'IDR', cod_available: true, returns_allowed: false, cancel_allowed: true, cancel_window: 'PT30M', cancel_event: 'BEFORE_PACKING', replace_allowed: false, max_distance: '15', offer_context: 'https://schema.ion.id/release1/schema/extension/trade/TradeOffer/v1/context.jsonld' }
+    off: { id: 'offer-teh-botol', delivery_fee: '0', commissions: [{ name: 'Finder fee', type: 'PERCENT', value: '2', applies_to: 'ORDER_TOTAL' }], settlement_basis: 'AFTER_DELIVERY', settlement_window: 'P1D', name: 'Teh Botol Sosro', price: '5000', currency: 'IDR', cod_available: true, returns_allowed: false, cancel_allowed: true, cancel_window: 'PT30M', cancel_event: 'BEFORE_PACKING', replace_allowed: false, max_distance: '15', offer_context: 'https://schema.ion.id/release1/schema/extension/trade/TradeOffer/v1/context.jsonld' }
   },
 ]
 // Next sample per CRC for the Add Product page's Auto-fill (CRC_AUTOFILL).
@@ -4182,6 +4219,7 @@ function OfferForm({ off, oSet, offOpen, setOffOpen, catalogId, lockId, showReso
       {offOpen.pol && (
         <div className="mt-3 space-y-3">
           <SettlementTermsFields offer={off} onChange={oSet} labelCls={labelCls} inputCls={inputCls} />
+          <DeliveryFeeField offer={off} onChange={oSet} labelCls={labelCls} inputCls={inputCls} />
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {/* Returns */}
             <div className="p-3 rounded-lg bg-slate-800/50 border border-white/[0.06] space-y-2">
@@ -4656,7 +4694,7 @@ function AddOfferPage({ onNav, catalogId, preselectedResourceId, editOfferId }) 
     _productFillIdx++
     const uid = id => `${id}-${Date.now().toString(36)}`
     setOff({
-      ...EMPTY_OFFER(), ...seed.off, id: uid(seed.off.id),
+      ...EMPTY_OFFER(), ...seed.off, ...sampleValidity(), id: uid(seed.off.id),
       resource_ids: preselectedResourceId || ''
     })
     setOffOpen({}); setError(null)
@@ -4688,6 +4726,7 @@ function AddOfferPage({ onNav, catalogId, preselectedResourceId, editOfferId }) 
             currency: off.currency,
             ...buildPriceBreakup(off),
             ...(buildBuyerFinderFee(off) ? { buyerFinderFee: buildBuyerFinderFee(off) } : {}),
+            ...(buildDeliveryFee(off) ? { deliveryFee: buildDeliveryFee(off) } : {}),
             paymentMethods: off.cod_available ? ['PREPAID', 'COD', 'DIGITAL_WALLET'] : ['PREPAID', 'DIGITAL_WALLET'],
           },
         }],

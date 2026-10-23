@@ -490,3 +490,43 @@ func TestFinderFeeFollowsTheItemsStillOrdered(t *testing.T) {
 		t.Error("a contract without a finder fee must not get one")
 	}
 }
+
+// withDelivery is the order with a 10,000 delivery fee line on its price,
+// paid 109,900.
+func withDelivery(t *testing.T) map[string]any {
+	t.Helper()
+	c := load(t)
+	attrs := asMap(asMap(slice(c["consideration"])[0])["considerationAttributes"])
+	attrs["breakup"] = append(slice(attrs["breakup"]), map[string]any{"type": "DELIVERY_CHARGE", "title": "Delivery fee", "amount": 10000.0})
+	attrs["totalAmount"] = 109900.0
+	sa := asMap(asMap(slice(c["settlements"])[0])["settlementAttributes"])
+	sa["settledAmount"] = 109900.0
+	return c
+}
+
+func TestPartialCancelKeepsTheDeliveryFee(t *testing.T) {
+	res, err := Apply(withDelivery(t), []Item{{CommitmentID: "commitment-cake", Quantity: 1}}, reason, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	active := asMap(byID(t, res.Contract["consideration"], "consideration-105ad328-a1")["considerationAttributes"])
+	if num(active["totalAmount"]) != 59950 {
+		t.Errorf("active total = %v, want 59950 (49,950 + 10,000 delivery)", active["totalAmount"])
+	}
+	if len(deliveryLines(active)) != 1 {
+		t.Errorf("active breakup %v lost its delivery line", active["breakup"])
+	}
+	if res.Refund != 44950 {
+		t.Errorf("refund = %v, want 44950 (no delivery fee refunded)", res.Refund)
+	}
+}
+
+func TestFullCancelRefundsTheDeliveryFee(t *testing.T) {
+	res, err := Apply(withDelivery(t), nil, reason, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Refund != 104900 {
+		t.Errorf("refund = %v, want 104900 (109,900 paid − 5,000 fee)", res.Refund)
+	}
+}
