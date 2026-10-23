@@ -376,7 +376,9 @@ function Sidebar({ active, onNav, open, onClose, onTour }) {
     if (idTok) params.set('id_token', idTok)
     if (ownProvider?.id) params.set('providerId', ownProvider.id)
     const qs = params.toString()
-    return `${bapBaseUrl}${qs ? `?${qs}` : ''}`
+    // `<base>/?...`, like landing-page: in the cloud BAP_URL is .../tsp/remiges/cn,
+    // and ion-landing-page's 301 from /cn to /cn/ drops the query (and the token).
+    return `${bapBaseUrl.replace(/\/+$/, '')}/${qs ? `?${qs}` : ''}`
   })()
   // Escape closes the mobile drawer, like a click on its backdrop.
   useEffect(() => {
