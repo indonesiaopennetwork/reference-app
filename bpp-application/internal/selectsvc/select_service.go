@@ -133,6 +133,11 @@ func (s *SelectService) enrichContract(ctx context.Context, req *SelectRequest) 
 		}
 	}
 
+	// The seller's delivery fee: one DELIVERY_CHARGE line per order.
+	if line, ok := deliveryLine(contract.Commitments, contract.Performance); ok && len(allBreakup) > 0 {
+		allBreakup = append(allBreakup, line)
+	}
+
 	// Build aggregate contract-level consideration from all found line items.
 	if len(allBreakup) > 0 {
 		var total float64
@@ -330,6 +335,43 @@ func unitBreakup(attrs dbConsiderationAttrs) []breakupItem {
 		lines = []breakupItem{{Amount: attrs.TotalAmount, Type: "BASE_PRICE"}}
 	}
 	return lines
+}
+
+// deliveryLine is the order's delivery charge (IONDeliveryFee): the highest
+// deliveryFee.amount stated on the stored considerations of the offers
+// ordered, charged once as a DELIVERY_CHARGE line. None when no offer states
+// one, or when the order is picked up (performanceMode SELF_PICKUP).
+func deliveryLine(commitments []Commitment, performance []Performance) (breakupItem, bool) {
+	for _, p := range performance {
+		var attrs struct {
+			PerformanceMode string `json:"performanceMode"`
+		}
+		if json.Unmarshal(p.PerformanceAttributes, &attrs) == nil && attrs.PerformanceMode == "SELF_PICKUP" {
+			return breakupItem{}, false
+		}
+	}
+	fee, found := 0.0, false
+	for _, c := range commitments {
+		if c.Offer == nil || len(c.Offer.Considerations) == 0 {
+			continue
+		}
+		var attrs struct {
+			DeliveryFee *struct {
+				Amount float64 `json:"amount"`
+			} `json:"deliveryFee"`
+		}
+		if json.Unmarshal(c.Offer.Considerations[0].ConsiderationAttributes, &attrs) != nil || attrs.DeliveryFee == nil {
+			continue
+		}
+		if !found || attrs.DeliveryFee.Amount > fee {
+			fee = attrs.DeliveryFee.Amount
+		}
+		found = true
+	}
+	if !found {
+		return breakupItem{}, false
+	}
+	return breakupItem{Title: "Delivery fee", Amount: fee, Type: "DELIVERY_CHARGE"}, true
 }
 
 // callOnSelect POSTs the on_select payload via ONIX BPP caller and logs the OUTBOUND entry.
