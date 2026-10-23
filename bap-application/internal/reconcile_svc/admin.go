@@ -10,9 +10,12 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// BatchView is one reconciliation batch, sent or received.
+// BatchView is one reconciliation batch, sent or received: one exchange
+// (context.transactionId) with a BPP. ID is this BAP's own name for it, not
+// sent on the wire.
 type BatchView struct {
 	ID              string          `json:"id"`
+	TransactionID   string          `json:"transaction_id"`
 	Direction       string          `json:"direction"`
 	SettlementDate  string          `json:"settlement_date"`
 	Status          string          `json:"status"`
@@ -147,7 +150,7 @@ func (s *Service) overview(ctx context.Context) ([]*bppView, error) {
 	}
 
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, direction, bpp_id, settlement_date::text, status, claimed_summary, computed_summary, contracts,
+		SELECT id, COALESCE(transaction_id, ''), direction, bpp_id, settlement_date::text, status, claimed_summary, computed_summary, contracts,
 		       request_payload, response_payload, error_message, created_at
 		  FROM reconciliations ORDER BY created_at DESC LIMIT 200`)
 	if err != nil {
@@ -157,7 +160,7 @@ func (s *Service) overview(ctx context.Context) ([]*bppView, error) {
 	for rows.Next() {
 		var b BatchView
 		var bppID string
-		if err := rows.Scan(&b.ID, &b.Direction, &bppID, &b.SettlementDate, &b.Status, &b.ClaimedSummary, &b.ComputedSummary,
+		if err := rows.Scan(&b.ID, &b.TransactionID, &b.Direction, &bppID, &b.SettlementDate, &b.Status, &b.ClaimedSummary, &b.ComputedSummary,
 			&b.Contracts, &b.RequestPayload, &b.ResponsePayload, &b.ErrorMessage, &b.CreatedAt); err != nil {
 			return nil, err
 		}
@@ -166,8 +169,10 @@ func (s *Service) overview(ctx context.Context) ([]*bppView, error) {
 		if b.Status == "DISPUTED" || b.Status == "PARTIALLY_AGREED" {
 			v.Disputed++
 		}
+		// Agreement is per settlement: every accord true counts, in any
+		// answered batch.
 		var verdicts []Verdict
-		if b.Status == "AGREED" && json.Unmarshal(b.Contracts, &verdicts) == nil {
+		if json.Unmarshal(b.Contracts, &verdicts) == nil {
 			for _, vd := range verdicts {
 				if vd.Accord {
 					v.AgreedNetPayable = round2(v.AgreedNetPayable + vd.NetPayable)
