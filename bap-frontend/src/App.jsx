@@ -463,10 +463,27 @@ function ConfirmedQuotePanel({ quote, onInit, isLoading, nameOf }) {
           onClick={onInit} disabled={isLoading}
           className="w-full mt-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all active:scale-[0.98] shadow-lg shadow-emerald-600/30"
         >
-          {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <><span>{t('Initialize Order')}</span><ArrowRight className="w-4 h-4" /></>}
+          {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <><ShieldCheck className="w-4 h-4" /><span>{t('Place Order')}</span></>}
         </button>
       </div>
     </motion.div>
+  );
+}
+
+/* ─────────────────────────── PlacingStoppedNote ─────────────────────────── */
+// Why placing the order stopped before confirm: the seller's final total
+// (on_init) differs from the quote, or the confirm failed.
+function PlacingStoppedNote({ transaction }) {
+  const { t } = useI18n();
+  const changed = transaction?.priceChanged;
+  return (
+    <div className={`flex items-start gap-2 text-sm rounded-xl px-4 py-3 border ${changed
+      ? 'text-amber-200 bg-amber-500/10 border-amber-500/25' : 'text-slate-300 bg-emerald-500/5 border-emerald-500/20'}`}>
+      <Info className={`w-4 h-4 shrink-0 mt-0.5 ${changed ? 'text-amber-400' : 'text-emerald-400'}`} />
+      <span>{changed
+        ? t('The seller updated the total from {from} to {to}. Place the order at the new total?', { from: fmtIDR(changed.from), to: fmtIDR(changed.to) })
+        : t('Your order is ready. Click below to place it.')}</span>
+    </div>
   );
 }
 
@@ -485,14 +502,14 @@ function ProductModal({ product, transaction, onClose, onSelect, onInit, onConfi
     )
     : null;
 
-  const pendingStatuses = ['SELECT_SENT', 'INIT_SENT', 'CONFIRM_SENT'];
-  const isPending = pendingStatuses.includes(status);
+  // Placing the order: init, then confirm, run in the background (App).
+  const placing = status === 'INIT_SENT' || status === 'CONFIRM_SENT' ||
+    (status === 'INIT_RECEIVED' && transaction?.placing);
+  const isPending = status === 'SELECT_SENT' || placing;
 
-  const pendingLabel = {
-    SELECT_SENT: t('Requesting a quote from the seller…'),
-    INIT_SENT: t('Initializing order…'),
-    CONFIRM_SENT: t('Confirming your order…'),
-  }[status];
+  const pendingLabel = status === 'SELECT_SENT'
+    ? t('Requesting a quote from the seller…')
+    : t('Placing your order…');
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-3 sm:p-4">
@@ -583,16 +600,13 @@ function ProductModal({ product, transaction, onClose, onSelect, onInit, onConfi
               nameOf={id => (id === product.id ? product.name : null)} />
           )}
 
-          {/* Init received — confirm */}
-          {status === 'INIT_RECEIVED' && (
+          {/* Placing stopped (the price changed, or confirm failed): the buyer confirms */}
+          {status === 'INIT_RECEIVED' && !placing && (
             <div className="space-y-3">
-              <div className="flex items-center gap-2 text-sm text-slate-300 bg-emerald-500/5 border border-emerald-500/20 rounded-xl px-4 py-3">
-                <Info className="w-4 h-4 text-emerald-400 shrink-0" />
-                {t('Order initialized. Click below to place and pay.')}
-              </div>
+              <PlacingStoppedNote transaction={transaction} />
               <button onClick={onConfirm} disabled={isLoading}
                 className="w-full flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-white py-3.5 rounded-2xl font-bold text-sm transition-all active:scale-[0.98] shadow-lg shadow-amber-500/30">
-                {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <><ShieldCheck className="w-4 h-4" />{t('Pay & Confirm Order')}</>}
+                {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <><ShieldCheck className="w-4 h-4" />{t('Pay & Place Order')}</>}
               </button>
             </div>
           )}
@@ -660,20 +674,24 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
   const blocked = quoteBlocked(confirmedQuote);
 
   /* ── Stepper ───────────────────────────────────────────────────────── */
-  const STEPS = [t('Quote'), t('Billing'), t('Confirm'), t('Done')];
+  // Placing the order (init, then confirm) runs in the background from
+  // Billing; it stops at INIT_RECEIVED only when the buyer must confirm.
+  const STEPS = [t('Quote'), t('Billing'), t('Done')];
   const stepIndex = {
     SELECT_SENT: 0,
     QUOTE_RECEIVED: 1,
     INIT_SENT: 1,
-    INIT_RECEIVED: 2,
-    CONFIRM_SENT: 2,
-    CONFIRMED: 3,
-    STATUS_SENT: 3,
-    CANCEL_SENT: 3,
-    CANCELLED: 3,
-    RATE_SENT: 3,
-    SUPPORT_SENT: 3,
+    INIT_RECEIVED: 1,
+    CONFIRM_SENT: 1,
+    CONFIRMED: 2,
+    STATUS_SENT: 2,
+    CANCEL_SENT: 2,
+    CANCELLED: 2,
+    RATE_SENT: 2,
+    SUPPORT_SENT: 2,
   }[status] ?? 0;
+  const placing = status === 'INIT_SENT' || status === 'CONFIRM_SENT' ||
+    (status === 'INIT_RECEIVED' && transaction?.placing);
 
   return (
     <div className="flex flex-col flex-grow overflow-hidden">
@@ -880,27 +898,21 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
         )}
 
         {/* ── Step: Waiting for on_init ──────────────────────────────── */}
-        {status === 'INIT_SENT' && (
+        {placing && (
           <div className="flex flex-col items-center gap-3 py-8">
             <div className="relative w-12 h-12">
               <div className="absolute inset-0 rounded-full border-2 border-emerald-500/20 border-t-emerald-400 animate-spin" />
               <ShieldCheck className="absolute inset-0 m-auto w-5 h-5 text-emerald-400" />
             </div>
-            <p className="text-sm text-slate-300">{t('Initializing your order…')}</p>
+            <p className="text-sm text-slate-300">{t('Placing your order…')}</p>
           </div>
         )}
 
         {/* ── Step: Init received → ready to confirm ─────────────────── */}
-        {status === 'INIT_RECEIVED' && (
+        {status === 'INIT_RECEIVED' && !placing && (
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
-            className="rounded-xl border border-blue-500/20 bg-blue-500/5 px-4 py-3 space-y-2">
-            <div className="flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-blue-400 shrink-0" />
-              <p className="text-sm font-medium text-blue-300">{t('Order Initialized')}</p>
-            </div>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              {t('Your order is ready. Review the details above and confirm to place your order on the ION network.')}
-            </p>
+            className="space-y-2">
+            <PlacingStoppedNote transaction={transaction} />
             <div className="pt-1 text-xs text-slate-500 space-y-1">
               <p><span className="text-slate-400">{t('Name:')}</span> {billing.name || t('Customer')}</p>
               <p><span className="text-slate-400">{t('Phone:')}</span> {billing.phone || '—'}</p>
@@ -910,16 +922,6 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
           </motion.div>
         )}
 
-        {/* ── Step: Waiting for on_confirm ──────────────────────────── */}
-        {status === 'CONFIRM_SENT' && (
-          <div className="flex flex-col items-center gap-3 py-8">
-            <div className="relative w-12 h-12">
-              <div className="absolute inset-0 rounded-full border-2 border-emerald-500/20 border-t-emerald-400 animate-spin" />
-              <Banknote className="absolute inset-0 m-auto w-5 h-5 text-emerald-400" />
-            </div>
-            <p className="text-sm text-slate-300">{t('Placing your order…')}</p>
-          </div>
-        )}
 
         {/* ── Step: Status requested ─────────────────────────────────── */}
         {status === 'STATUS_SENT' && (
@@ -1057,14 +1059,14 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
       </div>
 
       {/* ── Sticky action footer ────────────────────────────────────── */}
-      {((status === 'QUOTE_RECEIVED' && !blocked) || status === 'INIT_RECEIVED') && (
+      {((status === 'QUOTE_RECEIVED' && !blocked) || (status === 'INIT_RECEIVED' && !placing)) && (
         <div className="px-5 py-4 border-t border-white/[0.07] shrink-0">
           {status === 'QUOTE_RECEIVED' && (
             <button onClick={onInit} disabled={isLoading} data-tour="init"
               className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white py-3.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all active:scale-[0.98] shadow-lg shadow-emerald-600/30">
               {isLoading
-                ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('Initializing…')}</>
-                : <><ArrowRight className="w-4 h-4" /> {t('Initialize Order')}</>}
+                ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('Placing your order…')}</>
+                : <><ShieldCheck className="w-4 h-4" /> {t('Place Order')}</>}
             </button>
           )}
           {status === 'INIT_RECEIVED' && (
@@ -1072,7 +1074,7 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
               className="w-full bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-white py-3.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all active:scale-[0.98] shadow-lg shadow-amber-500/30">
               {isLoading
                 ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('Confirming…')}</>
-                : <><ShieldCheck className="w-4 h-4" /> {t('Pay & Confirm Order')}</>}
+                : <><ShieldCheck className="w-4 h-4" /> {t('Pay & Place Order')}</>}
             </button>
           )}
         </div>
@@ -2289,27 +2291,24 @@ const tourSteps = t => [
   { eyebrow: t('Browse'), target: 'filters', title: t('Categories and sorting'),
     body: <p>{t('Narrow the list by category, or sort by price or name. Tap any product card to see its details, offer, and return and cancellation policies.')}</p> },
 
-  { eyebrow: t('Order · {n} of 4', { n: 1 }), target: 'add-first', action: 'click', waitLabel: t('Click ADD'),
+  { eyebrow: t('Order · {n} of 3', { n: 1 }), target: 'add-first', action: 'click', waitLabel: t('Click ADD'),
     skip: { label: t('Skip this part'), to: 'orders' }, title: t("Let's place an order"),
     body: <><p>{rich(t('Click <b>ADD</b> on the first product to put it in your cart.'))}</p><p className="text-slate-400">{t('No products? A seller has to publish a catalog first, from the BPP app.')}</p></> },
-  { eyebrow: t('Order · {n} of 4', { n: 1 }), target: 'view-cart', until: s => s.isCartOpen, waitLabel: t('Click View Cart'),
+  { eyebrow: t('Order · {n} of 3', { n: 1 }), target: 'view-cart', until: s => s.isCartOpen, waitLabel: t('Click View Cart'),
     title: t('Open your cart'),
     body: <p>{rich(t('Your cart can hold products from different sellers. Click <b>View Cart</b>.'))}</p> },
-  { eyebrow: t('Order · {n} of 4', { n: 2 }), target: 'checkout', until: s => s.cartCheckout, waitLabel: t('Click Checkout'),
+  { eyebrow: t('Order · {n} of 3', { n: 2 }), target: 'checkout', until: s => s.cartCheckout, waitLabel: t('Click Checkout'),
     title: t('Check out'),
     body: <p>{rich(t('Click <b>Proceed to Checkout</b>. The app asks the seller for a <b>quote</b>: live price, stock, tax and delivery.'))}</p> },
-  { eyebrow: t('Order · {n} of 4', { n: 2 }), target: 'checkout-stepper', until: statusIn('QUOTE_RECEIVED', 'INIT_SENT', 'INIT_RECEIVED', 'CONFIRM_SENT', ...PLACED),
+  { eyebrow: t('Order · {n} of 3', { n: 2 }), target: 'checkout-stepper', until: statusIn('QUOTE_RECEIVED', 'INIT_SENT', 'INIT_RECEIVED', 'CONFIRM_SENT', ...PLACED),
     waitLabel: t('Waiting for the seller…'), title: t('Getting a quote'),
     body: <p>{t('The seller is working out your quote. This usually takes a second or two.')}</p> },
-  { eyebrow: t('Order · {n} of 4', { n: 3 }), target: 'billing-autofill', action: 'click', waitLabel: t('Click Auto-fill'),
+  { eyebrow: t('Order · {n} of 3', { n: 3 }), target: 'billing-autofill', action: 'click', waitLabel: t('Click Auto-fill'),
     title: t('Your details'),
     body: <p>{rich(t("The quote shows the seller's price, tax and delivery. Below it, enter who the order is for and where to deliver it. Click <b>Auto-fill</b> for a sample address."))}</p> },
-  { eyebrow: t('Order · {n} of 4', { n: 3 }), target: 'init', until: statusIn('INIT_RECEIVED', 'CONFIRM_SENT', ...PLACED), waitLabel: t('Click Initialize'),
-    title: t('Initialize the order'),
-    body: <p>{rich(t("Click <b>Initialize Order</b>. The seller confirms the final terms and how you'll pay."))}</p> },
-  { eyebrow: t('Order · {n} of 4', { n: 4 }), target: 'confirm', until: statusIn(...PLACED), waitLabel: t('Click Pay & Confirm'),
-    title: t('Pay and confirm'),
-    body: <><p>{rich(t('Click <b>Pay & Confirm Order</b> to place it.'))}</p><p className="text-slate-400">{t('The payment gateway holds your payment until the order is settled with the seller.')}</p></> },
+  { eyebrow: t('Order · {n} of 3', { n: 3 }), target: 'init', until: statusIn(...PLACED), waitLabel: t('Click Place Order'),
+    title: t('Place the order'),
+    body: <><p>{rich(t('Click <b>Place Order</b>. The app agrees the final terms with the seller and places the order in one go.'))}</p><p className="text-slate-400">{t('The payment gateway holds your payment until the order is settled with the seller.')}</p></> },
   { eyebrow: t('Order placed'), target: 'order-placed', title: t('Order placed!'),
     body: <p>{t("The seller has your order. Its items are listed below. You can cancel the whole order, or just some items, if the seller's policy allows it.")}</p> },
   { eyebrow: t('Order placed'), target: 'order-actions', title: t('After you order'),
@@ -2584,7 +2583,10 @@ export default function App() {
         // 409: the seller can no longer supply this order.
         throw new Error(r.status === 409 ? t('Some items are no longer available from the seller.') : (err.error || `HTTP ${r.status}`));
       }
-      setTransaction(p => ({ ...p, status: 'INIT_SENT' }));
+      // Placing: once on_init is in, confirm follows on its own (below).
+      const quoted = parseOnSelectContract(typeof transaction.contract === 'string'
+        ? JSON.parse(transaction.contract) : transaction.contract)?.total ?? null;
+      setTransaction(p => ({ ...p, status: 'INIT_SENT', placing: true, quoteTotal: quoted, priceChanged: null }));
     } catch (e) { alert(t('Init failed: {error}', { error: e.message })); }
     finally { setIsLoading(false); }
   };
@@ -2594,14 +2596,39 @@ export default function App() {
     if (!transaction) return;
     setIsLoading(true);
     try {
-      await apiFetch(`/confirm`, {
+      const r = await apiFetch(`/confirm`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ transaction_id: transaction.id }),
       });
-      setTransaction(p => ({ ...p, status: 'CONFIRM_SENT' }));
-    } catch (e) { alert(t('Confirm failed: {error}', { error: e.message })); }
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
+      setTransaction(p => ({ ...p, status: 'CONFIRM_SENT', placing: false }));
+    } catch (e) {
+      // Stop placing; the buyer can try again with Pay & Place Order.
+      setTransaction(p => ({ ...p, placing: false }));
+      alert(t('Confirm failed: {error}', { error: e.message }));
+    }
     finally { setIsLoading(false); }
   };
+
+  /* ── Placing: confirm once on_init is in ─────────────────────────────── */
+  // The seller's on_init states the final terms. Confirm follows at once
+  // unless its total differs from the quote the buyer saw; then the buyer
+  // decides (PlacingStoppedNote).
+  const confirmedFor = useRef(null);
+  useEffect(() => {
+    if (transaction?.status !== 'INIT_RECEIVED' || !transaction.placing) return;
+    if (confirmedFor.current === transaction.id) return;
+    confirmedFor.current = transaction.id;
+    const contract = typeof transaction.contract === 'string' ? JSON.parse(transaction.contract) : transaction.contract;
+    const total = parseOnSelectContract(contract)?.total ?? null;
+    const quoted = transaction.quoteTotal;
+    if (quoted != null && total != null && Math.abs(Number(total) - Number(quoted)) > 0.005) {
+      setTransaction(p => ({ ...p, placing: false, priceChanged: { from: quoted, to: total } }));
+      return;
+    }
+    handleConfirm();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transaction?.status, transaction?.placing, transaction?.id]);
 
   /* ── Beckn: Request Status ───────────────────────────────────────────── */
   const handleRequestStatus = async () => {
