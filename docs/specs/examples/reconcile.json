@@ -54,12 +54,7 @@
                 "value": 2400
               },
               "currency": "IDR",
-              "finderFee": {
-                "appliesTo": "ITEM_TOTAL",
-                "feeType": "PERCENT",
-                "feeValue": 3,
-                "feeAmount": 2400
-              },
+              "orderDate": "2026-09-28",
               "netPayable": {
                 "value": 87600
               },
@@ -80,14 +75,24 @@
                   "accountName": "onix-bpp.example",
                   "accountNumber": "8730000000001",
                   "bankCode": "BCA",
-                  "holderRole": "BPP"
+                  "holderRole": "BPP",
+                  "holderId": "onix-bpp.example",
+                  "allocationFor": "BPP",
+                  "allocatedAmount": 87600
                 }
               ],
-              "settlementBasis": "AFTER_DELIVERY",
-              "settlementWindow": "P1D",
               "withholdingAmount": {
                 "value": 0
-              }
+              },
+              "dueDate": "2026-09-30",
+              "collections": [
+                {
+                  "method": "PREPAID",
+                  "status": "COLLECTED",
+                  "collectorRole": "PJP",
+                  "reportedCollectedAmount": 90000
+                }
+              ]
             }
           }
         ]
@@ -130,12 +135,7 @@
                 "value": 1200
               },
               "currency": "IDR",
-              "finderFee": {
-                "appliesTo": "ITEM_TOTAL",
-                "feeType": "PERCENT",
-                "feeValue": 3,
-                "feeAmount": 1200
-              },
+              "orderDate": "2026-09-28",
               "netPayable": {
                 "value": 43800
               },
@@ -156,14 +156,32 @@
                   "accountName": "onix-bpp.example",
                   "accountNumber": "8730000000001",
                   "bankCode": "BCA",
-                  "holderRole": "BPP"
+                  "holderRole": "BPP",
+                  "holderId": "onix-bpp.example",
+                  "allocationFor": "BPP",
+                  "allocatedAmount": 43800
                 }
               ],
-              "settlementBasis": "AFTER_DELIVERY",
-              "settlementWindow": "P1D",
               "withholdingAmount": {
                 "value": 0
-              }
+              },
+              "dueDate": "2026-09-30",
+              "collections": [
+                {
+                  "method": "PREPAID",
+                  "status": "COLLECTED",
+                  "collectorRole": "PJP",
+                  "reportedCollectedAmount": 90000
+                }
+              ],
+              "breakup": [
+                {
+                  "code": "CANCELLATION",
+                  "includedIn": "REFUND",
+                  "amount": 45000,
+                  "referenceId": "refund-7b2e4f6a-c1"
+                }
+              ]
             }
           }
         ]
@@ -206,12 +224,7 @@
                 "value": 0
               },
               "currency": "IDR",
-              "finderFee": {
-                "appliesTo": "ITEM_TOTAL",
-                "feeType": "PERCENT",
-                "feeValue": 3,
-                "feeAmount": 0
-              },
+              "orderDate": "2026-09-28",
               "netPayable": {
                 "value": 200
               },
@@ -232,20 +245,37 @@
                   "accountName": "onix-bpp.example",
                   "accountNumber": "8730000000001",
                   "bankCode": "BCA",
-                  "holderRole": "BPP"
+                  "holderRole": "BPP",
+                  "holderId": "onix-bpp.example",
+                  "allocationFor": "BPP",
+                  "allocatedAmount": 200
                 }
               ],
-              "settlementBasis": "AFTER_DELIVERY",
-              "settlementWindow": "P1D",
               "withholdingAmount": {
                 "value": 0
-              }
+              },
+              "dueDate": "2026-09-30",
+              "collections": [
+                {
+                  "method": "PREPAID",
+                  "status": "COLLECTED",
+                  "collectorRole": "PJP",
+                  "reportedCollectedAmount": 90000
+                }
+              ],
+              "breakup": [
+                {
+                  "code": "RETURN",
+                  "includedIn": "REFUND",
+                  "amount": 89800,
+                  "referenceId": "refund-9d8c7b6a-c1"
+                }
+              ]
             }
           }
         ]
       }
     ],
-    "reconciliationId": "recon-2026-09-30T170000Z-onix-bpp.example",
     "settlementDate": "2026-09-30",
     "settlementSummary": {
       "bapId": "onix-bap.example",
@@ -253,11 +283,19 @@
       "currency": "IDR",
       "settlementDate": "2026-09-30",
       "contractCount": 3,
+      "settlementCount": 3,
       "totalOrderAmount": 270000,
       "totalCommission": 3600,
       "totalWithholding": 0,
       "totalRefund": 134800,
-      "totalNetPayable": 131600
+      "totalNetPayable": 131600,
+      "orderDayCounts": [
+        {
+          "orderDate": "2026-09-28",
+          "reportedOrderCount": 3,
+          "remainingOrderCount": 3
+        }
+      ]
     }
   }
 }
