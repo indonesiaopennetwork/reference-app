@@ -108,6 +108,52 @@ tasks:
       - docker compose down
 
   # ───────────────────────────────────────────────────────────────────────
+  # Database docs — tbls (https://github.com/k1LoW/tbls) table docs and ER
+  # diagrams for the bap and bpp databases, written to docs/db/. Runs
+  # against a throwaway Postgres with the migrations freshly applied, so it
+  # needs only Docker and never touches the local stack's data.
+  # ───────────────────────────────────────────────────────────────────────
+
+  docs:db:
+    desc: >-
+      Regenerate docs/db/bap.md and docs/db/bpp.md (tables, columns,
+      constraints, indexes and mermaid ER diagrams) with tbls. Re-run after
+      adding a migration and commit the result.
+    vars:
+      NET: tbls-docs
+      PG: tbls-docs-postgres
+      TBLS_IMAGE: ghcr.io/k1low/tbls:v1.96.1
+    cmds:
+      - defer: docker rm -f {{.PG}} >/dev/null 2>&1; docker network rm {{.NET}} >/dev/null 2>&1 || true
+      - docker network create {{.NET}} >/dev/null
+      - >-
+        docker run -d --name {{.PG}} --network {{.NET}}
+        -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres
+        -v "$PWD/postgres/init-dbs.sh:/docker-entrypoint-initdb.d/init-dbs.sh:ro"
+        postgres:16-alpine >/dev/null
+      # pg_isready alone passes during the init-script phase; wait for bap to exist.
+      - |
+        until docker exec {{.PG}} psql -U postgres -h 127.0.0.1 -d bap -c 'select 1' >/dev/null 2>&1; do sleep 1; done
+      - for: [bap, bpp]
+        cmd: |
+          set -euo pipefail
+          docker build -q -t reference-app-migrate-{{.ITEM}} -f {{.ITEM}}-application/Dockerfile.migrate {{.ITEM}}-application >/dev/null
+          docker run --rm --network {{.NET}} \
+            -e PGHOST={{.PG}} -e PGPORT=5432 -e PGDATABASE={{.ITEM}} \
+            -e PGUSER=postgres -e PGPASSWORD=postgres \
+            reference-app-migrate-{{.ITEM}}
+          # tbls writes one page per table; generate into a scratch dir and
+          # merge those into the single docs/db/<db>.md.
+          TMP=$(mktemp -d)
+          trap 'rm -rf "$TMP"' EXIT
+          docker run --rm --network {{.NET}} -u "$(id -u):$(id -g)" \
+            -v "$PWD:/work" -v "$TMP:/out" -w /work {{.TBLS_IMAGE}} doc --rm-dist \
+            -c {{.ITEM}}-application/db/.tbls.yml \
+            "postgres://postgres:postgres@{{.PG}}:5432/{{.ITEM}}?sslmode=disable" /out
+          mkdir -p docs/db
+          ./scripts/merge-tbls-docs.sh "$TMP" docs/db/{{.ITEM}}.md
+
+  # ───────────────────────────────────────────────────────────────────────
   # Fresh deploy — mirrors README.md "Deploy to your fresh GCP project"
   # steps 0-9. Run in order. Steps 0/2/4 aren't here (a one-time backend.tf
   # text edit, a tfvars file, and real secret key material — nothing to

@@ -1,0 +1,15 @@
+# tbls config for the BPP database -- regenerate docs/db/bpp.md with
+# `task docs:db` (it passes the DSN and output dir on the command line).
+name: bpp
+format:
+  adjust: true
+er:
+  format: mermaid
+  comment: true
+  distance: 1
+exclude:
+  # tern's own bookkeeping table
+  - schema_version
+  # monthly/default partitions of beckn_message_log: they mirror the parent
+  # table and the monthly ones change name with the date they were created on
+  - beckn_message_log_*
