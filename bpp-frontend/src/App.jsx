@@ -365,6 +365,19 @@ const TOUR_DONE_KEY = 'bpp.tourDone'
 
 function Sidebar({ active, onNav, open, onClose, onTour }) {
   const { t } = useI18n()
+  const ownProvider = useOwnProvider()
+  const bapBaseUrl = window.__env__?.BAP_URL || import.meta.env.VITE_BAP_URL || '#'
+  const bapUrl = (() => {
+    if (bapBaseUrl === '#') return '#'
+    const params = new URLSearchParams()
+    const tok = getToken()
+    const idTok = getIdToken()
+    if (tok) params.set('token', tok)
+    if (idTok) params.set('id_token', idTok)
+    if (ownProvider?.id) params.set('providerId', ownProvider.id)
+    const qs = params.toString()
+    return `${bapBaseUrl}${qs ? `?${qs}` : ''}`
+  })()
   // Escape closes the mobile drawer, like a click on its backdrop.
   useEffect(() => {
     if (!open || !onClose) return
@@ -425,7 +438,7 @@ function Sidebar({ active, onNav, open, onClose, onTour }) {
           <Compass size={13} className="shrink-0" /> <span className="truncate">{t('Take the tour')}</span>
         </button>
         <a
-          href={`${window.__env__?.BAP_URL || import.meta.env.VITE_BAP_URL || "#"}?token=${encodeURIComponent(getToken() || '')}&id_token=${encodeURIComponent(getIdToken() || '')}`}
+          href={bapUrl}
           target="_blank"
           rel="noopener noreferrer"
           className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-emerald-400 transition-all bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 hover:border-emerald-500/40"
