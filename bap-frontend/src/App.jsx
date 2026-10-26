@@ -99,7 +99,6 @@ function parseCatalogs(data) {
       const policies = oa.policies || {};
       const serviceability = oa.serviceability || {};
       const timing = serviceability.timing?.[0] || {};
-      const distance = serviceability.distanceConstraint || {};
 
       // Composite dedup key: bpp + resource so cross-BPP resources with
       // the same resource ID (unlikely but possible) are treated as distinct.
@@ -140,7 +139,6 @@ function parseCatalogs(data) {
         returnPolicy: policies.returns,
         cancelPolicy: policies.cancellation,
         codAvailable: oa.paymentConstraints?.codAvailable,
-        deliveryRange: distance.maxDistance ? `${distance.maxDistance} ${distance.unit || 'KM'}` : '',
         deliveryDays: timing.daysOfWeek || [],
         deliveryHours: timing.timeRange ? `${timing.timeRange.start}–${timing.timeRange.end}` : '',
         // ISO date; shown with fmtDay() in the current language.
@@ -388,11 +386,6 @@ function OfferInfoPanel({ product }) {
 
       {/* Delivery & badges */}
       <div className="flex flex-wrap gap-2">
-        {deliveryRange && (
-          <span className="flex items-center gap-1 text-[10px] font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2.5 py-1 rounded-full">
-            <MapPin className="w-3 h-3" /> {t('Delivers within {range}', { range: deliveryRange })}
-          </span>
-        )}
         {deliveryHours && (
           <span className="flex items-center gap-1 text-[10px] font-semibold bg-white/5 text-slate-400 border border-white/10 px-2.5 py-1 rounded-full">
             <Clock className="w-3 h-3" /> {deliveryHours}
@@ -3202,13 +3195,8 @@ export default function App() {
                             )}
 
                             {/* Delivery badges */}
-                            {(item.deliveryRange || item.deliveryHours || item.codAvailable || item.returnPolicy?.allowed || item.cancelPolicy?.allowed) && (
+                            {(item.deliveryHours || item.codAvailable || item.returnPolicy?.allowed || item.cancelPolicy?.allowed) && (
                               <div className="flex flex-wrap gap-1.5">
-                                {item.deliveryRange && (
-                                  <span className="flex items-center gap-1 text-[10px] font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded-full">
-                                    <MapPin className="w-2.5 h-2.5" /> {t('Delivers within {range}', { range: item.deliveryRange })}
-                                  </span>
-                                )}
                                 {item.deliveryHours && (
                                   <span className="flex items-center gap-1 text-[10px] font-semibold bg-white/5 text-slate-400 border border-white/10 px-2 py-0.5 rounded-full">
                                     <Clock className="w-2.5 h-2.5" /> {item.deliveryHours}
