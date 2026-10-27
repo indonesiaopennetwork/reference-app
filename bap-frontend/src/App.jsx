@@ -2471,6 +2471,15 @@ export default function App() {
   const cartTotal = cart.reduce((s, i) => s + i.price * i.qty, 0);
 
   /* ── Transaction polling ─────────────────────────────────────────────── */
+  // Depends only on transaction?.id, not the whole transaction object --
+  // setTransaction below builds a new object on every tick (even when
+  // nothing changed), and depending on the full object would re-run this
+  // effect on every single poll, tearing down and restarting the interval
+  // from zero each time. That silently doubled the worst-case wait: a
+  // status landing just after a tick found nothing new had to wait a full
+  // fresh interval again instead of the remainder of the original one.
+  // Since this effect no longer re-runs when the status changes, it must
+  // stop itself explicitly once a terminal status is reached.
   useEffect(() => {
     const terminalStatuses = ['CONFIRMED', 'CANCELLED', 'COMPLETE'];
     if (!transaction || terminalStatuses.includes(transaction.status)) return;
@@ -2484,11 +2493,12 @@ export default function App() {
             if (p.status === 'CANCEL_SENT' && d.status === 'CONFIRMED') return p;
             return { ...p, ...d };
           });
+          if (terminalStatuses.includes(d.status)) clearInterval(id);
         })
         .catch(() => { });
-    }, 2000);
+    }, 500);
     return () => clearInterval(id);
-  }, [transaction]);
+  }, [transaction?.id]);
 
   /* ── Beckn: Select (single product from modal) ───────────────────────── */
   const handleSelectProduct = async (product) => {
