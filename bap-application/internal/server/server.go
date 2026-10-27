@@ -23,13 +23,26 @@ import (
 	reconcilesvc "github.com/ion/winroom/bap/internal/reconcile_svc"
 )
 
+// handleHealth is the liveness probe: a static OK, without checking the
+// database.
+//
+//	@Summary		Health check
+//	@ID				getHealth
+//	@Description	Returns a static OK. Does not check the database. Not reachable through the bap-frontend nginx proxy (it proxies /api only).
+//	@Tags			health
+//	@Produce		json
+//	@Success		200	{object}	HealthResponse	"Service is up."
+//	@Security
+//	@Router			/health [get]
+func handleHealth(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
 // RegisterRoutes wires all BAP routes onto the given Gin engine. verifier
 // may be nil (Zitadel unreachable at startup) -- see internal/auth.OptionalAuth.
 func RegisterRoutes(r *gin.Engine, pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.Logger, verifier *auth.Verifier) {
 	// Health check
-	r.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "ok"})
-	})
+	r.GET("/health", handleHealth)
 
 	// discoverRegistry bridges the on_discover webhook below back to the
 	// synchronous /api/v1/discover request that triggered it -- see

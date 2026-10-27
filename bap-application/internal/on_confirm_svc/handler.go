@@ -25,6 +25,19 @@ func NewOnConfirmHandler(pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.
 	}
 }
 
+// Handle answers POST /api/webhook/on_confirm with an immediate ACK and processes the callback asynchronously.
+//
+//	@Summary		Receive on_confirm (active contract)
+//	@ID				webhookOnConfirm
+//	@Description	The BPP's confirmation. Asynchronously sets the transaction status to CONFIRMED, stores the on_confirm contract snapshot and logs the message. The adapter has already verified the Beckn signature; no auth.
+//	@Tags			beckn webhooks
+//	@Accept			json
+//	@Produce		json
+//	@Param			request body server.BecknContractRequest true "Beckn on_confirm request"
+//	@Success		200 {object} server.BecknAckResponse "Synchronous ACK; the message is processed asynchronously afterwards. The context is echoed with action set to on_confirm."
+//	@Failure		400 {object} server.BecknAckResponse "NACK: the body is not valid JSON or does not match the expected types. Context fields are empty strings except action."
+//	@Security
+//	@Router			/api/webhook/on_confirm [post]
 func (h *OnConfirmHandler) Handle(c *gin.Context) {
 	var req OnConfirmRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

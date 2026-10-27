@@ -1,0 +1,2248 @@
+basePath: /
+definitions:
+  clientsvc.ActionStatusResponse:
+    properties:
+      status:
+        enum:
+        - INIT_SENT
+        - CONFIRM_SENT
+        - STATUS_SENT
+        - CANCEL_SENT
+        - UPDATE_SENT
+        - RATE_SENT
+        - SUPPORT_SENT
+        type: string
+    required:
+    - status
+    type: object
+  clientsvc.BecknContext:
+    properties:
+      action:
+        example: on_select
+        type: string
+      bapId:
+        type: string
+      bapUri:
+        type: string
+      bppId:
+        type: string
+      bppUri:
+        type: string
+      messageId:
+        format: uuid
+        type: string
+      networkId:
+        type: string
+      timestamp:
+        example: "2026-10-23T10:00:00Z"
+        type: string
+      transactionId:
+        format: uuid
+        type: string
+      ttl:
+        example: PT30S
+        type: string
+      version:
+        example: 2.0.0
+        type: string
+    type: object
+  clientsvc.Billing:
+    properties:
+      addressCountry:
+        type: string
+      addressLocality:
+        type: string
+      addressRegion:
+        type: string
+      email:
+        type: string
+      name:
+        type: string
+      phone:
+        type: string
+      postalCode:
+        type: string
+      streetAddress:
+        type: string
+    type: object
+  clientsvc.CancelItem:
+    properties:
+      commitment_id:
+        type: string
+      quantity:
+        type: number
+    required:
+    - commitment_id
+    type: object
+  clientsvc.CancelItemsResponse:
+    properties:
+      status:
+        enum:
+        - CANCEL_SENT
+        - UPDATE_SENT
+        type: string
+    required:
+    - status
+    type: object
+  clientsvc.ClientCancelItemsRequest:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/clientsvc.CancelItem'
+        minItems: 1
+        type: array
+      reason_code:
+        enum:
+        - CHANGE_OF_MIND
+        - WRONG_ITEM_ORDERED
+        - ORDERED_WRONG_VARIANT
+        - FOUND_BETTER_PRICE
+        - DELIVERY_TOO_LONG
+        - INCORRECT_ADDRESS
+        - DUPLICATE_ORDER
+        - PAYMENT_METHOD_CHANGE
+        - ITEM_NO_LONGER_NEEDED
+        - SELLER_UNRESPONSIVE
+        - BUYER_FRAUD_SUSPECTED
+        - QUALITY_ISSUE_AT_PREVIEW
+        type: string
+      transaction_id:
+        format: uuid
+        type: string
+    required:
+    - items
+    - reason_code
+    - transaction_id
+    type: object
+  clientsvc.ClientCancelRequest:
+    properties:
+      reason_code:
+        description: |-
+          ReasonCode is an ION cancellation reason (e.g. CHANGE_OF_MIND), sent as
+          contractAttributes.cancellation.reason.code.
+        example: CHANGE_OF_MIND
+        type: string
+      transaction_id:
+        format: uuid
+        type: string
+    required:
+    - reason_code
+    - transaction_id
+    type: object
+  clientsvc.ClientConfirmRequest:
+    properties:
+      transaction_id:
+        format: uuid
+        type: string
+    required:
+    - transaction_id
+    type: object
+  clientsvc.ClientInitRequest:
+    properties:
+      billing:
+        type: object
+      transaction_id:
+        format: uuid
+        type: string
+    required:
+    - billing
+    - transaction_id
+    type: object
+  clientsvc.ClientRateRequest:
+    properties:
+      ratingInputs:
+        items:
+          $ref: '#/definitions/clientsvc.RatingInput'
+        type: array
+      transaction_id:
+        format: uuid
+        type: string
+    required:
+    - ratingInputs
+    - transaction_id
+    type: object
+  clientsvc.ClientRequestStatusRequest:
+    properties:
+      transaction_id:
+        format: uuid
+        type: string
+    required:
+    - transaction_id
+    type: object
+  clientsvc.ClientReturnItemsRequest:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/clientsvc.CancelItem'
+        minItems: 1
+        type: array
+      transaction_id:
+        format: uuid
+        type: string
+    required:
+    - items
+    - transaction_id
+    type: object
+  clientsvc.ClientSelectRequest:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/clientsvc.SelectItem'
+        type: array
+    required:
+    - items
+    type: object
+  clientsvc.ClientStatusResponse:
+    properties:
+      contract:
+        description: Latest snapshot
+        type: object
+      status:
+        enum:
+        - SELECT_SENT
+        - QUOTE_RECEIVED
+        - INIT_SENT
+        - INIT_RECEIVED
+        - CONFIRM_SENT
+        - CONFIRMED
+        - CANCELLED
+        - COMPLETE
+        - STATUS_SENT
+        - CANCEL_SENT
+        - UPDATE_SENT
+        - RATE_SENT
+        - SUPPORT_SENT
+        - DISCOVER_SENT
+        - DISCOVER_RECEIVED
+        type: string
+      transaction_id:
+        format: uuid
+        type: string
+      updated_at:
+        format: date-time
+        type: string
+    required:
+    - status
+    - transaction_id
+    - updated_at
+    type: object
+  clientsvc.ClientSupportRequest:
+    properties:
+      description:
+        type: string
+      orderId:
+        type: string
+      transaction_id:
+        format: uuid
+        type: string
+    required:
+    - transaction_id
+    type: object
+  clientsvc.ClientUpdateRequest:
+    properties:
+      contract:
+        type: object
+      transaction_id:
+        format: uuid
+        type: string
+    required:
+    - contract
+    - transaction_id
+    type: object
+  clientsvc.ContractSnapshotEntry:
+    properties:
+      action:
+        description: Beckn action that produced the snapshot (e.g. on_select, on_confirm).
+        type: string
+      contract:
+        type: object
+      created_at:
+        format: date-time
+        type: string
+    type: object
+  clientsvc.DemoCatalogItem:
+    properties:
+      category:
+        example: Produce
+        type: string
+      id:
+        example: p1
+        type: string
+      image:
+        format: uri
+        type: string
+      name:
+        example: Organic Avocados
+        type: string
+      price:
+        example: 120
+        type: number
+    type: object
+  clientsvc.DiscoverResponse:
+    additionalProperties: {}
+    type: object
+  clientsvc.ErrorResponse:
+    properties:
+      error:
+        description: Human-readable error (often the underlying Go error text).
+        example: transaction not found
+        type: string
+    required:
+    - error
+    type: object
+  clientsvc.MessageListResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/clientsvc.MessageLogEntry'
+        type: array
+    required:
+    - items
+    type: object
+  clientsvc.MessageLogEntry:
+    properties:
+      ack_status:
+        enum:
+        - ACK
+        - NACK
+        type: string
+        x-nullable: true
+      action:
+        enum:
+        - discover
+        - on_discover
+        - select
+        - on_select
+        - init
+        - on_init
+        - confirm
+        - on_confirm
+        - status
+        - on_status
+        - track
+        - on_track
+        - update
+        - on_update
+        - cancel
+        - on_cancel
+        - rate
+        - on_rate
+        - support
+        - on_support
+        - reconcile
+        - on_reconcile
+        type: string
+      created_at:
+        format: date-time
+        type: string
+      direction:
+        enum:
+        - INBOUND
+        - OUTBOUND
+        type: string
+      error_message:
+        type: string
+        x-nullable: true
+      id:
+        format: uuid
+        type: string
+      message_id:
+        format: uuid
+        type: string
+      processing_duration_ms:
+        type: integer
+        x-nullable: true
+      request_payload:
+        description: The full Beckn request as sent or received.
+        type: object
+        x-nullable: true
+      response_payload:
+        description: The response body (e.g. the adapter ACK), when recorded.
+        type: object
+        x-nullable: true
+      transaction_id:
+        format: uuid
+        type: string
+        x-nullable: true
+      url:
+        type: string
+        x-nullable: true
+    type: object
+  clientsvc.OrderDetailResponse:
+    properties:
+      contract:
+        description: |-
+          Latest contract snapshot (opaque Beckn/ION contract JSON); null when
+          there is none yet.
+        type: object
+        x-nullable: true
+      snapshots:
+        description: |-
+          All contract snapshots of the transaction, oldest first (empty if the
+          query fails).
+        items:
+          $ref: '#/definitions/clientsvc.ContractSnapshotEntry'
+        type: array
+      status:
+        enum:
+        - SELECT_SENT
+        - QUOTE_RECEIVED
+        - INIT_SENT
+        - INIT_RECEIVED
+        - CONFIRM_SENT
+        - CONFIRMED
+        - CANCELLED
+        - COMPLETE
+        - STATUS_SENT
+        - CANCEL_SENT
+        - UPDATE_SENT
+        - RATE_SENT
+        - SUPPORT_SENT
+        - DISCOVER_SENT
+        - DISCOVER_RECEIVED
+        type: string
+      transaction_id:
+        format: uuid
+        type: string
+      updated_at:
+        format: date-time
+        type: string
+    required:
+    - snapshots
+    - status
+    - transaction_id
+    - updated_at
+    type: object
+  clientsvc.OrderListResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/clientsvc.OrderSummary'
+        type: array
+      limit:
+        example: 20
+        type: integer
+      page:
+        example: 1
+        type: integer
+      total:
+        description: Total orders owned by the buyer.
+        type: integer
+    required:
+    - items
+    - limit
+    - page
+    - total
+    type: object
+  clientsvc.OrderSummary:
+    properties:
+      bpp_id:
+        type: string
+      contract:
+        description: Latest contract snapshot (opaque Beckn/ION contract JSON); {}
+          when none.
+        type: object
+      created_at:
+        format: date-time
+        type: string
+      currency:
+        type: string
+      item_name:
+        description: First commitment's resource name, falling back to its offer name.
+        type: string
+      item_price:
+        description: First commitment's commitmentAttributes.price.value.
+        type: number
+      latest_action:
+        description: Beckn action of the latest snapshot (e.g. on_confirm); empty
+          if none.
+        type: string
+      status:
+        description: |-
+          The transaction status, overridden by the status code of a RETURN
+          performance when the contract has one (e.g. Return_Initiated).
+        type: string
+      transaction_id:
+        format: uuid
+        type: string
+      updated_at:
+        format: date-time
+        type: string
+    type: object
+  clientsvc.RatingInput:
+    properties:
+      descriptor:
+        type: object
+      feedbackFormSubmission:
+        type: object
+      id:
+        type: string
+      range:
+        type: object
+      ratingCategory:
+        type: string
+    required:
+    - id
+    - range
+    type: object
+  clientsvc.ReturnItemsResponse:
+    properties:
+      status:
+        enum:
+        - UPDATE_SENT
+        type: string
+    required:
+    - status
+    type: object
+  clientsvc.SelectItem:
+    properties:
+      bpp_id:
+        description: |-
+          BppID and BppURI are populated from the catalog's bppId/bppUri fields in the
+          discover response. They override the server-config defaults so the select is
+          routed to the BPP that actually owns the resource.
+        type: string
+      bpp_uri:
+        type: string
+      offer_attributes:
+        type: object
+      offer_considerations:
+        description: |-
+          OfferConsiderations is the offer's considerations[] (pricing) exactly as
+          the discover response carried it; sent on as offer.considerations.
+        items:
+          type: object
+        type: array
+      offer_id:
+        type: string
+      offer_name:
+        type: string
+      provider_id:
+        type: string
+      provider_name:
+        type: string
+      quantity:
+        example: 1
+        type: integer
+      resource:
+        description: |-
+          Resource is the resource's descriptor / resourceAttributes as discover
+          returned them; sent on in commitments[].resources[].
+        type: object
+      resource_id:
+        type: string
+    type: object
+  clientsvc.SelectResponse:
+    properties:
+      transaction_id:
+        format: uuid
+        type: string
+    required:
+    - transaction_id
+    type: object
+  reconcilesvc.BppReconciliation:
+    properties:
+      agreed_commission:
+        description: Released to this BAP by agreed contracts.
+        type: number
+      agreed_net_payable:
+        description: Released to the BPP by agreed contracts.
+        type: number
+      batches:
+        items:
+          $ref: '#/definitions/reconcilesvc.ReconciliationBatch'
+        type: array
+      bpp_id:
+        type: string
+      contracts:
+        items:
+          $ref: '#/definitions/reconcilesvc.DueContract'
+        type: array
+      currency:
+        example: IDR
+        type: string
+      disputed_batches:
+        description: Batches with status DISPUTED or PARTIALLY_AGREED.
+        type: integer
+      held_amount:
+        description: |-
+          What the PJP still holds for contracts not yet agreed (order amount
+          less pre-payout refunds).
+        type: number
+      refunded_after_payout:
+        type: number
+    type: object
+  reconcilesvc.Context:
+    properties:
+      action:
+        type: string
+      bapId:
+        type: string
+      bapUri:
+        type: string
+      bppId:
+        type: string
+      bppUri:
+        type: string
+      messageId:
+        type: string
+      networkId:
+        type: string
+      receiverId:
+        type: string
+      senderId:
+        type: string
+      timestamp:
+        type: string
+      transactionId:
+        type: string
+      ttl:
+        type: string
+      version:
+        type: string
+    type: object
+  reconcilesvc.Diff:
+    properties:
+      diff:
+        type: number
+      field:
+        type: string
+      ours:
+        type: number
+      theirs:
+        type: number
+    type: object
+  reconcilesvc.DueContract:
+    properties:
+      basis_event:
+        type: string
+      bpp_id:
+        type: string
+      bpp_uri:
+        type: string
+      breakup:
+        description: |-
+          Breakup itemizes the refund (settlement.RefundBreakup); Collections
+          says who collected the buyer's money (settlement.Collections).
+        items: {}
+        type: array
+      collected_by:
+        type: string
+      collections:
+        items: {}
+        type: array
+      commission:
+        type: number
+      consideration_id:
+        type: string
+      contract_id:
+        type: string
+      created_at:
+        description: 'CreatedAt is when the contract was created: its first snapshot.'
+        format: date-time
+        type: string
+        x-nullable: true
+      currency:
+        type: string
+      due:
+        type: boolean
+      due_at:
+        format: date-time
+        type: string
+        x-nullable: true
+      due_date:
+        type: string
+      in_next_batch:
+        description: |-
+          InNextBatch: the contract goes in this BAP's next /reconcile (see
+          nextBatch).
+        type: boolean
+      last_result:
+        allOf:
+        - $ref: '#/definitions/reconcilesvc.Result'
+        description: |-
+          LastResult: for a contract its last batch didn't reconcile (disputed,
+          or sent before its settlement window), how it fared there.
+      net_payable:
+        type: number
+      order_amount:
+        type: number
+      order_date:
+        description: |-
+          OrderDate is the order's creation date in Asia/Jakarta time; DueDate
+          the date the payout falls due, once known. Set by the caller.
+        type: string
+      reconciliation_id:
+        description: ReconciliationID is the batch the contract was last in.
+        type: string
+      reconciliation_status:
+        type: string
+      refund:
+        type: number
+      refund_settlement_ids:
+        description: RefundSettlementIDs are the pre-payout refunds counted in Refund.
+        items:
+          type: string
+        type: array
+      refunded_after_payout:
+        description: |-
+          RefundedAfterPayout is refunded by the BPP itself after the payout; it
+          is outside reconciliation (ION Release 1) and only reported.
+        type: number
+      selectable:
+        description: |-
+          Selectable: the operator can choose the contract for a /reconcile (due
+          or disputed; see choose).
+        type: boolean
+      settlement_accounts:
+        items: {}
+        type: array
+      settlement_basis:
+        description: |-
+          Basis / Window are the payout term the contract falls due by: of its
+          Terms, the one giving the latest due date (see assess).
+        type: string
+      settlement_id:
+        type: string
+      settlement_window:
+        type: string
+      status:
+        enum:
+        - SELECT_SENT
+        - QUOTE_RECEIVED
+        - INIT_SENT
+        - INIT_RECEIVED
+        - CONFIRM_SENT
+        - CONFIRMED
+        - CANCELLED
+        - COMPLETE
+        - STATUS_SENT
+        - CANCEL_SENT
+        - UPDATE_SENT
+        - RATE_SENT
+        - SUPPORT_SENT
+        - DISCOVER_SENT
+        - DISCOVER_RECEIVED
+        type: string
+      transaction_id:
+        format: uuid
+        type: string
+      withholding:
+        type: number
+    type: object
+  reconcilesvc.ReconcileLogEntry:
+    properties:
+      ack_status:
+        enum:
+        - ACK
+        - NACK
+        type: string
+        x-nullable: true
+      action:
+        enum:
+        - reconcile
+        - on_reconcile
+        type: string
+      bpp_id:
+        type: string
+        x-nullable: true
+      created_at:
+        format: date-time
+        type: string
+      direction:
+        enum:
+        - INBOUND
+        - OUTBOUND
+        type: string
+      error_message:
+        type: string
+        x-nullable: true
+      id:
+        format: uuid
+        type: string
+      message_id:
+        format: uuid
+        type: string
+      request_payload:
+        type: object
+        x-nullable: true
+      response_payload:
+        type: object
+        x-nullable: true
+      url:
+        type: string
+        x-nullable: true
+    type: object
+  reconcilesvc.ReconciliationBatch:
+    properties:
+      claimed_summary:
+        description: The sender's settlementSummary.
+        type: object
+        x-nullable: true
+      computed_summary:
+        description: The answerer's settlementSummary.
+        type: object
+        x-nullable: true
+      contracts:
+        description: Per-contract verdicts.
+        items:
+          $ref: '#/definitions/reconcilesvc.Verdict'
+        type: array
+        x-nullable: true
+      created_at:
+        format: date-time
+        type: string
+      direction:
+        description: 'INBOUND: a BPP sent /reconcile; OUTBOUND: this BAP sent it.'
+        enum:
+        - INBOUND
+        - OUTBOUND
+        type: string
+      error_message:
+        type: string
+        x-nullable: true
+      id:
+        description: This BAP's own name for the batch (not sent on the wire).
+        type: string
+      request_payload:
+        description: The /reconcile body.
+        type: object
+        x-nullable: true
+      response_payload:
+        description: The /on_reconcile body.
+        type: object
+        x-nullable: true
+      settlement_date:
+        format: date
+        type: string
+      status:
+        description: |-
+          SENDING/SENT/FAILED track delivery of an outbound batch;
+          AGREED/DISPUTED/PARTIALLY_AGREED/PENDING are outcomes (PENDING: every
+          due contract matched but some were sent before their settlement window).
+        enum:
+        - SENDING
+        - SENT
+        - FAILED
+        - AGREED
+        - DISPUTED
+        - PARTIALLY_AGREED
+        - PENDING
+        type: string
+      transaction_id:
+        description: |-
+          The exchange's context.transactionId; a disputed batch is re-sent under
+          the same one.
+        format: uuid
+        type: string
+    type: object
+  reconcilesvc.ReconciliationOverviewResponse:
+    properties:
+      bpps:
+        description: One entry per BPP, sorted by bpp_id.
+        items:
+          $ref: '#/definitions/reconcilesvc.BppReconciliation'
+        type: array
+      messages:
+        description: Up to 100 most recent /reconcile and /on_reconcile messages,
+          newest first.
+        items:
+          $ref: '#/definitions/reconcilesvc.ReconcileLogEntry'
+        type: array
+      now:
+        description: Server time (UTC).
+        format: date-time
+        type: string
+    required:
+    - bpps
+    - messages
+    - now
+    type: object
+  reconcilesvc.Request:
+    properties:
+      context:
+        $ref: '#/definitions/reconcilesvc.Context'
+      message:
+        properties:
+          contracts:
+            description: |-
+              Contracts with their settlements[0].settlementAttributes figures
+              (orderAmount, commission, withholding, refund, netPayable, accord,
+              dispute, ...).
+            items:
+              type: object
+            type: array
+          reconciliationStatus:
+            description: On /on_reconcile, the BPP's batch verdict (e.g. AGREED, DISPUTED).
+            type: string
+          settlementDate:
+            format: date
+            type: string
+          settlementSummary:
+            additionalProperties: {}
+            type: object
+        type: object
+    type: object
+  reconcilesvc.Result:
+    properties:
+      accord:
+        type: boolean
+      code:
+        type: string
+      diffs:
+        description: Diffs are the figures the two participants differ on.
+        items:
+          $ref: '#/definitions/reconcilesvc.Diff'
+        type: array
+      field:
+        description: Field is the figure the dispute names (dispute.field), when it
+          does.
+        type: string
+      pending:
+        description: |-
+          Pending: accord false with a pending code; the contract is sent again
+          later rather than disputed.
+        type: boolean
+      reason:
+        type: string
+    type: object
+  reconcilesvc.SendFailedResponse:
+    properties:
+      batch:
+        $ref: '#/definitions/reconcilesvc.ReconciliationBatch'
+      error:
+        example: 'reconcile not delivered: ...'
+        type: string
+    required:
+    - batch
+    - error
+    type: object
+  reconcilesvc.SendRequest:
+    properties:
+      bpp_id:
+        description: The seller to reconcile with.
+        example: bpp.example.com
+        type: string
+      contract_ids:
+        description: |-
+          Contracts to send. Empty or omitted sends the default batch; ids that
+          are neither due nor disputed are ignored.
+        items:
+          type: string
+        type: array
+    required:
+    - bpp_id
+    type: object
+  reconcilesvc.SendResponse:
+    properties:
+      batch:
+        $ref: '#/definitions/reconcilesvc.ReconciliationBatch'
+    required:
+    - batch
+    type: object
+  reconcilesvc.Verdict:
+    properties:
+      accord:
+        type: boolean
+      commission:
+        type: number
+      contractId:
+        type: string
+      dispute:
+        additionalProperties: {}
+        type: object
+      netPayable:
+        type: number
+      settlementId:
+        type: string
+    type: object
+  server.AckMessage:
+    properties:
+      ack:
+        $ref: '#/definitions/server.AckStatus'
+    required:
+    - ack
+    type: object
+  server.AckStatus:
+    properties:
+      status:
+        enum:
+        - ACK
+        - NACK
+        type: string
+    required:
+    - status
+    type: object
+  server.BecknAckResponse:
+    properties:
+      context:
+        $ref: '#/definitions/clientsvc.BecknContext'
+      message:
+        $ref: '#/definitions/server.AckMessage'
+    required:
+    - context
+    - message
+    type: object
+  server.BecknContractMessage:
+    properties:
+      contract:
+        description: |-
+          Opaque Beckn v2 / ION TradeContract JSON (commitments, consideration,
+          performance, settlements, contractAttributes, ...).
+        type: object
+    type: object
+  server.BecknContractRequest:
+    properties:
+      context:
+        $ref: '#/definitions/clientsvc.BecknContext'
+      message:
+        $ref: '#/definitions/server.BecknContractMessage'
+    type: object
+  server.HealthResponse:
+    properties:
+      status:
+        enum:
+        - ok
+        example: ok
+        type: string
+    required:
+    - status
+    type: object
+  server.OnDiscoverMessage:
+    properties:
+      catalogs:
+        description: Catalogs, passed through as-is.
+        items:
+          type: object
+        type: array
+    type: object
+  server.OnDiscoverRequest:
+    properties:
+      context:
+        $ref: '#/definitions/clientsvc.BecknContext'
+      message:
+        $ref: '#/definitions/server.OnDiscoverMessage'
+    type: object
+  server.OnRateMessage:
+    properties:
+      ratings:
+        description: Opaque Beckn ratings payload.
+        type: object
+    type: object
+  server.OnRateRequest:
+    properties:
+      context:
+        $ref: '#/definitions/clientsvc.BecknContext'
+      message:
+        $ref: '#/definitions/server.OnRateMessage'
+    type: object
+  server.OnSupportMessage:
+    properties:
+      support:
+        description: Opaque Beckn support payload.
+        type: object
+    type: object
+  server.OnSupportRequest:
+    properties:
+      context:
+        $ref: '#/definitions/clientsvc.BecknContext'
+      message:
+        $ref: '#/definitions/server.OnSupportMessage'
+    type: object
+  server.ReconcileAckResponse:
+    properties:
+      context:
+        description: The request's context, echoed as received.
+        type: object
+        x-nullable: true
+      message:
+        $ref: '#/definitions/server.AckMessage'
+    required:
+    - context
+    - message
+    type: object
+  server.ReconcileNackResponse:
+    properties:
+      message:
+        $ref: '#/definitions/server.AckMessage'
+    required:
+    - message
+    type: object
+info:
+  contact: {}
+  description: 'Buyer backend (bap-application). /api/v1: client API for bap-frontend;
+    each order action sends a Beckn request through onix-bap and the BPP''s answer
+    arrives later on /api/webhook/on_*. /api/webhook: Beckn callbacks delivered by
+    onix-bap''s receiver (signature already verified; each answers with an immediate
+    ACK and is processed asynchronously). See docs/architecture.md.'
+  title: BAP API
+  version: "1.0"
+paths:
+  /api/v1/cancel:
+    post:
+      consumes:
+      - application/json
+      description: 'Declares the cancellation (reason and every still-active commitment)
+        in the latest contract''s contractAttributes.cancellation, checks the offers''
+        cancellation cut-off, sets the status to CANCEL_SENT and sends Beckn cancel
+        via onix-bap; the result arrives via /api/webhook/on_cancel (status CANCELLED).
+        Unlike /cancel-items, reason_code is not checked against the known list. The
+        bearer token is optional: without one the request is served anonymously; one
+        that fails verification is rejected with 401.'
+      operationId: cancelOrder
+      parameters:
+      - description: Request body
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/clientsvc.ClientCancelRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Cancel sent (status CANCEL_SENT).
+          schema:
+            $ref: '#/definitions/clientsvc.ActionStatusResponse'
+        "400":
+          description: Request body missing, not JSON, or missing a required field.
+          schema:
+            $ref: '#/definitions/clientsvc.ErrorResponse'
+        "401":
+          description: A bearer token was sent but failed verification (no token is
+            fine).
+          schema:
+            $ref: '#/definitions/clientsvc.ErrorResponse'
+        "500":
+          description: Transaction/snapshot not found, cancellation not allowed by
+            the offer policy, DB error, or adapter failure.
+          schema:
+            $ref: '#/definitions/clientsvc.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Cancel the whole order (Beckn cancel)
+      tags:
+      - order actions
+  /api/v1/cancel-items:
+    post:
+      consumes:
+      - application/json
+      description: 'Validates the items against the latest contract (active commitments,
+        quantities, cancellation cut-off, known reason code). If they add up to everything
+        still active it behaves like POST /api/v1/cancel (Beckn cancel, status CANCEL_SENT);
+        otherwise it lowers the quantities (or closes the commitments), declares the
+        partial cancellation and sends Beckn update (status UPDATE_SENT). The bearer
+        token is optional: without one the request is served anonymously; one that
+        fails verification is rejected with 401.'
+      operationId: cancelItems
+      parameters:
+      - description: Request body
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/clientsvc.ClientCancelItemsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Cancel or update sent; status says which.
+          schema:
+            $ref: '#/definitions/clientsvc.CancelItemsResponse'
+        "400":
+          description: Invalid body, or any failure while validating or sending (unknown
+            commitment, too many units, cut-off passed, unknown reason, snapshot missing,
+            adapter failure). All errors are reported as 400.
+          schema:
+            $ref: '#/definitions/clientsvc.ErrorResponse'
+        "401":
+          description: A bearer token was sent but failed verification (no token is
+            fine).
+          schema:
+            $ref: '#/definitions/clientsvc.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Cancel some or all items
+      tags:
+      - order actions
+  /api/v1/catalog:
+    get:
+      description: 'Returns a hard-coded list of five demo products. It does not query
+        any BPP or the network. The bearer token is optional: without one the request
+        is served anonymously; one that fails verification is rejected with 401.'
+      operationId: getCatalog
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Demo products.
+          schema:
+            items:
+              $ref: '#/definitions/clientsvc.DemoCatalogItem'
+            type: array
+        "401":
+          description: A bearer token was sent but failed verification (no token is
+            fine).
+          schema:
+            $ref: '#/definitions/clientsvc.ErrorResponse'
+        "500":
+          description: Catalog could not be loaded (not reached by the current hard-coded
+            catalog).
+          schema:
+            $ref: '#/definitions/clientsvc.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Static demo catalog
+      tags:
+      - discover & catalog
+  /api/v1/confirm:
+    post:
+      consumes:
+      - application/json
+      description: 'Loads the latest (on_init) contract snapshot, records a mock payment
+        on its settlement (status PAID, paidAt, a generated gatewayRef; there is no
+        real payment gateway), sets the status to CONFIRM_SENT and sends Beckn confirm
+        via onix-bap. The confirmation arrives later via /api/webhook/on_confirm (status
+        CONFIRMED). The bearer token is optional: without one the request is served
+        anonymously; one that fails verification is rejected with 401.'
+      operationId: confirm
+      parameters:
+      - description: Request body
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/clientsvc.ClientConfirmRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Confirm sent (status CONFIRM_SENT).
+          schema:
+            $ref: '#/definitions/clientsvc.ActionStatusResponse'
+        "400":
+          description: Request body missing, not JSON, or missing a required field.
+          schema:
+            $ref: '#/definitions/clientsvc.ErrorResponse'
+        "401":
+          description: A bearer token was sent but failed verification (no token is
+            fine).
+          schema:
+            $ref: '#/definitions/clientsvc.ErrorResponse'
+        "500":
+          description: Transaction or snapshot not found, database error, or the adapter
+            call failed / returned non-200 (the error text says which).
+          schema:
+            $ref: '#/definitions/clientsvc.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Pay and confirm (Beckn confirm)
+      tags:
+      - orders
+  /api/v1/discover:
+    get:
+      description: 'Sends a Beckn discover with intent.textSearch = q (plus " provider_name"
+        when given) and returns the result synchronously. DISCOVER_METHOD picks the
+        path: GET (default) calls the discovery service''s sync GET /discover directly
+        and returns its body as-is (or {"message":{"catalogs":[]}} when no discovery
+        URL is configured); POST sends discover through onix-bap and waits up to 60s
+        for the on_discover webhook, returning that callback''s body. A logged-in
+        buyer''s search is recorded in their message log. The bearer token is optional:
+        without one the request is served anonymously; one that fails verification
+        is rejected with 401.'
+      operationId: discover
+      parameters:
+      - description: Free-text search term. When both q and provider_name are empty,
+          coffee is used.
+        in: query
+        name: q
+        type: string
+      - description: Provider name; appended to the text search (<q> <provider_name>).
+        in: query
+        name: provider_name
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Discover result as returned by the discovery service, or the
+            on_discover callback body (context + message.catalogs).
+          schema:
+            $ref: '#/definitions/clientsvc.DiscoverResponse'
+        "401":
+          description: A bearer token was sent but failed verification (no token is
+            fine).
+          schema:
+            $ref: '#/definitions/clientsvc.ErrorResponse'
+        "500":
+          description: Discovery call failed, returned a non-200, or (POST mode) the
+            on_discover callback did not arrive within 60s.
+          schema:
+            $ref: '#/definitions/clientsvc.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Search the network (Beckn discover)
+      tags:
+      - discover & catalog
+  /api/v1/init:
+    post:
+      consumes:
+      - application/json
+      description: 'Loads the latest (on_select) contract snapshot, checks the quote
+        is still fulfillable, patches in the buyer''s billing/delivery details and
+        the settlement declaration, sets the status to INIT_SENT and sends Beckn init
+        via onix-bap. The draft contract arrives later via /api/webhook/on_init (status
+        INIT_RECEIVED). The bearer token is optional: without one the request is served
+        anonymously; one that fails verification is rejected with 401.'
+      operationId: init
+      parameters:
+      - description: Request body
+        in: body
+        name: request
+        required: true
+        schema:
+          allOf:
+          - $ref: '#/definitions/clientsvc.ClientInitRequest'
+          - properties:
+              billing:
+                $ref: '#/definitions/clientsvc.Billing'
+            type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Init sent (status INIT_SENT).
+          schema:
+            $ref: '#/definitions/clientsvc.ActionStatusResponse'
+        "400":
+          description: Request body missing, not JSON, or missing a required field.
+          schema:
+            $ref: '#/definitions/clientsvc.ErrorResponse'
+        "401":
+          description: A bearer token was sent but failed verification (no token is
+            fine).
+          schema:
+            $ref: '#/definitions/clientsvc.ErrorResponse'
+        "409":
+          description: The quote is no longer available (an item was marked CLOSED
+            by the seller, or the quote has no price).
+          schema:
+            $ref: '#/definitions/clientsvc.ErrorResponse'
+        "500":
+          description: Transaction or on_select snapshot not found, invalid billing,
+            DB error, or adapter failure.
+          schema:
+            $ref: '#/definitions/clientsvc.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Submit buyer details (Beckn init)
+      tags:
+      - orders
+  /api/v1/messages:
+    get:
+      description: 'The logged-in buyer''s Beckn messages from beckn_message_log,
+        newest first: their discover searches and every message of their orders. The
+        bearer token is optional for the /api/v1 group, but this route needs a buyer
+        identity: with no token it answers 401.'
+      operationId: listMessages
+      parameters:
+      - default: 50
+        description: Max rows, 1-200. Out-of-range or non-numeric values fall back
+          to 50.
+        in: query
+        maximum: 200
+        minimum: 1
+        name: limit
+        type: integer
+      - description: Only messages with this Beckn action (exact match). Empty means
+          all.
+        enum:
+        - discover
+        - on_discover
+        - select
+        - on_select
+        - init
+        - on_init
+        - confirm
+        - on_confirm
+        - status
+        - on_status
+        - track
+        - on_track
+        - update
+        - on_update
+        - cancel
+        - on_cancel
+        - rate
+        - on_rate
+        - support
+        - on_support
+        - reconcile
+        - on_reconcile
+        in: query
+        name: action
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Messages.
+          schema:
+            $ref: '#/definitions/clientsvc.MessageListResponse'
+        "401":
+          description: 'No buyer identity (no token: log in to see your messages),
+            or an invalid/expired token.'
+          schema:
+            $ref: '#/definitions/clientsvc.ErrorResponse'
+        "500":
+          description: Transaction or snapshot not found, database error, or the adapter
+            call failed / returned non-200 (the error text says which).
+          schema:
+            $ref: '#/definitions/clientsvc.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: The buyer's Beckn message log
+      tags:
+      - messages
+  /api/v1/orders:
+    get:
+      description: 'Paginated transactions owned by the logged-in buyer, newest first,
+        each with its latest contract snapshot and display fields extracted from it.
+        Without a buyer identity (no token) it returns an empty page {"items":[],"total":0,"page":1,"limit":20}.
+        The bearer token is optional: without one the request is served anonymously;
+        one that fails verification is rejected with 401.'
+      operationId: listOrders
+      parameters:
+      - default: 1
+        description: 1-based page number. Non-numeric or < 1 falls back to 1.
+        in: query
+        minimum: 1
+        name: page
+        type: integer
+      - default: 20
+        description: Page size, 1-100. Out-of-range or non-numeric values fall back
+          to 20.
+        in: query
+        maximum: 100
+        minimum: 1
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: A page of orders.
+          schema:
+            $ref: '#/definitions/clientsvc.OrderListResponse'
+        "401":
+          description: A bearer token was sent but failed verification (no token is
+            fine).
+          schema:
+            $ref: '#/definitions/clientsvc.ErrorResponse'
+        "500":
+          description: Transaction or snapshot not found, database error, or the adapter
+            call failed / returned non-200 (the error text says which).
+          schema:
+            $ref: '#/definitions/clientsvc.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: The buyer's order history
+      tags:
+      - orders
+  /api/v1/orders/{id}:
+    get:
+      description: 'The buyer''s transaction with its latest contract and every contract
+        snapshot (oldest first). Scoped to the buyer: without a token, or for a transaction
+        owned by someone else, it answers 404 exactly as for an unknown id. The bearer
+        token is optional: without one the request is served anonymously; one that
+        fails verification is rejected with 401.'
+      operationId: getOrder
+      parameters:
+      - description: Transaction id (UUID) returned by POST /api/v1/select.
+        format: uuid
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Order details.
+          schema:
+            $ref: '#/definitions/clientsvc.OrderDetailResponse'
+        "401":
+          description: A bearer token was sent but failed verification (no token is
+            fine).
+          schema:
+            $ref: '#/definitions/clientsvc.ErrorResponse'
+        "404":
+          description: Not found, not this buyer's, or no buyer identity.
+          schema:
+            $ref: '#/definitions/clientsvc.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: One order with its snapshot timeline
+      tags:
+      - orders
+  /api/v1/rate:
+    post:
+      consumes:
+      - application/json
+      description: 'Maps each rating input to the Beckn RatingInput wire shape (target.id,
+        target.descriptor, range, feedbackFormSubmission; ratingCategory is not sent),
+        sets the status to RATE_SENT and sends Beckn rate via onix-bap. The answer
+        arrives via /api/webhook/on_rate. The bearer token is optional: without one
+        the request is served anonymously; one that fails verification is rejected
+        with 401.'
+      operationId: rateOrder
+      parameters:
+      - description: Request body
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/clientsvc.ClientRateRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Rate sent (status RATE_SENT).
+          schema:
+            $ref: '#/definitions/clientsvc.ActionStatusResponse'
+        "400":
+          description: Request body missing, not JSON, or missing a required field.
+          schema:
+            $ref: '#/definitions/clientsvc.ErrorResponse'
+        "401":
+          description: A bearer token was sent but failed verification (no token is
+            fine).
+          schema:
+            $ref: '#/definitions/clientsvc.ErrorResponse'
+        "500":
+          description: Transaction or snapshot not found, database error, or the adapter
+            call failed / returned non-200 (the error text says which).
+          schema:
+            $ref: '#/definitions/clientsvc.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Rate an order (Beckn rate)
+      tags:
+      - order actions
+  /api/v1/reconciliation:
+    get:
+      description: 'Per seller (BPP): the contracts still to reconcile (with due date,
+        figures and whether they go in the next batch), what the PJP still holds,
+        what agreed contracts release, and up to the 200 most recent batches (sent
+        or received) overall; plus the 100 most recent /reconcile and /on_reconcile
+        messages. Open: no login required.'
+      operationId: getReconciliationOverview
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Overview.
+          schema:
+            $ref: '#/definitions/reconcilesvc.ReconciliationOverviewResponse'
+        "500":
+          description: Database error.
+          schema:
+            $ref: '#/definitions/clientsvc.ErrorResponse'
+      security: []
+      summary: Reconciliation overview
+      tags:
+      - reconciliation
+  /api/v1/reconciliation/send:
+    post:
+      consumes:
+      - application/json
+      description: 'Builds and sends a /reconcile batch to the given BPP via onix-bap:
+        the selected contract_ids (those due or disputed), or by default the batch
+        this BAP previously sent that was disputed (re-sent in the same exchange:
+        same transactionId, new messageId), else every contract with that BPP that
+        is due now. The batch is recorded as OUTBOUND (SENDING -> SENT, or FAILED
+        if delivery fails); the BPP''s answer arrives later on /api/webhook/on_reconcile.
+        Open: no login required.'
+      operationId: sendReconcile
+      parameters:
+      - description: The seller and, optionally, the contracts to send.
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/reconcilesvc.SendRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Batch sent (adapter ACKed).
+          schema:
+            $ref: '#/definitions/reconcilesvc.SendResponse'
+        "400":
+          description: Request body missing, not JSON, or missing bpp_id.
+          schema:
+            $ref: '#/definitions/clientsvc.ErrorResponse'
+        "409":
+          description: No contract with this BPP is due (or none of the selected ones
+            is due/disputed).
+          schema:
+            $ref: '#/definitions/clientsvc.ErrorResponse'
+        "500":
+          description: Database error, or the batch could not be built (the error
+            text says which).
+          schema:
+            $ref: '#/definitions/clientsvc.ErrorResponse'
+        "502":
+          description: The batch was recorded but could not be delivered; it is returned
+            with status FAILED and its contracts are restored to their earlier reconciliation
+            state.
+          schema:
+            $ref: '#/definitions/reconcilesvc.SendFailedResponse'
+      security: []
+      summary: Send this BAP's /reconcile to a BPP
+      tags:
+      - reconciliation
+  /api/v1/request-status:
+    post:
+      consumes:
+      - application/json
+      description: 'Sets the transaction status to STATUS_SENT and sends Beckn status
+        with the latest contract via onix-bap. The answer arrives via /api/webhook/on_status,
+        which moves the status on according to the contract''s state. The bearer token
+        is optional: without one the request is served anonymously; one that fails
+        verification is rejected with 401.'
+      operationId: requestStatus
+      parameters:
+      - description: Request body
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/clientsvc.ClientRequestStatusRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Status request sent (status STATUS_SENT).
+          schema:
+            $ref: '#/definitions/clientsvc.ActionStatusResponse'
+        "400":
+          description: Request body missing, not JSON, or missing a required field.
+          schema:
+            $ref: '#/definitions/clientsvc.ErrorResponse'
+        "401":
+          description: A bearer token was sent but failed verification (no token is
+            fine).
+          schema:
+            $ref: '#/definitions/clientsvc.ErrorResponse'
+        "500":
+          description: Transaction or snapshot not found, database error, or the adapter
+            call failed / returned non-200 (the error text says which).
+          schema:
+            $ref: '#/definitions/clientsvc.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Ask the BPP for status (Beckn status)
+      tags:
+      - order actions
+  /api/v1/return-items:
+    post:
+      consumes:
+      - application/json
+      description: 'Checks each item against its offer''s return policy (returns allowed,
+        order delivered, still inside the return window counted from delivery), lowers
+        the returned quantities (or closes the commitments), adds a RETURN performance
+        with status Return_Initiated and sends Beckn update via onix-bap (status UPDATE_SENT).
+        The BPP''s decision arrives via /api/webhook/on_update. The bearer token is
+        optional: without one the request is served anonymously; one that fails verification
+        is rejected with 401.'
+      operationId: returnItems
+      parameters:
+      - description: Request body
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/clientsvc.ClientReturnItemsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Update sent.
+          schema:
+            $ref: '#/definitions/clientsvc.ReturnItemsResponse'
+        "400":
+          description: Invalid body, or any failure while validating or sending (unknown
+            commitment, not returnable, window closed, too many units, adapter failure).
+            All errors are reported as 400.
+          schema:
+            $ref: '#/definitions/clientsvc.ErrorResponse'
+        "401":
+          description: A bearer token was sent but failed verification (no token is
+            fine).
+          schema:
+            $ref: '#/definitions/clientsvc.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Return some or all delivered items
+      tags:
+      - order actions
+  /api/v1/select:
+    post:
+      consumes:
+      - application/json
+      description: 'Creates a new transaction (status SELECT_SENT, owned by the logged-in
+        buyer if any) and sends a Beckn select built from the items to onix-bap. The
+        BPP is taken from the first item''s bpp_id/bpp_uri, falling back to server
+        config; the quote arrives later via /api/webhook/on_select (status QUOTE_RECEIVED).
+        The bearer token is optional: without one the request is served anonymously;
+        one that fails verification is rejected with 401.'
+      operationId: select
+      parameters:
+      - description: Request body
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/clientsvc.ClientSelectRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Select sent and ACKed by the adapter.
+          schema:
+            $ref: '#/definitions/clientsvc.SelectResponse'
+        "400":
+          description: Request body missing, not JSON, or missing a required field.
+          schema:
+            $ref: '#/definitions/clientsvc.ErrorResponse'
+        "401":
+          description: A bearer token was sent but failed verification (no token is
+            fine).
+          schema:
+            $ref: '#/definitions/clientsvc.ErrorResponse'
+        "500":
+          description: Building the message failed (e.g. an empty items array) or
+            the adapter call failed/returned non-200.
+          schema:
+            $ref: '#/definitions/clientsvc.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Start an order (Beckn select)
+      tags:
+      - orders
+  /api/v1/status/{id}:
+    get:
+      description: 'Reads the transaction''s current status and latest contract snapshot
+        from the BAP database (no Beckn call; see POST /api/v1/request-status for
+        that). Not scoped to the buyer: any transaction id resolves, with or without
+        a token. The bearer token is optional: without one the request is served anonymously;
+        one that fails verification is rejected with 401.'
+      operationId: getTransactionStatus
+      parameters:
+      - description: Transaction id (UUID) returned by POST /api/v1/select.
+        format: uuid
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Current state.
+          schema:
+            $ref: '#/definitions/clientsvc.ClientStatusResponse'
+        "401":
+          description: A bearer token was sent but failed verification (no token is
+            fine).
+          schema:
+            $ref: '#/definitions/clientsvc.ErrorResponse'
+        "404":
+          description: Unknown or malformed transaction id.
+          schema:
+            $ref: '#/definitions/clientsvc.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Poll a transaction's local state
+      tags:
+      - orders
+  /api/v1/support:
+    post:
+      consumes:
+      - application/json
+      description: 'Sends Beckn support with support.orderId (defaults to the transaction
+        id) and support.descriptor.shortDesc = description, and sets the status to
+        SUPPORT_SENT. The answer arrives via /api/webhook/on_support. The bearer token
+        is optional: without one the request is served anonymously; one that fails
+        verification is rejected with 401.'
+      operationId: requestSupport
+      parameters:
+      - description: Request body
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/clientsvc.ClientSupportRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Support request sent (status SUPPORT_SENT).
+          schema:
+            $ref: '#/definitions/clientsvc.ActionStatusResponse'
+        "400":
+          description: Request body missing, not JSON, or missing a required field.
+          schema:
+            $ref: '#/definitions/clientsvc.ErrorResponse'
+        "401":
+          description: A bearer token was sent but failed verification (no token is
+            fine).
+          schema:
+            $ref: '#/definitions/clientsvc.ErrorResponse'
+        "500":
+          description: Transaction or snapshot not found, database error, or the adapter
+            call failed / returned non-200 (the error text says which).
+          schema:
+            $ref: '#/definitions/clientsvc.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Raise a support request (Beckn support)
+      tags:
+      - order actions
+  /api/v1/update:
+    post:
+      consumes:
+      - application/json
+      description: 'Sends the given contract as-is as Beckn update via onix-bap and
+        sets the status to UPDATE_SENT. The BPP''s answer arrives via /api/webhook/on_update.
+        The bearer token is optional: without one the request is served anonymously;
+        one that fails verification is rejected with 401.'
+      operationId: updateOrder
+      parameters:
+      - description: Request body
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/clientsvc.ClientUpdateRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Update sent (status UPDATE_SENT).
+          schema:
+            $ref: '#/definitions/clientsvc.ActionStatusResponse'
+        "400":
+          description: Request body missing, not JSON, or missing a required field.
+          schema:
+            $ref: '#/definitions/clientsvc.ErrorResponse'
+        "401":
+          description: A bearer token was sent but failed verification (no token is
+            fine).
+          schema:
+            $ref: '#/definitions/clientsvc.ErrorResponse'
+        "500":
+          description: Transaction or snapshot not found, database error, or the adapter
+            call failed / returned non-200 (the error text says which).
+          schema:
+            $ref: '#/definitions/clientsvc.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Send a raw contract update (Beckn update)
+      tags:
+      - order actions
+  /api/webhook/on_cancel:
+    post:
+      consumes:
+      - application/json
+      description: The BPP's answer to cancel. Asynchronously sets the transaction
+        status to CANCELLED (unconditionally), stores the on_cancel snapshot and logs
+        the message. The adapter has already verified the Beckn signature; no auth.
+      operationId: webhookOnCancel
+      parameters:
+      - description: Beckn on_cancel request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/server.BecknContractRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Synchronous ACK; the message is processed asynchronously afterwards.
+            The context is echoed with action set to on_cancel.
+          schema:
+            $ref: '#/definitions/server.BecknAckResponse'
+        "400":
+          description: 'NACK: the body is not valid JSON or does not match the expected
+            types. Context fields are empty strings except action.'
+          schema:
+            $ref: '#/definitions/server.BecknAckResponse'
+      security: []
+      summary: Receive on_cancel
+      tags:
+      - beckn webhooks
+  /api/webhook/on_confirm:
+    post:
+      consumes:
+      - application/json
+      description: The BPP's confirmation. Asynchronously sets the transaction status
+        to CONFIRMED, stores the on_confirm contract snapshot and logs the message.
+        The adapter has already verified the Beckn signature; no auth.
+      operationId: webhookOnConfirm
+      parameters:
+      - description: Beckn on_confirm request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/server.BecknContractRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Synchronous ACK; the message is processed asynchronously afterwards.
+            The context is echoed with action set to on_confirm.
+          schema:
+            $ref: '#/definitions/server.BecknAckResponse'
+        "400":
+          description: 'NACK: the body is not valid JSON or does not match the expected
+            types. Context fields are empty strings except action.'
+          schema:
+            $ref: '#/definitions/server.BecknAckResponse'
+      security: []
+      summary: Receive on_confirm (active contract)
+      tags:
+      - beckn webhooks
+  /api/webhook/on_discover:
+    post:
+      consumes:
+      - application/json
+      description: Catalog results for a discover sent by this BAP (only used when
+        DISCOVER_METHOD=POST). The payload is handed to the GET /api/v1/discover request
+        waiting on the same transactionId (if it has not timed out) and written to
+        beckn_message_log as INBOUND; no transaction status change. The adapter has
+        already verified the Beckn signature; no auth.
+      operationId: webhookOnDiscover
+      parameters:
+      - description: Beckn on_discover request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/server.OnDiscoverRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Synchronous ACK; the message is processed asynchronously afterwards.
+            The context is echoed with action set to on_discover.
+          schema:
+            $ref: '#/definitions/server.BecknAckResponse'
+        "400":
+          description: 'NACK: the body is not valid JSON or does not match the expected
+            types. Context fields are empty strings except action.'
+          schema:
+            $ref: '#/definitions/server.BecknAckResponse'
+      security: []
+      summary: Receive on_discover (catalogs)
+      tags:
+      - beckn webhooks
+  /api/webhook/on_init:
+    post:
+      consumes:
+      - application/json
+      description: The BPP's answer to init, carrying the contract with its BPP-assigned
+        id. Asynchronously sets the transaction status to INIT_RECEIVED, stores the
+        on_init contract snapshot and logs the message. The adapter has already verified
+        the Beckn signature; no auth.
+      operationId: webhookOnInit
+      parameters:
+      - description: Beckn on_init request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/server.BecknContractRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Synchronous ACK; the message is processed asynchronously afterwards.
+            The context is echoed with action set to on_init.
+          schema:
+            $ref: '#/definitions/server.BecknAckResponse'
+        "400":
+          description: 'NACK: the body is not valid JSON or does not match the expected
+            types. Context fields are empty strings except action.'
+          schema:
+            $ref: '#/definitions/server.BecknAckResponse'
+      security: []
+      summary: Receive on_init (draft contract)
+      tags:
+      - beckn webhooks
+  /api/webhook/on_rate:
+    post:
+      consumes:
+      - application/json
+      description: The BPP's answer to rate. Only written to beckn_message_log; no
+        status change or snapshot. The adapter has already verified the Beckn signature;
+        no auth.
+      operationId: webhookOnRate
+      parameters:
+      - description: Beckn on_rate request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/server.OnRateRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Synchronous ACK; the message is processed asynchronously afterwards.
+            The context is echoed with action set to on_rate.
+          schema:
+            $ref: '#/definitions/server.BecknAckResponse'
+        "400":
+          description: 'NACK: the body is not valid JSON or does not match the expected
+            types. Context fields are empty strings except action.'
+          schema:
+            $ref: '#/definitions/server.BecknAckResponse'
+      security: []
+      summary: Receive on_rate
+      tags:
+      - beckn webhooks
+  /api/webhook/on_reconcile:
+    post:
+      consumes:
+      - application/json
+      description: A BPP's answer to a /reconcile this BAP sent. ACKs at once, then
+        in the background updates the OUTBOUND batch with the same context.messageId
+        (else transactionId) to AGREED or DISPUTED from the per-contract accords,
+        and stamps each contract's outcome. An unknown batch is only logged as an
+        error (the ACK has already been sent). No auth (signature verified by the
+        adapter).
+      operationId: webhookOnReconcile
+      parameters:
+      - description: ION /on_reconcile; only the fields shown are read.
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/reconcilesvc.Request'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Synchronous ACK echoing the request's context verbatim; processing
+            continues in the background.
+          schema:
+            $ref: '#/definitions/server.ReconcileAckResponse'
+        "400":
+          description: 'NACK: the body could not be read or is not a JSON object (no
+            context key).'
+          schema:
+            $ref: '#/definitions/server.ReconcileNackResponse'
+      security: []
+      summary: Receive a BPP's /on_reconcile
+      tags:
+      - beckn webhooks
+      - reconciliation
+  /api/webhook/on_select:
+    post:
+      consumes:
+      - application/json
+      description: The BPP's quoted contract. Asynchronously sets the transaction
+        status to QUOTE_RECEIVED, stores message.contract as the on_select contract
+        snapshot and logs the message. The adapter has already verified the Beckn
+        signature; no auth.
+      operationId: webhookOnSelect
+      parameters:
+      - description: Beckn on_select request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/server.BecknContractRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Synchronous ACK; the message is processed asynchronously afterwards.
+            The context is echoed with action set to on_select.
+          schema:
+            $ref: '#/definitions/server.BecknAckResponse'
+        "400":
+          description: 'NACK: the body is not valid JSON or does not match the expected
+            types. Context fields are empty strings except action.'
+          schema:
+            $ref: '#/definitions/server.BecknAckResponse'
+      security: []
+      summary: Receive on_select (quote)
+      tags:
+      - beckn webhooks
+  /api/webhook/on_status:
+    post:
+      consumes:
+      - application/json
+      description: The current contract from the BPP (solicited or unsolicited, e.g.
+        fulfillment progress). Asynchronously follows the contract's status.code (ACTIVE
+        -> CONFIRMED, CANCELLED -> CANCELLED, COMPLETE -> COMPLETE; any other code
+        leaves the status unchanged), stores the on_status snapshot and logs the message.
+        The adapter has already verified the Beckn signature; no auth.
+      operationId: webhookOnStatus
+      parameters:
+      - description: Beckn on_status request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/server.BecknContractRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Synchronous ACK; the message is processed asynchronously afterwards.
+            The context is echoed with action set to on_status.
+          schema:
+            $ref: '#/definitions/server.BecknAckResponse'
+        "400":
+          description: 'NACK: the body is not valid JSON or does not match the expected
+            types. Context fields are empty strings except action.'
+          schema:
+            $ref: '#/definitions/server.BecknAckResponse'
+      security: []
+      summary: Receive on_status (contract state)
+      tags:
+      - beckn webhooks
+  /api/webhook/on_support:
+    post:
+      consumes:
+      - application/json
+      description: The BPP's answer to support. Only written to beckn_message_log;
+        no status change or snapshot. The adapter has already verified the Beckn signature;
+        no auth.
+      operationId: webhookOnSupport
+      parameters:
+      - description: Beckn on_support request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/server.OnSupportRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Synchronous ACK; the message is processed asynchronously afterwards.
+            The context is echoed with action set to on_support.
+          schema:
+            $ref: '#/definitions/server.BecknAckResponse'
+        "400":
+          description: 'NACK: the body is not valid JSON or does not match the expected
+            types. Context fields are empty strings except action.'
+          schema:
+            $ref: '#/definitions/server.BecknAckResponse'
+      security: []
+      summary: Receive on_support
+      tags:
+      - beckn webhooks
+  /api/webhook/on_update:
+    post:
+      consumes:
+      - application/json
+      description: The BPP's answer to update (partial cancellation, return decision,
+        other changes). Asynchronously follows the contract's status.code like on_status
+        (ACTIVE -> CONFIRMED, CANCELLED -> CANCELLED, COMPLETE -> COMPLETE, otherwise
+        unchanged), stores the on_update snapshot and logs the message. The adapter
+        has already verified the Beckn signature; no auth.
+      operationId: webhookOnUpdate
+      parameters:
+      - description: Beckn on_update request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/server.BecknContractRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Synchronous ACK; the message is processed asynchronously afterwards.
+            The context is echoed with action set to on_update.
+          schema:
+            $ref: '#/definitions/server.BecknAckResponse'
+        "400":
+          description: 'NACK: the body is not valid JSON or does not match the expected
+            types. Context fields are empty strings except action.'
+          schema:
+            $ref: '#/definitions/server.BecknAckResponse'
+      security: []
+      summary: Receive on_update
+      tags:
+      - beckn webhooks
+  /api/webhook/reconcile:
+    post:
+      consumes:
+      - application/json
+      description: 'ION reconciliation extension. ACKs at once, then in the background
+        checks each contract''s settlement figures against this BAP''s own copy (contracts
+        not yet past their settlement window are answered accord: false with code
+        SETTLEMENT_WINDOW_NOT_REACHED), records the batch as INBOUND in reconciliations,
+        stamps each contract''s outcome on a new snapshot and sends /on_reconcile
+        back via onix-bap. No auth (signature verified by the adapter).'
+      operationId: webhookReconcile
+      parameters:
+      - description: ION /reconcile (ion-specs core/api/v2.0.0/ion-additional.yaml);
+          only the fields shown are read.
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/reconcilesvc.Request'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Synchronous ACK echoing the request's context verbatim; processing
+            continues in the background.
+          schema:
+            $ref: '#/definitions/server.ReconcileAckResponse'
+        "400":
+          description: 'NACK: the body could not be read or is not a JSON object (no
+            context key).'
+          schema:
+            $ref: '#/definitions/server.ReconcileNackResponse'
+      security: []
+      summary: Receive a BPP's /reconcile (settlement batch)
+      tags:
+      - beckn webhooks
+      - reconciliation
+  /health:
+    get:
+      description: Returns a static OK. Does not check the database. Not reachable
+        through the bap-frontend nginx proxy (it proxies /api only).
+      operationId: getHealth
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Service is up.
+          schema:
+            $ref: '#/definitions/server.HealthResponse'
+      security: []
+      summary: Health check
+      tags:
+      - health
+securityDefinitions:
+  BearerAuth:
+    description: Optional Zitadel access token, as "Bearer <token>". Without one,
+      buyer-scoped endpoints (orders, messages) return empty or 401; an invalid token
+      is rejected with 401.
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"

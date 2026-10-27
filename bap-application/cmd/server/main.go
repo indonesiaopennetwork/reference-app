@@ -19,6 +19,16 @@ import (
 	"github.com/ion/winroom/bap/internal/server"
 )
 
+// API documentation (swag) -- regenerate docs/api/bap.yaml with `task docs:api`.
+//
+//	@title						BAP API
+//	@version					1.0
+//	@description				Buyer backend (bap-application). /api/v1: client API for bap-frontend; each order action sends a Beckn request through onix-bap and the BPP's answer arrives later on /api/webhook/on_*. /api/webhook: Beckn callbacks delivered by onix-bap's receiver (signature already verified; each answers with an immediate ACK and is processed asynchronously). See docs/architecture.md.
+//	@BasePath					/
+//	@securityDefinitions.apikey	BearerAuth
+//	@in							header
+//	@name						Authorization
+//	@description				Optional Zitadel access token, as "Bearer <token>". Without one, buyer-scoped endpoints (orders, messages) return empty or 401; an invalid token is rejected with 401.
 func main() {
 	if err := godotenv.Load(); err != nil {
 		fmt.Fprintln(os.Stderr, "no .env file found, using process environment")

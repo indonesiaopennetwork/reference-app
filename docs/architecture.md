@@ -7,7 +7,7 @@ Everything here is mapped from the code and config (`docker-compose.yml`, `confi
 Related docs:
 
 - Database schemas, every table and column → [db/README.md](db/README.md)
-- Every HTTP endpoint (OpenAPI 3) → [api/README.md](api/README.md)
+- Every HTTP endpoint (Swagger, generated with `task docs:api`) → [api/README.md](api/README.md)
 - Step-by-step local setup → [INFRA_SETUP.md](../INFRA_SETUP.md); step-by-step cloud setup and gotchas → [terraform/README.md](../terraform/README.md); CI/CD setup → [deploy-github-actions.md](deploy-github-actions.md)
 
 ## Contents
@@ -178,9 +178,9 @@ Solid arrows are API calls; dotted arrows are page navigation, caches, and key a
 | `scripts/` | `render-onix-config.sh`, `setup-zitadel.sh` / `setup-zitadel-cloud.sh`, `seed-secrets.sh`, `build-and-push.sh`, `zitadel-branding.sh`, `mock-cds.py`, `gen_crc_fields.py`, `merge-tbls-docs.sh`. |
 | `terraform/` | Everything on GCP (see [9.2](#92-cloud-architecture-gcp)). |
 | `docker-compose.yml` | The full local stack. |
-| `Taskfile.yaml` | Shortcuts (`task <name>`): `local:up/down`, `deploy:*`, `redeploy:*`, `sign-dedi-files`, `deploy-dedi-files`, `docs:db`. |
+| `Taskfile.yaml` | Shortcuts (`task <name>`): `local:up/down`, `deploy:*`, `redeploy:*`, `sign-dedi-files`, `deploy-dedi-files`, `docs:db`, `docs:api`. |
 | `.github/workflows/deploy.yml` | CI/CD: deploys changed services on every push to `main`. |
-| `docs/` | This document, `api/` (OpenAPI), `db/` (schema docs), `deploy-github-actions.md`, `specs/`. |
+| `docs/` | This document, `api/` (Swagger specs, `task docs:api`), `db/` (schema docs, `task docs:db`), `deploy-github-actions.md`, `specs/`. |
 
 ---
 
@@ -631,7 +631,7 @@ flowchart LR
 | Stop (data kept) | `task local:down` |
 | Wipe all data and start fresh | `docker compose down -v`, then `task local:up` |
 | Check it's up | `curl localhost:8083/health` (bap), `curl localhost:8080/health` (bpp), open `http://localhost:3002` |
-| Regenerate DB docs | `task docs:db` |
+| Regenerate DB docs / API docs | `task docs:db` / `task docs:api` |
 
 After rebuilding a backend, restart its frontend too (`docker compose restart frontend bpp-frontend`), otherwise nginx returns 502.
 

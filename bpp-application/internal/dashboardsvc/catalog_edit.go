@@ -43,6 +43,21 @@ func (h *Handler) editableCatalog(c *gin.Context, catalogID string) bool {
 
 // HandleGetResource (GET /catalogs/:id/resources/:rid) returns one resource
 // in its publish shape.
+//
+//	@Summary		Get one product in publish shape
+//	@ID			getCatalogResource
+//	@Description	Returns one resource of a catalog the seller owns, in the shape it is published in.
+//	@Tags			catalogs
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id	path	string	true	"Catalog id, without the <bppId>/ prefix"
+//	@Param			rid	path	string	true	"Resource (product) id"
+//	@Success		200	{object}	ResourceResponse	"Resource"
+//	@Failure		401	{object}	auth.ErrorResponse	"Bearer token missing (missing bearer token), or invalid or expired (invalid or expired token)"
+//	@Failure		403	{object}	auth.NoProviderResponse	"Valid token, but no seller profile (users row) for it; call POST /api/v1/auth/bootstrap"
+//	@Failure		404	{object}	auth.ErrorResponse	"catalog not found, or resource not found"
+//	@Failure		500	{object}	auth.ErrorResponse	"Database or internal error (raw error text)"
+//	@Router			/api/v1/catalogs/{id}/resources/{rid} [get]
 func (h *Handler) HandleGetResource(c *gin.Context) {
 	catalogID, rid := c.Param("id"), c.Param("rid")
 	if !h.ownedCatalog(c, catalogID) {
@@ -73,6 +88,24 @@ func (h *Handler) HandleGetResource(c *gin.Context) {
 // HandleUpdateResource (PUT /catalogs/:id/resources/:rid) replaces a
 // resource's descriptor and attributes (its availability among them). The id
 // can't change.
+//
+//	@Summary		Replace a product
+//	@ID			updateCatalogResource
+//	@Description	Replaces the resource's descriptor (name, code, descriptions, media) and resourceAttributes, including availability. The id in the body is ignored; rid from the path is used. Publish again for the change to reach the network.
+//	@Tags			catalogs
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id	path	string	true	"Catalog id, without the <bppId>/ prefix"
+//	@Param			rid	path	string	true	"Resource (product) id"
+//	@Param			body	body	catalog.Resource	true	"Resource in publish shape"
+//	@Success		200	{object}	StatusUpdatedResponse	"Updated"
+//	@Failure		400	{object}	auth.ErrorResponse	"Invalid JSON, or descriptor.name is empty (resource name is required)"
+//	@Failure		401	{object}	auth.ErrorResponse	"Bearer token missing (missing bearer token), or invalid or expired (invalid or expired token)"
+//	@Failure		403	{object}	auth.NoProviderResponse	"Valid token, but no seller profile (users row) for it; call POST /api/v1/auth/bootstrap"
+//	@Failure		404	{object}	auth.ErrorResponse	"catalog not found, or resource not found"
+//	@Failure		500	{object}	auth.ErrorResponse	"Database or internal error (raw error text)"
+//	@Router			/api/v1/catalogs/{id}/resources/{rid} [put]
 func (h *Handler) HandleUpdateResource(c *gin.Context) {
 	catalogID, rid := c.Param("id"), c.Param("rid")
 	var req catalog.Resource
@@ -122,6 +155,21 @@ func (h *Handler) HandleUpdateResource(c *gin.Context) {
 }
 
 // HandleDeleteOffer (DELETE /catalogs/:id/offers/:oid) soft-deletes an offer.
+//
+//	@Summary		Soft-delete an offer
+//	@ID			deleteCatalogOffer
+//	@Description	Soft-deletes the offer (sets deleted_at). Nothing is sent to the network; the next publish leaves the offer out.
+//	@Tags			catalogs
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id	path	string	true	"Catalog id, without the <bppId>/ prefix"
+//	@Param			oid	path	string	true	"Offer id"
+//	@Success		200	{object}	StatusDeletedResponse	"Deleted"
+//	@Failure		401	{object}	auth.ErrorResponse	"Bearer token missing (missing bearer token), or invalid or expired (invalid or expired token)"
+//	@Failure		403	{object}	auth.NoProviderResponse	"Valid token, but no seller profile (users row) for it; call POST /api/v1/auth/bootstrap"
+//	@Failure		404	{object}	auth.ErrorResponse	"catalog not found, or offer not found"
+//	@Failure		500	{object}	auth.ErrorResponse	"Database or internal error (raw error text)"
+//	@Router			/api/v1/catalogs/{id}/offers/{oid} [delete]
 func (h *Handler) HandleDeleteOffer(c *gin.Context) {
 	catalogID, oid := c.Param("id"), c.Param("oid")
 	if !h.ownedCatalog(c, catalogID) {
@@ -144,6 +192,21 @@ func (h *Handler) HandleDeleteOffer(c *gin.Context) {
 
 // HandleGetOffer (GET /catalogs/:id/offers/:oid) returns one offer in its
 // publish shape, with its considerations (prices).
+//
+//	@Summary		Get one offer in publish shape
+//	@ID			getCatalogOffer
+//	@Description	Returns one offer of a catalog the seller owns, with its considerations (prices). offerAttributes are returned as stored; default terms are not filled in.
+//	@Tags			catalogs
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id	path	string	true	"Catalog id, without the <bppId>/ prefix"
+//	@Param			oid	path	string	true	"Offer id"
+//	@Success		200	{object}	OfferResponse	"Offer"
+//	@Failure		401	{object}	auth.ErrorResponse	"Bearer token missing (missing bearer token), or invalid or expired (invalid or expired token)"
+//	@Failure		403	{object}	auth.NoProviderResponse	"Valid token, but no seller profile (users row) for it; call POST /api/v1/auth/bootstrap"
+//	@Failure		404	{object}	auth.ErrorResponse	"catalog not found, or offer not found"
+//	@Failure		500	{object}	auth.ErrorResponse	"Database or internal error (raw error text)"
+//	@Router			/api/v1/catalogs/{id}/offers/{oid} [get]
 func (h *Handler) HandleGetOffer(c *gin.Context) {
 	catalogID, oid := c.Param("id"), c.Param("oid")
 	if !h.ownedCatalog(c, catalogID) {
@@ -198,6 +261,24 @@ func (h *Handler) HandleGetOffer(c *gin.Context) {
 
 // HandleUpdateOffer (PUT /catalogs/:id/offers/:oid) replaces an offer's
 // descriptor, resources, attributes, validity and considerations (prices).
+//
+//	@Summary		Replace an offer
+//	@ID			updateCatalogOffer
+//	@Description	Replaces the offer's descriptor, resourceIds, offerAttributes and validity, and replaces all of its considerations. Missing terms are filled with this BPP's defaults. The offer's provider link is not changed. Publish again for the change to reach the network.
+//	@Tags			catalogs
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id	path	string	true	"Catalog id, without the <bppId>/ prefix"
+//	@Param			oid	path	string	true	"Offer id"
+//	@Param			body	body	catalog.Offer	true	"Offer with its considerations"
+//	@Success		200	{object}	StatusUpdatedResponse	"Updated"
+//	@Failure		400	{object}	auth.ErrorResponse	"Invalid JSON, or descriptor.name or resourceIds is empty (offer name and at least one resource are required)"
+//	@Failure		401	{object}	auth.ErrorResponse	"Bearer token missing (missing bearer token), or invalid or expired (invalid or expired token)"
+//	@Failure		403	{object}	auth.NoProviderResponse	"Valid token, but no seller profile (users row) for it; call POST /api/v1/auth/bootstrap"
+//	@Failure		404	{object}	auth.ErrorResponse	"catalog not found, or offer not found"
+//	@Failure		500	{object}	auth.ErrorResponse	"Database or internal error (raw error text)"
+//	@Router			/api/v1/catalogs/{id}/offers/{oid} [put]
 func (h *Handler) HandleUpdateOffer(c *gin.Context) {
 	catalogID, oid := c.Param("id"), c.Param("oid")
 	var req catalog.Offer

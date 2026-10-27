@@ -28,6 +28,18 @@ func NewInitHandler(pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.Logge
 }
 
 // Handle is the Gin handler for POST /beckn/init.
+//
+//	@Summary		Beckn init
+//	@ID			becknInit
+//	@Description	Returns a synchronous ACK, then works asynchronously: adds the seller's payout terms and settlement account to the contract, creates the DRAFT contract for this transaction (or updates the existing one) with its participants, commitments, considerations and performances, and sends on_init echoing the contract with its assigned id.
+//	@Tags			beckn webhooks
+//	@Accept			json
+//	@Produce		json
+//	@Param			body	body	server.BecknWebhookRequest	true	"Beckn message forwarded by onix-bpp"
+//	@Success		200	{object}	server.BecknAckResponse	"Synchronous ACK; context echoes the inbound context fields"
+//	@Failure		400	{object}	server.BecknAckResponse	"NACK: body not decodable into the request type (context then all empty strings), or context.bapUri empty (context echoed). No reason field"
+//	@Security
+//	@Router			/api/webhook/init [post]
 func (h *InitHandler) Handle(c *gin.Context) {
 	var req InitRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

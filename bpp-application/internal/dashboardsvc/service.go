@@ -46,6 +46,18 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.Logger) *
 
 // HandleStats returns key metrics: active/pending/today orders, resource/offer counts,
 // and message funnel counts (select → init → confirm).
+//
+//	@Summary		Dashboard key metrics
+//	@ID			getDashboardStats
+//	@Description	Order counts (ACTIVE, DRAFT, created in the last 24 hours), resource and offer counts, the select/init/confirm message funnel, and how many products are published as OUT_OF_STOCK or LOW_STOCK. Order and inventory counts are scoped to the seller; the funnel counts come from beckn_message_log and are filtered only by bpp_id, not by provider.
+//	@Tags			dashboard
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Success		200	{object}	DashboardStatsResponse	"Stats"
+//	@Failure		401	{object}	auth.ErrorResponse	"Bearer token missing (missing bearer token), or invalid or expired (invalid or expired token)"
+//	@Failure		403	{object}	auth.NoProviderResponse	"Valid token, but no seller profile (users row) for it; call POST /api/v1/auth/bootstrap"
+//	@Failure		500	{object}	auth.ErrorResponse	"Database or internal error (raw error text)"
+//	@Router			/api/v1/dashboard/stats [get]
 func (h *Handler) HandleStats(c *gin.Context) {
 	q := sqlc.New(h.pool)
 	ctx := c.Request.Context()
@@ -106,6 +118,20 @@ func (h *Handler) HandleStats(c *gin.Context) {
 // ---------------------------------------------------------------------------
 
 // HandleListOrders returns a paginated list of contracts.
+//
+//	@Summary		List the seller's orders (contracts)
+//	@ID			listOrders
+//	@Description	Paginated list of the seller's contracts, newest first, with the order's offer descriptor, fulfillment progress and latest return outcome.
+//	@Tags			orders
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			page	query	int	false	"1-based page number; values that are not numbers or below 1 become 1"	default(1) minimum(1)
+//	@Param			limit	query	int	false	"Page size; values that are not numbers or outside 1..100 fall back to 20"	default(20) minimum(1) maximum(100)
+//	@Success		200	{object}	OrderListResponse	"Page of orders"
+//	@Failure		401	{object}	auth.ErrorResponse	"Bearer token missing (missing bearer token), or invalid or expired (invalid or expired token)"
+//	@Failure		403	{object}	auth.NoProviderResponse	"Valid token, but no seller profile (users row) for it; call POST /api/v1/auth/bootstrap"
+//	@Failure		500	{object}	auth.ErrorResponse	"Database or internal error (raw error text)"
+//	@Router			/api/v1/orders [get]
 func (h *Handler) HandleListOrders(c *gin.Context) {
 	page, limit := parsePagination(c)
 	q := sqlc.New(h.pool)
@@ -143,6 +169,21 @@ func (h *Handler) HandleListOrders(c *gin.Context) {
 
 // HandleGetOrder returns the full detail for a single contract, including
 // commitments and considerations.
+//
+//	@Summary		Get one order with commitments and considerations
+//	@ID			getOrder
+//	@Description	Returns one of the seller's contracts with its commitments (and their offers) and its considerations.
+//	@Tags			orders
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id	path	string	true	"Contract (order) id"	format(uuid)
+//	@Success		200	{object}	OrderDetailResponse	"Order detail"
+//	@Failure		400	{object}	auth.ErrorResponse	"id is not a UUID (invalid contract id)"
+//	@Failure		401	{object}	auth.ErrorResponse	"Bearer token missing (missing bearer token), or invalid or expired (invalid or expired token)"
+//	@Failure		403	{object}	auth.NoProviderResponse	"Valid token, but no seller profile (users row) for it; call POST /api/v1/auth/bootstrap"
+//	@Failure		404	{object}	auth.ErrorResponse	"No such contract for this seller (order not found)"
+//	@Failure		500	{object}	auth.ErrorResponse	"Database or internal error (raw error text)"
+//	@Router			/api/v1/orders/{id} [get]
 func (h *Handler) HandleGetOrder(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -188,6 +229,20 @@ func (h *Handler) HandleGetOrder(c *gin.Context) {
 // ---------------------------------------------------------------------------
 
 // HandleListResources returns a paginated list of resources in the BPP's inventory.
+//
+//	@Summary		List the seller's resources (products)
+//	@ID			listInventoryResources
+//	@Description	Paginated list of the seller's resources, read straight from the resources table.
+//	@Tags			inventory
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			page	query	int	false	"1-based page number; values that are not numbers or below 1 become 1"	default(1) minimum(1)
+//	@Param			limit	query	int	false	"Page size; values that are not numbers or outside 1..100 fall back to 20"	default(20) minimum(1) maximum(100)
+//	@Success		200	{object}	ResourceListResponse	"Page of resources"
+//	@Failure		401	{object}	auth.ErrorResponse	"Bearer token missing (missing bearer token), or invalid or expired (invalid or expired token)"
+//	@Failure		403	{object}	auth.NoProviderResponse	"Valid token, but no seller profile (users row) for it; call POST /api/v1/auth/bootstrap"
+//	@Failure		500	{object}	auth.ErrorResponse	"Database or internal error (raw error text)"
+//	@Router			/api/v1/inventory/resources [get]
 func (h *Handler) HandleListResources(c *gin.Context) {
 	page, limit := parsePagination(c)
 	q := sqlc.New(h.pool)
@@ -224,6 +279,20 @@ func (h *Handler) HandleListResources(c *gin.Context) {
 // ---------------------------------------------------------------------------
 
 // HandleListOffers returns a paginated list of offers with their considerations.
+//
+//	@Summary		List the seller's offers
+//	@ID			listInventoryOffers
+//	@Description	Paginated list of the seller's offers.
+//	@Tags			inventory
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			page	query	int	false	"1-based page number; values that are not numbers or below 1 become 1"	default(1) minimum(1)
+//	@Param			limit	query	int	false	"Page size; values that are not numbers or outside 1..100 fall back to 20"	default(20) minimum(1) maximum(100)
+//	@Success		200	{object}	OfferListResponse	"Page of offers"
+//	@Failure		401	{object}	auth.ErrorResponse	"Bearer token missing (missing bearer token), or invalid or expired (invalid or expired token)"
+//	@Failure		403	{object}	auth.NoProviderResponse	"Valid token, but no seller profile (users row) for it; call POST /api/v1/auth/bootstrap"
+//	@Failure		500	{object}	auth.ErrorResponse	"Database or internal error (raw error text)"
+//	@Router			/api/v1/inventory/offers [get]
 func (h *Handler) HandleListOffers(c *gin.Context) {
 	page, limit := parsePagination(c)
 	q := sqlc.New(h.pool)
@@ -260,6 +329,19 @@ func (h *Handler) HandleListOffers(c *gin.Context) {
 // ---------------------------------------------------------------------------
 
 // HandleListMessages returns recent Beckn protocol messages from the audit log.
+//
+//	@Summary		Recent Beckn messages
+//	@ID			listMessages
+//	@Description	The most recent beckn_message_log entries (inbound and outbound) for the seller.
+//	@Tags			dashboard
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			limit	query	int	false	"Maximum number of rows; values that are not numbers or outside 1..200 fall back to 50"	default(50) minimum(1) maximum(200)
+//	@Success		200	{object}	MessageListResponse	"Messages"
+//	@Failure		401	{object}	auth.ErrorResponse	"Bearer token missing (missing bearer token), or invalid or expired (invalid or expired token)"
+//	@Failure		403	{object}	auth.NoProviderResponse	"Valid token, but no seller profile (users row) for it; call POST /api/v1/auth/bootstrap"
+//	@Failure		500	{object}	auth.ErrorResponse	"Database or internal error (raw error text)"
+//	@Router			/api/v1/messages [get]
 func (h *Handler) HandleListMessages(c *gin.Context) {
 	limitStr := c.DefaultQuery("limit", "50")
 	limit, _ := strconv.Atoi(limitStr)
@@ -288,6 +370,22 @@ func (h *Handler) HandleListMessages(c *gin.Context) {
 // GET /api/v1/support-tickets
 // ---------------------------------------------------------------------------
 
+// HandleListSupportTickets returns a page of the support tickets BAPs raised
+// (via /support) on the seller's orders.
+//
+//	@Summary		List support tickets
+//	@ID			listSupportTickets
+//	@Description	Paginated list of support tickets raised by BAPs through /support on the seller's orders.
+//	@Tags			dashboard
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			page	query	int	false	"1-based page number; values that are not numbers or below 1 become 1"	default(1) minimum(1)
+//	@Param			limit	query	int	false	"Page size; values that are not numbers or outside 1..100 fall back to 20"	default(20) minimum(1) maximum(100)
+//	@Success		200	{object}	SupportTicketListResponse	"Page of tickets"
+//	@Failure		401	{object}	auth.ErrorResponse	"Bearer token missing (missing bearer token), or invalid or expired (invalid or expired token)"
+//	@Failure		403	{object}	auth.NoProviderResponse	"Valid token, but no seller profile (users row) for it; call POST /api/v1/auth/bootstrap"
+//	@Failure		500	{object}	auth.ErrorResponse	"Database or internal error (raw error text)"
+//	@Router			/api/v1/support-tickets [get]
 func (h *Handler) HandleListSupportTickets(c *gin.Context) {
 	page, limit := parsePagination(c)
 	q := sqlc.New(h.pool)
@@ -376,6 +474,22 @@ func (h *Handler) HandleListSupportTickets(c *gin.Context) {
 // GET /api/v1/ratings
 // ---------------------------------------------------------------------------
 
+// HandleListRatings returns a page of the ratings received (via /rate) on the
+// seller's orders.
+//
+//	@Summary		List ratings
+//	@ID			listRatings
+//	@Description	Paginated list of ratings received through /rate on the seller's orders.
+//	@Tags			dashboard
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			page	query	int	false	"1-based page number; values that are not numbers or below 1 become 1"	default(1) minimum(1)
+//	@Param			limit	query	int	false	"Page size; values that are not numbers or outside 1..100 fall back to 20"	default(20) minimum(1) maximum(100)
+//	@Success		200	{object}	RatingListResponse	"Page of ratings"
+//	@Failure		401	{object}	auth.ErrorResponse	"Bearer token missing (missing bearer token), or invalid or expired (invalid or expired token)"
+//	@Failure		403	{object}	auth.NoProviderResponse	"Valid token, but no seller profile (users row) for it; call POST /api/v1/auth/bootstrap"
+//	@Failure		500	{object}	auth.ErrorResponse	"Database or internal error (raw error text)"
+//	@Router			/api/v1/ratings [get]
 func (h *Handler) HandleListRatings(c *gin.Context) {
 	page, limit := parsePagination(c)
 	q := sqlc.New(h.pool)
@@ -509,6 +623,24 @@ func (h *Handler) markDelivered(ctx context.Context, contractID uuid.UUID) {
 }
 
 // HandleUpdateFulfillmentStatus updates the contract performance status
+//
+//	@Summary		Set an order's fulfillment status
+//	@ID			updateFulfillmentStatus
+//	@Description	Writes the status to contract_performances and into the stored contract's first non-RETURN performance, then sends an unsolicited on_status to the BAP through the onix-bpp caller (synchronously, 30 s timeout; errors are only logged) and logs it to beckn_message_log.
+//	@Description	Delivered stamps delivered_at (starting the return window) and can make the contract COMPLETE. A background sweep (every 2 s) moves Shipped orders to Delivered after 10 s and sends on_status again. Statuses starting with Return are rejected; the offer's return policy sets them.
+//	@Tags			orders
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id	path	string	true	"Contract (order) id"	format(uuid)
+//	@Param			body	body	FulfillmentStatusRequest	true	"New fulfillment status"
+//	@Success		200	{object}	StatusUpdatedResponse	"Updated"
+//	@Failure		400	{object}	auth.ErrorResponse	"id is not a UUID, status is missing, or status starts with Return (return status is set by the return policy, not manually)"
+//	@Failure		401	{object}	auth.ErrorResponse	"Bearer token missing (missing bearer token), or invalid or expired (invalid or expired token)"
+//	@Failure		403	{object}	auth.NoProviderResponse	"Valid token, but no seller profile (users row) for it; call POST /api/v1/auth/bootstrap"
+//	@Failure		404	{object}	auth.ErrorResponse	"No such contract for this seller (order not found)"
+//	@Failure		500	{object}	auth.ErrorResponse	"Database or internal error (raw error text)"
+//	@Router			/api/v1/orders/{id}/fulfillment-status [put]
 func (h *Handler) HandleUpdateFulfillmentStatus(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {

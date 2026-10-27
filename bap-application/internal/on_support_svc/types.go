@@ -17,8 +17,8 @@ type BecknContext struct {
 }
 
 type OnSupportRequest struct {
-	Context BecknContext      `json:"context"`
-	Message OnSupportMessage  `json:"message"`
+	Context BecknContext     `json:"context"`
+	Message OnSupportMessage `json:"message"`
 }
 
 type OnSupportMessage struct {

@@ -9,8 +9,8 @@ import "github.com/ion/winroom/bpp/internal/settlement"
 type Summary struct {
 	BapID            string  `json:"bapId"`
 	BppID            string  `json:"bppId"`
-	Currency         string  `json:"currency"`
-	SettlementDate   string  `json:"settlementDate"`
+	Currency         string  `json:"currency" example:"IDR"`
+	SettlementDate   string  `json:"settlementDate" format:"date"`
 	ContractCount    int     `json:"contractCount"`
 	SettlementCount  int     `json:"settlementCount"`
 	TotalOrderAmount float64 `json:"totalOrderAmount"`
