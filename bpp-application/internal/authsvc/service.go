@@ -30,12 +30,14 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config, verifier *auth.Verifier)
 }
 
 type BootstrapRequest struct {
-	BusinessName string `json:"businessName" binding:"required"`
+	// Seller's business name. The provider id is provider-<slug> of this name.
+	BusinessName string `json:"businessName" binding:"required" example:"Toko Nusantara"`
 }
 
 type BootstrapResponse struct {
-	ProviderID string `json:"providerId"`
-	IsNew      bool   `json:"isNew"`
+	ProviderID string `json:"providerId" binding:"required" example:"provider-toko-nusantara"`
+	// True when this call created the provider and user rows.
+	IsNew bool `json:"isNew" binding:"required"`
 }
 
 // HandleBootstrap is called once per Zitadel identity, right after its
@@ -44,6 +46,21 @@ type BootstrapResponse struct {
 // on every login, not just the first). Otherwise it requires a
 // BootstrapRequest body and creates a new providers row + users row in one
 // transaction, per the "registration creates a new provider" decision.
+//
+//	@Summary		Create (or fetch) the seller profile for a Zitadel login
+//	@ID			bootstrapSeller
+//	@Description	Idempotent. If a users row already exists for the token's sub, returns its providerId with isNew false without reading the body. Otherwise requires businessName, fetches the email from Zitadel's userinfo endpoint, and creates a providers row (id provider-<slug of businessName>; a second seller with the same name collides and gets a 500) and a users row in one transaction.
+//	@Description	The /api/v1/auth group applies a CORS middleware allowing only LANDING_PAGE_ORIGIN (methods POST, OPTIONS; headers Authorization, Content-Type); an OPTIONS /api/v1/auth/bootstrap preflight is answered 204 before the token check.
+//	@Tags			auth
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			body	body		BootstrapRequest	false	"Required only when no seller profile exists yet for this identity"
+//	@Success		200		{object}	BootstrapResponse	"Existing or newly created seller profile"
+//	@Failure		400		{object}	auth.ErrorResponse	"New identity and the body is missing, invalid, or has no businessName (gin binding error text)"
+//	@Failure		401		{object}	auth.ErrorResponse	"Bearer token missing (missing bearer token), or invalid or expired (invalid or expired token)"
+//	@Failure		500		{object}	auth.ErrorResponse	"DB error, userinfo fetch failure (fetch userinfo: ...), or provider/user insert failure (create provider: ..., create user: ...)"
+//	@Router			/api/v1/auth/bootstrap [post]
 func (h *Handler) HandleBootstrap(c *gin.Context) {
 	ctx := c.Request.Context()
 	subject := auth.SubjectFromContext(c)

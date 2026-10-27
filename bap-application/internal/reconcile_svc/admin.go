@@ -66,6 +66,16 @@ type logEntry struct {
 // contracts still to reconcile (and which are due), what the PJP holds for
 // them, what agreed contracts release, and every batch sent or received;
 // plus the recent /reconcile and /on_reconcile messages, sent or received.
+//
+//	@Summary		Reconciliation overview
+//	@ID				getReconciliationOverview
+//	@Description	Per seller (BPP): the contracts still to reconcile (with due date, figures and whether they go in the next batch), what the PJP still holds, what agreed contracts release, and up to the 200 most recent batches (sent or received) overall; plus the 100 most recent /reconcile and /on_reconcile messages. Open: no login required.
+//	@Tags			reconciliation
+//	@Produce		json
+//	@Success		200 {object} ReconciliationOverviewResponse "Overview."
+//	@Failure		500 {object} clientsvc.ErrorResponse "Database error."
+//	@Security
+//	@Router			/api/v1/reconciliation [get]
 func (h *Handler) HandleAdminOverview(c *gin.Context) {
 	ctx := c.Request.Context()
 	views, err := h.svc.overview(ctx)

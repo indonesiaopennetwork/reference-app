@@ -22,8 +22,8 @@ import (
 // DueContract is a contract whose settlement is not yet agreed, and when it
 // falls due.
 type DueContract struct {
-	ContractID    uuid.UUID `json:"contract_id"`
-	TransactionID uuid.UUID `json:"transaction_id"`
+	ContractID    uuid.UUID `json:"contract_id" swaggertype:"string" format:"uuid"`
+	TransactionID uuid.UUID `json:"transaction_id" swaggertype:"string" format:"uuid"`
 	BapID         string    `json:"bap_id"`
 	BapURI        string    `json:"bap_uri"`
 	NetworkID     string    `json:"network_id"`
@@ -40,15 +40,15 @@ type DueContract struct {
 	// or disputed; see choose).
 	Selectable bool `json:"selectable"`
 	// CreatedAt is when the contract was created.
-	CreatedAt time.Time `json:"created_at"`
+	CreatedAt time.Time `json:"created_at" format:"date-time"`
 	// LastResult: for a contract its last batch didn't reconcile (disputed,
 	// or sent before its settlement window), how it fared there.
 	LastResult *Result `json:"last_result,omitempty"`
 	// BasisEvent is what started the payout clock ("delivered", "cancelled",
 	// ...); BasisAt is when. Zero BasisAt: the event hasn't happened.
 	BasisEvent string     `json:"basis_event"`
-	BasisAt    *time.Time `json:"basis_at"`
-	DueAt      *time.Time `json:"due_at"`
+	BasisAt    *time.Time `json:"basis_at" format:"date-time" extensions:"x-nullable"`
+	DueAt      *time.Time `json:"due_at" format:"date-time" extensions:"x-nullable"`
 	Due        bool       `json:"due"`
 
 	*Figures

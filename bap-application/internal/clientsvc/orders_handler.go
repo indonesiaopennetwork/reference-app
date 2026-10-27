@@ -18,6 +18,18 @@ import (
 // buyer_subject is treated as not found, same as one that doesn't exist,
 // so a buyer can't view another buyer's order by guessing its UUID.
 // GET /api/v1/orders/:id
+//
+//	@Summary		One order with its snapshot timeline
+//	@ID				getOrder
+//	@Description	The buyer's transaction with its latest contract and every contract snapshot (oldest first). Scoped to the buyer: without a token, or for a transaction owned by someone else, it answers 404 exactly as for an unknown id. The bearer token is optional: without one the request is served anonymously; one that fails verification is rejected with 401.
+//	@Tags			orders
+//	@Produce		json
+//	@Param			id path string true "Transaction id (UUID) returned by POST /api/v1/select." format(uuid)
+//	@Success		200 {object} OrderDetailResponse "Order details."
+//	@Failure		401 {object} ErrorResponse "A bearer token was sent but failed verification (no token is fine)."
+//	@Failure		404 {object} ErrorResponse "Not found, not this buyer's, or no buyer identity."
+//	@Security		BearerAuth
+//	@Router			/api/v1/orders/{id} [get]
 func (h *ClientHandler) HandleGetOrder(c *gin.Context) {
 	txnID := c.Param("id")
 	if txnID == "" {
@@ -80,6 +92,19 @@ func (h *ClientHandler) HandleGetOrder(c *gin.Context) {
 // A request with no resolvable buyer identity gets an empty page rather
 // than falling back to every order ever placed through this BAP.
 // GET /api/v1/orders?page=1&limit=20
+//
+//	@Summary		The buyer's order history
+//	@ID				listOrders
+//	@Description	Paginated transactions owned by the logged-in buyer, newest first, each with its latest contract snapshot and display fields extracted from it. Without a buyer identity (no token) it returns an empty page {"items":[],"total":0,"page":1,"limit":20}. The bearer token is optional: without one the request is served anonymously; one that fails verification is rejected with 401.
+//	@Tags			orders
+//	@Produce		json
+//	@Param			page query int false "1-based page number. Non-numeric or < 1 falls back to 1." default(1) minimum(1)
+//	@Param			limit query int false "Page size, 1-100. Out-of-range or non-numeric values fall back to 20." default(20) minimum(1) maximum(100)
+//	@Success		200 {object} OrderListResponse "A page of orders."
+//	@Failure		401 {object} ErrorResponse "A bearer token was sent but failed verification (no token is fine)."
+//	@Failure		500 {object} ErrorResponse "Transaction or snapshot not found, database error, or the adapter call failed / returned non-200 (the error text says which)."
+//	@Security		BearerAuth
+//	@Router			/api/v1/orders [get]
 func (h *ClientHandler) HandleListOrders(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -225,7 +250,7 @@ func (h *ClientHandler) HandleListOrders(c *gin.Context) {
 					item.ItemPrice = cm.CommitmentAttributes.Price.Value
 					item.Currency = cm.CommitmentAttributes.Price.Currency
 				}
-				
+
 				// Extract return status if any
 				for _, p := range contractData.Performance {
 					if p.PerformanceAttributes.Type == "RETURN" && p.Status.Code != "" {

@@ -153,6 +153,27 @@ tasks:
           mkdir -p docs/db
           ./scripts/merge-tbls-docs.sh "$TMP" docs/db/{{.ITEM}}.md
 
+  docs:api:
+    desc: >-
+      Regenerate docs/api/bap.yaml and docs/api/bpp.yaml (Swagger/OpenAPI
+      2.0) from the swag annotations on the bap and bpp handlers. Re-run
+      after changing a route, handler or its request/response types, and
+      commit the result.
+    vars:
+      SWAG: github.com/swaggo/swag/cmd/swag@v1.16.4
+    cmds:
+      - mkdir -p docs/api
+      - for: [bap, bpp]
+        cmd: |
+          set -euo pipefail
+          TMP=$(mktemp -d)
+          trap 'rm -rf "$TMP"' EXIT
+          docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -e GOCACHE=/tmp/go-cache \
+            -v "$PWD/{{.ITEM}}-application:/src:ro" -v "$TMP:/out" -w /src golang:1.25-alpine \
+            go run {{.SWAG}} init -g cmd/server/main.go --parseInternal \
+              --outputTypes yaml -o /out --quiet
+          cp "$TMP/swagger.yaml" docs/api/{{.ITEM}}.yaml
+
   # ───────────────────────────────────────────────────────────────────────
   # Fresh deploy — mirrors README.md "Deploy to your fresh GCP project"
   # steps 0-9. Run in order. Steps 0/2/4 aren't here (a one-time backend.tf

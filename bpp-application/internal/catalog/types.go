@@ -14,8 +14,8 @@ type ProviderPublishRequest struct {
 
 // PublishAck is returned to the provider on success.
 type PublishAck struct {
-	Status  string `json:"status"`
-	Message string `json:"message,omitempty"`
+	Status  string `json:"status" example:"ACK"`
+	Message string `json:"message,omitempty" example:"Catalog published successfully"`
 }
 
 // BecknPublishRequest is the Beckn-compliant payload sent from the BPP to the CDS.
@@ -253,7 +253,7 @@ type Location struct {
 }
 
 type GeoJSON struct {
-	Type        string    `json:"type"`
+	Type        string    `json:"type" example:"Point"`
 	Coordinates []float64 `json:"coordinates"`
 }
 
@@ -266,25 +266,31 @@ type Address struct {
 }
 
 type Resource struct {
-	ID                 string          `json:"id"`
-	Descriptor         Descriptor      `json:"descriptor"`
-	ResourceAttributes json.RawMessage `json:"resourceAttributes,omitempty"`
+	ID         string     `json:"id"`
+	Descriptor Descriptor `json:"descriptor"`
+	// JSON-LD resource attributes (@context and @type are stored too), e.g.
+	// crc and availability.status (IN_STOCK, LOW_STOCK, OUT_OF_STOCK).
+	// Stored and published as-is.
+	ResourceAttributes json.RawMessage `json:"resourceAttributes,omitempty" swaggertype:"object"`
 }
 
 type Offer struct {
-	ID              string          `json:"id"`
-	Descriptor      Descriptor      `json:"descriptor"`
-	Provider        *Provider       `json:"provider,omitempty"`
-	ResourceIDs     []string        `json:"resourceIds"`
-	Considerations  []Consideration `json:"considerations,omitempty"`
-	Validity        *TimePeriod     `json:"validity,omitempty"`
-	OfferAttributes json.RawMessage `json:"offerAttributes,omitempty"`
+	ID             string          `json:"id"`
+	Descriptor     Descriptor      `json:"descriptor"`
+	Provider       *Provider       `json:"provider,omitempty"`
+	ResourceIDs    []string        `json:"resourceIds"`
+	Considerations []Consideration `json:"considerations,omitempty"`
+	Validity       *TimePeriod     `json:"validity,omitempty"`
+	// JSON-LD offer attributes (policies such as returns, and commission and
+	// payout terms). Missing terms are filled with BPP defaults when written.
+	OfferAttributes json.RawMessage `json:"offerAttributes,omitempty" swaggertype:"object"`
 }
 
 type Consideration struct {
-	ID                      string          `json:"id"`
-	Status                  Status          `json:"status"`
-	ConsiderationAttributes json.RawMessage `json:"considerationAttributes,omitempty"`
+	ID     string `json:"id"`
+	Status Status `json:"status"`
+	// JSON-LD price attributes (currency, totalAmount, breakup, ...).
+	ConsiderationAttributes json.RawMessage `json:"considerationAttributes,omitempty" swaggertype:"object"`
 }
 
 type Status struct {
@@ -293,10 +299,13 @@ type Status struct {
 }
 
 type TimePeriod struct {
-	StartDate string `json:"startDate,omitempty"`
-	EndDate   string `json:"endDate,omitempty"`
+	// RFC 3339. Values that can't be parsed are stored as NULL.
+	StartDate string `json:"startDate,omitempty" format:"date-time"`
+	EndDate   string `json:"endDate,omitempty" format:"date-time"`
 }
 
 type PublishDirectives struct {
-	CatalogType string `json:"catalogType,omitempty"`
+	// master or regular are stored; sent upper-cased as the publish
+	// directive's catalogType (default REGULAR).
+	CatalogType string `json:"catalogType,omitempty" example:"regular"`
 }

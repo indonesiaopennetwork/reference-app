@@ -99,10 +99,14 @@ type Context struct {
 type Request struct {
 	Context Context `json:"context"`
 	Message struct {
-		ReconciliationStatus string         `json:"reconciliationStatus"`
-		SettlementDate       string         `json:"settlementDate"`
-		Contracts            []any          `json:"contracts"`
-		SettlementSummary    map[string]any `json:"settlementSummary"`
+		// On /on_reconcile, the BPP's batch verdict (e.g. AGREED, DISPUTED).
+		ReconciliationStatus string `json:"reconciliationStatus"`
+		SettlementDate       string `json:"settlementDate" format:"date"`
+		// Contracts with their settlements[0].settlementAttributes figures
+		// (orderAmount, commission, withholding, refund, netPayable, accord,
+		// dispute, ...).
+		Contracts         []any          `json:"contracts" swaggertype:"array,object"`
+		SettlementSummary map[string]any `json:"settlementSummary"`
 	} `json:"message"`
 }
 
@@ -280,10 +284,10 @@ func reply(c map[string]any, settlementID string, considerationID any, bag map[s
 // not yet agreed, and when it falls due.
 type DueContract struct {
 	ContractID           string `json:"contract_id"`
-	TransactionID        string `json:"transaction_id"`
+	TransactionID        string `json:"transaction_id" format:"uuid"`
 	BppID                string `json:"bpp_id"`
 	BppURI               string `json:"bpp_uri"`
-	Status               string `json:"status"`
+	Status               string `json:"status" enums:"SELECT_SENT,QUOTE_RECEIVED,INIT_SENT,INIT_RECEIVED,CONFIRM_SENT,CONFIRMED,CANCELLED,COMPLETE,STATUS_SENT,CANCEL_SENT,UPDATE_SENT,RATE_SENT,SUPPORT_SENT,DISCOVER_SENT,DISCOVER_RECEIVED"`
 	ReconciliationStatus string `json:"reconciliation_status,omitempty"`
 	// ReconciliationID is the batch the contract was last in.
 	ReconciliationID string `json:"reconciliation_id,omitempty"`
@@ -294,12 +298,12 @@ type DueContract struct {
 	// or disputed; see choose).
 	Selectable bool `json:"selectable"`
 	// CreatedAt is when the contract was created: its first snapshot.
-	CreatedAt *time.Time `json:"created_at"`
+	CreatedAt *time.Time `json:"created_at" format:"date-time" extensions:"x-nullable"`
 	// LastResult: for a contract its last batch didn't reconcile (disputed,
 	// or sent before its settlement window), how it fared there.
 	LastResult *Result    `json:"last_result,omitempty"`
 	BasisEvent string     `json:"basis_event"`
-	DueAt      *time.Time `json:"due_at"`
+	DueAt      *time.Time `json:"due_at" format:"date-time" extensions:"x-nullable"`
 	Due        bool       `json:"due"`
 	*Figures
 

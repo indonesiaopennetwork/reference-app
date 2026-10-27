@@ -20,6 +20,19 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.Logger) *
 	return &Handler{svc: NewService(pool, cfg, lh), lh: lh}
 }
 
+// Handle answers POST /api/webhook/status: ACK at once, then on_status.
+//
+//	@Summary		Beckn status
+//	@ID			becknStatus
+//	@Description	Returns a synchronous ACK, then works asynchronously: finds the contract by context.transactionId, loads its latest stored state, and sends on_status with the contract id and status code. If the transaction id is invalid or no contract is found, nothing is sent.
+//	@Tags			beckn webhooks
+//	@Accept			json
+//	@Produce		json
+//	@Param			body	body	server.BecknWebhookRequest	true	"Beckn message forwarded by onix-bpp"
+//	@Success		200	{object}	server.BecknAckResponse	"Synchronous ACK; context echoes the inbound context fields"
+//	@Failure		400	{object}	server.BecknAckResponse	"NACK: body not decodable into the request type (context then all empty strings), or context.bapUri empty (context echoed). No reason field"
+//	@Security
+//	@Router			/api/webhook/status [post]
 func (h *Handler) Handle(c *gin.Context) {
 	var req StatusRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

@@ -17,8 +17,8 @@ type BecknContext struct {
 }
 
 type OnCancelRequest struct {
-	Context BecknContext     `json:"context"`
-	Message OnCancelMessage  `json:"message"`
+	Context BecknContext    `json:"context"`
+	Message OnCancelMessage `json:"message"`
 }
 
 type OnCancelMessage struct {

@@ -20,6 +20,19 @@ func NewHandler(pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.Logger) *
 	return &Handler{svc: NewService(pool, cfg, lh), lh: lh}
 }
 
+// Handle answers POST /api/webhook/support: ACK at once, then on_support.
+//
+//	@Summary		Beckn support
+//	@ID			becknSupport
+//	@Description	Returns a synchronous ACK, then works asynchronously: creates a support ticket from message.support (orderId is treated as a transaction id when linking it to a contract) and sends on_support with the ticket id and the BPP's hard-coded support channels.
+//	@Tags			beckn webhooks
+//	@Accept			json
+//	@Produce		json
+//	@Param			body	body	server.BecknWebhookRequest	true	"Beckn message forwarded by onix-bpp"
+//	@Success		200	{object}	server.BecknAckResponse	"Synchronous ACK; context echoes the inbound context fields"
+//	@Failure		400	{object}	server.BecknAckResponse	"NACK: body not decodable into the request type (context then all empty strings), or context.bapUri empty (context echoed). No reason field"
+//	@Security
+//	@Router			/api/webhook/support [post]
 func (h *Handler) Handle(c *gin.Context) {
 	var req SupportRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

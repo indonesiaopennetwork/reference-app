@@ -59,8 +59,8 @@ type Figures struct {
 
 	// OrderDate is the order's creation date in Asia/Jakarta time; DueDate
 	// the date the payout falls due, once known. Set by the caller.
-	OrderDate string `json:"order_date,omitempty"`
-	DueDate   string `json:"due_date,omitempty"`
+	OrderDate string `json:"order_date,omitempty" format:"date"`
+	DueDate   string `json:"due_date,omitempty" format:"date"`
 	// Breakup itemizes the refund (settlement.RefundBreakup); Collections
 	// says who collected the buyer's money (settlement.Collections).
 	Breakup     []any `json:"breakup,omitempty"`

@@ -27,6 +27,18 @@ func NewSelectHandler(pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.Log
 }
 
 // Handle is the Gin handler for POST /beckn/select.
+//
+//	@Summary		Beckn select
+//	@ID			becknSelect
+//	@Description	Returns a synchronous ACK, then works asynchronously: looks up each commitment's offer and resources in the DB and adds full details, prices the quote (per-unit BASE_PRICE and TAX lines times quantity, plus a contract consideration with status QUOTED), adds the seller's offer terms and commission, and sends on_select through the onix-bpp caller. Nothing is written except the message log.
+//	@Tags			beckn webhooks
+//	@Accept			json
+//	@Produce		json
+//	@Param			body	body	server.BecknWebhookRequest	true	"Beckn message forwarded by onix-bpp"
+//	@Success		200	{object}	server.BecknAckResponse	"Synchronous ACK; context echoes the inbound context fields"
+//	@Failure		400	{object}	server.BecknAckResponse	"NACK: body not decodable into the request type (context then all empty strings), or context.bapUri empty (context echoed). No reason field"
+//	@Security
+//	@Router			/api/webhook/select [post]
 func (h *SelectHandler) Handle(c *gin.Context) {
 	var req SelectRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

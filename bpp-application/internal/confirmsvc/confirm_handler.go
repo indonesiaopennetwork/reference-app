@@ -28,6 +28,18 @@ func NewConfirmHandler(pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.Lo
 }
 
 // Handle is the Gin handler for POST /beckn/confirm.
+//
+//	@Summary		Beckn confirm
+//	@ID			becknConfirm
+//	@Description	Returns a synchronous ACK, then works asynchronously: checks that the contract carries settlements (payment proof), applies the stored offer terms, and in one transaction makes the DRAFT contract and its commitments ACTIVE and records the settlements as COMPLETE; then sends on_confirm. If the state change fails, no on_confirm is sent and the failure is only logged as NACK in beckn_message_log.
+//	@Tags			beckn webhooks
+//	@Accept			json
+//	@Produce		json
+//	@Param			body	body	server.BecknWebhookRequest	true	"Beckn message forwarded by onix-bpp"
+//	@Success		200	{object}	server.BecknAckResponse	"Synchronous ACK; context echoes the inbound context fields"
+//	@Failure		400	{object}	server.BecknAckResponse	"NACK: body not decodable into the request type (context then all empty strings), or context.bapUri empty (context echoed). No reason field"
+//	@Security
+//	@Router			/api/webhook/confirm [post]
 func (h *ConfirmHandler) Handle(c *gin.Context) {
 	var req ConfirmRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

@@ -26,6 +26,19 @@ func NewOnSelectHandler(pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.L
 	}
 }
 
+// Handle answers POST /api/webhook/on_select with an immediate ACK and processes the callback asynchronously.
+//
+//	@Summary		Receive on_select (quote)
+//	@ID				webhookOnSelect
+//	@Description	The BPP's quoted contract. Asynchronously sets the transaction status to QUOTE_RECEIVED, stores message.contract as the on_select contract snapshot and logs the message. The adapter has already verified the Beckn signature; no auth.
+//	@Tags			beckn webhooks
+//	@Accept			json
+//	@Produce		json
+//	@Param			request body server.BecknContractRequest true "Beckn on_select request"
+//	@Success		200 {object} server.BecknAckResponse "Synchronous ACK; the message is processed asynchronously afterwards. The context is echoed with action set to on_select."
+//	@Failure		400 {object} server.BecknAckResponse "NACK: the body is not valid JSON or does not match the expected types. Context fields are empty strings except action."
+//	@Security
+//	@Router			/api/webhook/on_select [post]
 func (h *OnSelectHandler) Handle(c *gin.Context) {
 	var req OnSelectRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

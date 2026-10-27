@@ -41,6 +41,18 @@ type bapGroup struct {
 // HandleOverview (GET /api/v1/reconciliation): per BAP, the contracts due now
 // and still to fall due, the summary a /reconcile would send, the payout
 // terms in force, and recent batches.
+//
+//	@Summary		Reconciliation overview per BAP
+//	@ID			getReconciliationOverview
+//	@Description	For each BAP: the seller's contracts whose settlement is not yet agreed, split into due (due now or disputed) and upcoming; the summary the next /reconcile would carry; and the disputed batch that would be sent again. Also returns the BPP's default payout terms and the 50 most recent reconciliation batches (sent or received). Read-only.
+//	@Tags			reconciliation
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Success		200	{object}	ReconciliationOverviewResponse	"Overview"
+//	@Failure		401	{object}	auth.ErrorResponse	"Bearer token missing (missing bearer token), or invalid or expired (invalid or expired token)"
+//	@Failure		403	{object}	auth.NoProviderResponse	"Valid token, but no seller profile (users row) for it; call POST /api/v1/auth/bootstrap"
+//	@Failure		500	{object}	auth.ErrorResponse	"Database or internal error (raw error text)"
+//	@Router			/api/v1/reconciliation [get]
 func (h *Handler) HandleOverview(c *gin.Context) {
 	ctx := c.Request.Context()
 	providerID := auth.ProviderIDFromContext(c)
@@ -103,6 +115,24 @@ func (h *Handler) HandleOverview(c *gin.Context) {
 // HandleSend (POST /api/v1/reconciliation/send {bap_id}): send /reconcile for
 // everything due now with that BAP. A batch that could not be delivered is
 // still recorded (FAILED) and returned with the error.
+//
+//	@Summary		Send /reconcile to a BAP
+//	@ID			sendReconciliation
+//	@Description	Builds a /reconcile for one BAP and sends it through the onix-bpp caller. With contract_ids it sends the listed contracts that are due or disputed, as a new batch; without them, the disputed batch again in full, or else everything due.
+//	@Description	The batch is first recorded in reconciliations (status SENDING) and its payments marked PENDING; if the send fails the batch is marked FAILED and the payments go back to their earlier state. The BAP's /on_reconcile arrives later at /api/webhook/on_reconcile. On 200 the batch status is SENT, or already the BAP's outcome if /on_reconcile arrived first.
+//	@Tags			reconciliation
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			body	body	ReconciliationSendRequest	true	"BAP and optional contracts"
+//	@Success		200	{object}	ReconciliationSendResponse	"Sent"
+//	@Failure		400	{object}	auth.ErrorResponse	"Invalid JSON or a missing required field (gin binding error text)"
+//	@Failure		401	{object}	auth.ErrorResponse	"Bearer token missing (missing bearer token), or invalid or expired (invalid or expired token)"
+//	@Failure		403	{object}	auth.NoProviderResponse	"Valid token, but no seller profile (users row) for it; call POST /api/v1/auth/bootstrap"
+//	@Failure		409	{object}	auth.ErrorResponse	"None of the seller's contracts with the BAP is due, or none of the selected ones is (no contracts are due for reconciliation with this BAP)"
+//	@Failure		500	{object}	auth.ErrorResponse	"Database or internal error (raw error text)"
+//	@Failure		502	{object}	ReconciliationSendErrorResponse	"Not delivered; the batch is still recorded as FAILED and returned"
+//	@Router			/api/v1/reconciliation/send [post]
 func (h *Handler) HandleSend(c *gin.Context) {
 	var req struct {
 		BapID string `json:"bap_id" binding:"required"`
@@ -130,12 +160,36 @@ func (h *Handler) HandleSend(c *gin.Context) {
 // HandleOnReconcile (POST /api/webhook/on_reconcile): ACK the BAP's
 // answer to this BPP's /reconcile at once and apply it in the background,
 // like the other webhooks.
+//
+//	@Summary		BAP's answer to this BPP's /reconcile
+//	@ID			becknOnReconcile
+//	@Description	Returns a synchronous ACK echoing context as received, then works asynchronously: sets the outbound batch message.reconciliationId to AGREED (only when every due contract has accord true and the BAP said AGREED), DISPUTED, or PENDING (some contracts were sent before their settlement window), and updates each contract's settlement reconciliation state to match. Nothing is sent back.
+//	@Tags			beckn webhooks
+//	@Accept			json
+//	@Produce		json
+//	@Param			body	body	server.BecknWebhookRequest	true	"Beckn message forwarded by onix-bpp"
+//	@Success		200	{object}	server.ReconAckResponse	"ACK; context is the inbound context as received"
+//	@Failure		400	{object}	server.ReconNackResponse	"The body is not a JSON object (NACK, no context)"
+//	@Security
+//	@Router			/api/webhook/on_reconcile [post]
 func (h *Handler) HandleOnReconcile(c *gin.Context) {
 	h.ackThen(c, "on_reconcile not applied", h.svc.ApplyOnReconcile)
 }
 
 // HandleReconcile (POST /api/webhook/reconcile): ACK a BAP's /reconcile at
 // once, then check it against this BPP's figures and answer /on_reconcile.
+//
+//	@Summary		A BAP's own /reconcile
+//	@ID			becknReconcile
+//	@Description	Returns a synchronous ACK echoing context as received, then works asynchronously: checks each contract's figures against this BPP's own (the batch is AGREED only if every contract agrees, otherwise DISPUTED), records an INBOUND reconciliations row, updates the settlement states, and sends on_reconcile through the onix-bpp caller.
+//	@Tags			beckn webhooks
+//	@Accept			json
+//	@Produce		json
+//	@Param			body	body	server.BecknWebhookRequest	true	"Beckn message forwarded by onix-bpp"
+//	@Success		200	{object}	server.ReconAckResponse	"ACK; context is the inbound context as received"
+//	@Failure		400	{object}	server.ReconNackResponse	"The body is not a JSON object (NACK, no context)"
+//	@Security
+//	@Router			/api/webhook/reconcile [post]
 func (h *Handler) HandleReconcile(c *gin.Context) {
 	h.ackThen(c, "reconcile not answered", h.svc.Respond)
 }

@@ -38,6 +38,22 @@ func NewPublishHandler(pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.Lo
 //  2. Save catalog data to the database (transaction).
 //  3. Forward a Beckn-compatible request to the CDS.
 //  4. Return ACK to the provider.
+//
+// API docs (swag):
+//
+//	@Summary		Provider catalog publish (no auth)
+//	@ID			providerPublishCatalog
+//	@Description	Provider-facing publish API with no auth middleware. For each catalog it upserts the provider (replacing its locations) and the catalog, and replaces the catalog's resources and offers in one DB transaction; offers without terms get this BPP's default terms.
+//	@Description	It then POSTs one catalog/publish request (onix-catalog-publish shape, catalog ids namespaced as <bppId>/<catalogId>) to CDS_PUBLISH_URL, signed when a BPP private key is set; when CDS_PUBLISH_URL is empty the forward is skipped and the call still ACKs. Inbound and outbound messages are logged to beckn_message_log.
+//	@Tags			catalogs
+//	@Accept			json
+//	@Produce		json
+//	@Param			body	body		ProviderPublishRequest		true	"Catalogs to save and publish"
+//	@Success		200		{object}	PublishAckResponse			"Saved, and forwarded when configured"
+//	@Failure		400		{object}	server.WscErrorResponse	"Body is not valid JSON, or catalogs is missing or empty (msgid 1001, errcode missing)"
+//	@Failure		500		{object}	server.WscErrorResponse	"DB save failed, or the CDS forward failed (transport error or non-2xx reply): msgid 1002, errcode database_error"
+//	@Security
+//	@Router			/api/v1/catalog/publish [post]
 func (h *PublishHandler) Handle(c *gin.Context, _ *service.Service) {
 	var req ProviderPublishRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
