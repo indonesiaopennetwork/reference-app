@@ -169,6 +169,15 @@ variable "cds_discover_url" {
   default = ""
 }
 
+# Where the otel-collector sidecars on onix-bap/onix-bpp forward filtered
+# onix telemetry (OTLP/HTTP) -- the same NETWORK_COLLECTOR_ENDPOINT
+# docker-compose.yml passes to otel-collector-bap/otel-collector-bpp. See
+# ../otel-collector/config.yaml.
+variable "network_collector_endpoint" {
+  type    = string
+  default = "https://netcol.iontest.in"
+}
+
 variable "discover_method" {
   description = "bap-application's DISCOVER_METHOD: \"GET\" (default) calls discovery-service directly via CDS_DISCOVER_URL; \"POST\" routes discover through onix-bap as a real async Beckn action (requires discovery-service to have a real registered network identity, not the ephemeral-key default)."
   type        = string

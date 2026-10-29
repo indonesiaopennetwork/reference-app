@@ -271,6 +271,10 @@ sidecar). The collector filters onix's raw telemetry down to only
 network-relevant signals (the `onix_http_request_count` metric; spans
 carrying `sender.id`) and forwards OTLP/HTTP to the network-level collector
 at `https://netcol.iontest.in` — nothing this repo deploys itself.
+Override it with `NETWORK_COLLECTOR_ENDPOINT` in `.env`. The cloud deploy
+runs the same collector as a sidecar on `beckn-onix-bap`/`beckn-onix-bpp`,
+with the endpoint set by the `network_collector_endpoint` Terraform variable
+— see [terraform/README.md](terraform/README.md#architecture-notes).
 
 **How it's wired**: `config/local-simple-{bap,bpp}.yaml`'s top-level
 `plugins.otelsetup` block sets `otlpEndpoint` to the sidecar's docker-compose

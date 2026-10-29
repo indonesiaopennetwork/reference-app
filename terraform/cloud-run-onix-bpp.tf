@@ -29,6 +29,8 @@ resource "google_cloud_run_v2_service" "onix_bpp" {
       name  = "onix-bpp"
       image = local.images.onix_bpp
 
+      depends_on = ["otel-collector"]
+
       ports {
         container_port = 8082
       }
@@ -38,6 +40,10 @@ resource "google_cloud_run_v2_service" "onix_bpp" {
           cpu    = "1"
           memory = "512Mi"
         }
+        # CPU stays allocated between requests, so the otel-collector
+        # sidecar can flush its batches (up to 10s after a request) instead
+        # of being throttled until the next request arrives.
+        cpu_idle = false
       }
 
       env {
@@ -109,16 +115,34 @@ resource "google_cloud_run_v2_service" "onix_bpp" {
     # otel-collector sidecar — onix-bpp's otelsetup plugin ships telemetry to
     # it over localhost (Cloud Run v2 sidecars share a network namespace),
     # which then filters and forwards network-relevant signals to
-    # netcol.iontest.in. See ../otel-collector/config.yaml.
+    # var.network_collector_endpoint (netcol.iontest.in by default). See
+    # ../otel-collector/config.yaml.
     containers {
       name  = "otel-collector"
       image = local.images.otel_collector
+
+      env {
+        name  = "NETWORK_COLLECTOR_ENDPOINT"
+        value = var.network_collector_endpoint
+      }
+
+      # The collector's health_check extension (otel-collector/config.yaml).
+      startup_probe {
+        http_get {
+          path = "/"
+          port = 13133
+        }
+        period_seconds    = 5
+        timeout_seconds   = 3
+        failure_threshold = 20
+      }
 
       resources {
         limits = {
           cpu    = "1"
           memory = "512Mi"
         }
+        cpu_idle = false
       }
     }
   }

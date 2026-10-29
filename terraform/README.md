@@ -54,8 +54,20 @@ For the stack/architecture/request-flow overview, see [TECHNICAL_ARTIFACT.md](..
   ships metrics/traces/logs to it over OTLP/gRPC; `otel-collector/config.yaml`
   filters that down to only network-relevant signals (`onix_http_request_count`,
   and spans carrying `sender.id`) and re-exports OTLP/HTTP to
-  `https://netcol.iontest.in`, the network-level collector operated outside
-  this deployment — not something this module deploys itself.
+  `var.network_collector_endpoint` (default `https://netcol.iontest.in`), the
+  network-level collector operated outside this deployment — not something
+  this module deploys itself. Same image, config and endpoint variable
+  (`NETWORK_COLLECTOR_ENDPOINT`) as docker-compose's
+  `otel-collector-bap`/`otel-collector-bpp`. Two Cloud Run specifics:
+  - onix waits for the collector (`depends_on = ["otel-collector"]`, with a
+    startup probe on the collector's health check, port 13133), so telemetry
+    from the first requests isn't dropped.
+  - Both onix services run with `cpu_idle = false` (CPU always allocated).
+    With request-based CPU, Cloud Run throttles the sidecar between requests
+    and its batched logs/metrics/traces (sent up to 10s after a request)
+    would sit unsent until the next request. Instances still scale to zero
+    (`min_instance_count = 0`), so the cost is the idle minutes before
+    scale-down, billed as instance time.
   `auditFieldsConfig` (`onix-bap/templates/audit-fields.yaml` and the bpp
   equivalent, byte-identical) controls PII masking in audit logs; both are
   static, non-templated files copied in by `entrypoint.sh`'s generic
@@ -806,6 +818,13 @@ Unlike the gotchas above, these are things `cloud-run-zitadel.tf` assumes rather
   Redis means the `compute.networkUser` subnet grant isn't working, or the
   Redis instance isn't in `READY` state yet.
 - Seed a catalog via `../catalog-seed/` against the new `bpp_url`.
+- Telemetry to the network collector: after a few onix requests, read the
+  sidecar's own logs —
+  `gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="beckn-onix-bap" AND labels.container_name="otel-collector"' --project=ion-sandbox-001 --freshness=10m`
+  (same for `beckn-onix-bpp`). The `logs/network` pipeline's `debug`
+  exporter prints every forwarded log record; `error exporting items` lines
+  name the HTTP status the collector got back from
+  `var.network_collector_endpoint`.
 
 ## Inspecting the Cloud SQL instance
 
