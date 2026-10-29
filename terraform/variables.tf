@@ -175,7 +175,7 @@ variable "cds_discover_url" {
 # ../otel-collector/config.yaml.
 variable "network_collector_endpoint" {
   type    = string
-  default = "https://netcol.iontest.in"
+  default = "https://netcol.staging.ion.id"
 }
 
 variable "discover_method" {

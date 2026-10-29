@@ -1,7 +1,7 @@
 # Companion collector for onix-bap/onix-bpp — network-forwarding only.
 # Forwards filtered signals to the network-level collector at
 # NETWORK_COLLECTOR_ENDPOINT (env-substituted below; see docker-compose.yml
-# and .env.example) — netcol.iontest.in is ion-monitor's own staging
+# and .env.example) — netcol.staging.ion.id is ion-monitor's own staging
 # deployment, and that's the default. Point it at a local ion-monitor
 # instead for local testing (http://host.docker.internal:<its OTLP/HTTP
 # host port, 4320 by default> — see docker-compose.yml's extra_hosts entry
@@ -46,7 +46,7 @@ exporters:
   debug:
     verbosity: detailed
   otlp_http/collector-network:
-    endpoint: ${env:NETWORK_COLLECTOR_ENDPOINT:-https://netcol.iontest.in}
+    endpoint: ${env:NETWORK_COLLECTOR_ENDPOINT:-https://netcol.staging.ion.id}
     compression: gzip
 
 extensions:

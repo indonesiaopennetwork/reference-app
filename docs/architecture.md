@@ -204,7 +204,7 @@ Solid arrows are API calls; dotted arrows are page navigation, caches, and key a
 | `postgres` | One Postgres with three databases: `bap`, `bpp`, `zitadel` | Postgres 16 | 5435 | — |
 | `migrate-bap` / `migrate-bpp` | One-shot jobs that apply the tern migrations before the apps start | tern | — | `postgres` |
 | `redis-bap` / `redis-bpp` | Cache for each onix adapter | Redis | — | — |
-| `otel-collector-bap` / `-bpp` | Receive onix telemetry and forward it to the ION network collector | OpenTelemetry Collector | — | `https://netcol.iontest.in` |
+| `otel-collector-bap` / `-bpp` | Receive onix telemetry and forward it to the ION network collector | OpenTelemetry Collector | — | `https://netcol.staging.ion.id` |
 | `dedi-static-server` | **Cloud only.** Public front door of the BAP and BPP domains: serves DeDi + catalog files, proxies Beckn and API paths | nginx | — | GCS bucket, `bap`, `bpp`, `onix-bap`, `onix-bpp` |
 
 ---
@@ -268,7 +268,7 @@ The catalog does not travel as a Beckn request to buyers. Instead `bpp` sends it
 
 ### 5.5 Telemetry
 
-Only the onix adapters emit telemetry (OTLP gRPC to `otel-collector-bap` / `-bpp` on `:4317`). The collectors keep request-count metrics and spans carrying a `sender.id`, and forward them to the ION network collector (`NETWORK_COLLECTOR_ENDPOINT`, default `https://netcol.iontest.in`). `bap`, `bpp` and `discovery-service` only write logs — see [11](#11-observability-and-debugging).
+Only the onix adapters emit telemetry (OTLP gRPC to `otel-collector-bap` / `-bpp` on `:4317`). The collectors keep request-count metrics and spans carrying a `sender.id`, and forward them to the ION network collector (`NETWORK_COLLECTOR_ENDPOINT`, default `https://netcol.staging.ion.id`). `bap`, `bpp` and `discovery-service` only write logs — see [11](#11-observability-and-debugging).
 
 ---
 
@@ -828,7 +828,7 @@ What the system needs from outside this repo at runtime:
 |---|---|---|
 | DeDi registry `https://fabric.nfh.global/registry/dedi` | onix adapters (look up senders' public keys) | `config/*.yaml`, `onix-*/templates/` |
 | ION schemas `https://schema.ion.id/release1/...` | onix adapters (validate every message) | same |
-| Network collector `https://netcol.iontest.in` | OTel collectors | `NETWORK_COLLECTOR_ENDPOINT` |
+| Network collector `https://netcol.staging.ion.id` | OTel collectors | `NETWORK_COLLECTOR_ENDPOINT` |
 | Network registry administrator | issues the BAP/BPP identities and keys | — (manual) |
 | Vendor images: `fidedocker/onix-adapter:1.9.0`, `fidedocker/catalog-publisher`, `otel/opentelemetry-collector-contrib`, Zitadel, Cloud SQL proxy | the onix, telemetry and identity services | `docker-compose.yml`, `terraform/images.tf` |
 | An external discovery service (optional) | `bap` instead of the bundled one | `CDS_DISCOVER_URL` / `cds_discover_url` |

@@ -30,7 +30,7 @@ pluginManager:
 
 # Ships telemetry to the otel-collector-bap sidecar (docker-compose.yml),
 # which filters and forwards only network-relevant signals to
-# netcol.iontest.in — see otel-collector/config.yaml. `producer` must be the
+# netcol.staging.ion.id — see otel-collector/config.yaml. `producer` must be the
 # SAME value as `networkParticipant` in the keyManager blocks below (one
 # registered identity) — when you replace that stale example value with your
 # real subscriber ID, update this to match too, or telemetry will be

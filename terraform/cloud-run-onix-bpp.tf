@@ -115,7 +115,7 @@ resource "google_cloud_run_v2_service" "onix_bpp" {
     # otel-collector sidecar — onix-bpp's otelsetup plugin ships telemetry to
     # it over localhost (Cloud Run v2 sidecars share a network namespace),
     # which then filters and forwards network-relevant signals to
-    # var.network_collector_endpoint (netcol.iontest.in by default). See
+    # var.network_collector_endpoint (netcol.staging.ion.id by default). See
     # ../otel-collector/config.yaml.
     containers {
       name  = "otel-collector"
