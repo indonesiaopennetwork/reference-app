@@ -153,7 +153,7 @@ services:
 
   # ─── OTel companion collectors ─────────────────────────────────────────────
   # Filter onix's telemetry down to network-relevant signals and forward to
-  # netcol.iontest.in. Same image for both — see otel-collector/.
+  # netcol.staging.ion.id. Same image for both — see otel-collector/.
   otel-collector-bap:
     build:
       context: ./otel-collector
@@ -164,7 +164,7 @@ services:
       # point at a local ion-monitor instead (e.g.
       # http://host.docker.internal:4320) — see extra_hosts below and
       # otel-collector/config.yaml's comment.
-      NETWORK_COLLECTOR_ENDPOINT: ${NETWORK_COLLECTOR_ENDPOINT:-https://netcol.iontest.in}
+      NETWORK_COLLECTOR_ENDPOINT: ${NETWORK_COLLECTOR_ENDPOINT:-https://netcol.staging.ion.id}
     extra_hosts:
       # Lets NETWORK_COLLECTOR_ENDPOINT point at a collector running on the
       # host (e.g. a local ion-monitor stack) without joining any extra
@@ -181,7 +181,7 @@ services:
     restart: unless-stopped
     environment:
       # See otel-collector-bap's identical NETWORK_COLLECTOR_ENDPOINT comment.
-      NETWORK_COLLECTOR_ENDPOINT: ${NETWORK_COLLECTOR_ENDPOINT:-https://netcol.iontest.in}
+      NETWORK_COLLECTOR_ENDPOINT: ${NETWORK_COLLECTOR_ENDPOINT:-https://netcol.staging.ion.id}
     extra_hosts:
       # See otel-collector-bap's identical extra_hosts comment.
       - "host.docker.internal:host-gateway"

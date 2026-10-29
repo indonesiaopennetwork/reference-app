@@ -270,7 +270,7 @@ both built from `otel-collector/` (same image/config as the cloud deploy's
 sidecar). The collector filters onix's raw telemetry down to only
 network-relevant signals (the `onix_http_request_count` metric; spans
 carrying `sender.id`) and forwards OTLP/HTTP to the network-level collector
-at `https://netcol.iontest.in` — nothing this repo deploys itself.
+at `https://netcol.staging.ion.id` — nothing this repo deploys itself.
 Override it with `NETWORK_COLLECTOR_ENDPOINT` in `.env`. The cloud deploy
 runs the same collector as a sidecar on `beckn-onix-bap`/`beckn-onix-bpp`,
 with the endpoint set by the `network_collector_endpoint` Terraform variable
@@ -325,6 +325,11 @@ those paths (or they're not the right paths/protocol — worth confirming with
 whoever operates that endpoint, the same "word of mouth" caveat as before).
 Re-run the verification above after that's fixed upstream to confirm data
 actually flows through.
+
+**Update, 2026-10-29**: the network collector moved to
+`https://netcol.staging.ion.id`, now the default everywhere. It accepts
+`POST /v1/logs` (HTTP 200), but `/v1/traces` and `/v1/metrics` still return
+404 — so logs reach it, while traces and metrics don't yet.
 
 ## 2. Cloud deployment (Cloud Run)
 

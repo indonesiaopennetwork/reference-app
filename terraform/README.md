@@ -54,7 +54,7 @@ For the stack/architecture/request-flow overview, see [TECHNICAL_ARTIFACT.md](..
   ships metrics/traces/logs to it over OTLP/gRPC; `otel-collector/config.yaml`
   filters that down to only network-relevant signals (`onix_http_request_count`,
   and spans carrying `sender.id`) and re-exports OTLP/HTTP to
-  `var.network_collector_endpoint` (default `https://netcol.iontest.in`), the
+  `var.network_collector_endpoint` (default `https://netcol.staging.ion.id`), the
   network-level collector operated outside this deployment — not something
   this module deploys itself. Same image, config and endpoint variable
   (`NETWORK_COLLECTOR_ENDPOINT`) as docker-compose's

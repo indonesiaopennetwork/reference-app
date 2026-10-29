@@ -78,7 +78,7 @@ region     = "asia-southeast1"
 
 # Network collector the onix otel-collector sidecars forward telemetry to
 # (OTLP/HTTP) -- defaults to ion-monitor's staging deployment.
-# network_collector_endpoint = "https://netcol.iontest.in"
+# network_collector_endpoint = "https://netcol.staging.ion.id"
 
 # --- Settlement and reconciliation (defaults in variables.tf) ---
 # Payout accounts: set your real ones -- the defaults are demo accounts.
