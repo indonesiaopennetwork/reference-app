@@ -76,6 +76,10 @@ region     = "asia-southeast1"
 # apply again — same two-phase pattern as the DB migration steps in README.md.
 # zitadel_client_id = "..."
 
+# Network collector the onix otel-collector sidecars forward telemetry to
+# (OTLP/HTTP) -- defaults to ion-monitor's staging deployment.
+# network_collector_endpoint = "https://netcol.iontest.in"
+
 # --- Settlement and reconciliation (defaults in variables.tf) ---
 # Payout accounts: set your real ones -- the defaults are demo accounts.
 # bap_settlement_bank_code      = "MANDIRI"
