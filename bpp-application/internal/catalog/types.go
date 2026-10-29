@@ -158,7 +158,7 @@ var onixVisibleToNetworks = []string{
 	"beckn.one/testnet",
 	"nfh.global/testnet",
 	"ion.id/ion-launch",
-	"ion.id/ion-staging",
+	"ion.id/staging",
 }
 
 // ToOnixCatalog converts a Catalog into the shape onix-catalog-publisher
