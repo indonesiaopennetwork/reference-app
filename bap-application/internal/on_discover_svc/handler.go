@@ -29,6 +29,19 @@ func NewOnDiscoverHandler(pool *pgxpool.Pool, cfg *config.Config, lh *logharbour
 	}
 }
 
+// Handle answers POST /api/webhook/on_discover with an immediate ACK and processes the callback asynchronously.
+//
+//	@Summary		Receive on_discover (catalogs)
+//	@ID				webhookOnDiscover
+//	@Description	Catalog results for a discover sent by this BAP (only used when DISCOVER_METHOD=POST). The payload is handed to the GET /api/v1/discover request waiting on the same transactionId (if it has not timed out) and written to beckn_message_log as INBOUND; no transaction status change. The adapter has already verified the Beckn signature; no auth.
+//	@Tags			beckn webhooks
+//	@Accept			json
+//	@Produce		json
+//	@Param			request body server.OnDiscoverRequest true "Beckn on_discover request"
+//	@Success		200 {object} server.BecknAckResponse "Synchronous ACK; the message is processed asynchronously afterwards. The context is echoed with action set to on_discover."
+//	@Failure		400 {object} server.BecknAckResponse "NACK: the body is not valid JSON or does not match the expected types. Context fields are empty strings except action."
+//	@Security
+//	@Router			/api/webhook/on_discover [post]
 func (h *OnDiscoverHandler) Handle(c *gin.Context) {
 	var req OnDiscoverRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

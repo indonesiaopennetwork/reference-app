@@ -20,6 +20,16 @@ import (
 	"github.com/ion/winroom/bpp/internal/server"
 )
 
+// API documentation (swag) -- regenerate docs/api/bpp.yaml with `task docs:api`.
+//
+//	@title						BPP API
+//	@version					1.0
+//	@description				Seller backend (bpp-application). /api/v1: seller dashboard API for bpp-frontend (scoped to the logged-in seller's provider), auth bootstrap for landing-page, and the provider catalog API. /api/webhook: Beckn requests delivered by onix-bpp's receiver; each is ACKed at once and processed asynchronously, with the on_* answer sent back through the onix-bpp caller. See docs/architecture.md.
+//	@BasePath					/
+//	@securityDefinitions.apikey	BearerAuth
+//	@in							header
+//	@name						Authorization
+//	@description				Zitadel access token, as "Bearer <token>". Dashboard routes also require a seller profile (403 NO_PROVIDER otherwise).
 func main() {
 	// Load .env in non-production environments.
 	// In production, variables are injected by the orchestrator (k8s, etc.).

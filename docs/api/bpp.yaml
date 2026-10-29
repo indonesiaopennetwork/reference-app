@@ -1,0 +1,3603 @@
+basePath: /
+definitions:
+  auth.ErrorResponse:
+    properties:
+      error:
+        description: Error message, often the raw Go error text.
+        example: invalid or expired token
+        type: string
+    required:
+    - error
+    type: object
+  auth.NoProviderResponse:
+    properties:
+      code:
+        enum:
+        - NO_PROVIDER
+        example: NO_PROVIDER
+        type: string
+      error:
+        example: no seller profile for this account
+        type: string
+    required:
+    - code
+    - error
+    type: object
+  authsvc.BootstrapRequest:
+    properties:
+      businessName:
+        description: Seller's business name. The provider id is provider-<slug> of
+          this name.
+        example: Toko Nusantara
+        type: string
+    required:
+    - businessName
+    type: object
+  authsvc.BootstrapResponse:
+    properties:
+      isNew:
+        description: True when this call created the provider and user rows.
+        type: boolean
+      providerId:
+        example: provider-toko-nusantara
+        type: string
+    required:
+    - isNew
+    - providerId
+    type: object
+  catalog.Address:
+    properties:
+      addressCountry:
+        type: string
+      addressLocality:
+        type: string
+      addressRegion:
+        type: string
+      postalCode:
+        type: string
+      streetAddress:
+        type: string
+    type: object
+  catalog.Catalog:
+    properties:
+      descriptor:
+        $ref: '#/definitions/catalog.Descriptor'
+      id:
+        type: string
+      offers:
+        items:
+          $ref: '#/definitions/catalog.Offer'
+        type: array
+      provider:
+        $ref: '#/definitions/catalog.Provider'
+      publishDirectives:
+        $ref: '#/definitions/catalog.PublishDirectives'
+      resources:
+        items:
+          $ref: '#/definitions/catalog.Resource'
+        type: array
+      validity:
+        $ref: '#/definitions/catalog.TimePeriod'
+    type: object
+  catalog.Consideration:
+    properties:
+      considerationAttributes:
+        description: JSON-LD price attributes (currency, totalAmount, breakup, ...).
+        type: object
+      id:
+        type: string
+      status:
+        $ref: '#/definitions/catalog.Status'
+    type: object
+  catalog.Descriptor:
+    properties:
+      code:
+        type: string
+      longDesc:
+        type: string
+      mediaFile:
+        items:
+          $ref: '#/definitions/catalog.MediaFile'
+        type: array
+      name:
+        type: string
+      shortDesc:
+        type: string
+    type: object
+  catalog.GeoJSON:
+    properties:
+      coordinates:
+        items:
+          type: number
+        type: array
+      type:
+        example: Point
+        type: string
+    type: object
+  catalog.Location:
+    properties:
+      address:
+        $ref: '#/definitions/catalog.Address'
+      geo:
+        $ref: '#/definitions/catalog.GeoJSON'
+    type: object
+  catalog.MediaFile:
+    properties:
+      label:
+        type: string
+      mimeType:
+        type: string
+      uri:
+        type: string
+    type: object
+  catalog.Offer:
+    properties:
+      considerations:
+        items:
+          $ref: '#/definitions/catalog.Consideration'
+        type: array
+      descriptor:
+        $ref: '#/definitions/catalog.Descriptor'
+      id:
+        type: string
+      offerAttributes:
+        description: |-
+          JSON-LD offer attributes (policies such as returns, and commission and
+          payout terms). Missing terms are filled with BPP defaults when written.
+        type: object
+      provider:
+        $ref: '#/definitions/catalog.Provider'
+      resourceIds:
+        items:
+          type: string
+        type: array
+      validity:
+        $ref: '#/definitions/catalog.TimePeriod'
+    type: object
+  catalog.Provider:
+    properties:
+      availableAt:
+        items:
+          $ref: '#/definitions/catalog.Location'
+        type: array
+      descriptor:
+        $ref: '#/definitions/catalog.Descriptor'
+      id:
+        type: string
+    type: object
+  catalog.ProviderPublishRequest:
+    properties:
+      catalogs:
+        items:
+          $ref: '#/definitions/catalog.Catalog'
+        minItems: 1
+        type: array
+    required:
+    - catalogs
+    type: object
+  catalog.PublishAck:
+    properties:
+      message:
+        example: Catalog published successfully
+        type: string
+      status:
+        example: ACK
+        type: string
+    type: object
+  catalog.PublishAckResponse:
+    properties:
+      data:
+        $ref: '#/definitions/catalog.PublishAck'
+      messages:
+        description: Always null on success.
+        items:
+          type: object
+        type: array
+        x-nullable: true
+      status:
+        enum:
+        - success
+        example: success
+        type: string
+    required:
+    - data
+    - status
+    type: object
+  catalog.PublishDirectives:
+    properties:
+      catalogType:
+        description: |-
+          master or regular are stored; sent upper-cased as the publish
+          directive's catalogType (default REGULAR).
+        example: regular
+        type: string
+    type: object
+  catalog.Resource:
+    properties:
+      descriptor:
+        $ref: '#/definitions/catalog.Descriptor'
+      id:
+        type: string
+      resourceAttributes:
+        description: |-
+          JSON-LD resource attributes (@context and @type are stored too), e.g.
+          crc and availability.status (IN_STOCK, LOW_STOCK, OUT_OF_STOCK).
+          Stored and published as-is.
+        type: object
+    type: object
+  catalog.Status:
+    properties:
+      code:
+        type: string
+      name:
+        type: string
+    type: object
+  catalog.TimePeriod:
+    properties:
+      endDate:
+        format: date-time
+        type: string
+      startDate:
+        description: RFC 3339. Values that can't be parsed are stored as NULL.
+        format: date-time
+        type: string
+    type: object
+  dashboardsvc.AddProductRequest:
+    properties:
+      offer:
+        $ref: '#/definitions/catalog.Offer'
+      resource:
+        $ref: '#/definitions/catalog.Resource'
+    required:
+    - resource
+    type: object
+  dashboardsvc.CatalogDetail:
+    properties:
+      catalogType:
+        enum:
+        - master
+        - regular
+        type: string
+        x-nullable: true
+      crc:
+        type: string
+        x-nullable: true
+      createdAt:
+        format: date-time
+        type: string
+      id:
+        type: string
+      isActive:
+        type: boolean
+      isPublished:
+        type: boolean
+      name:
+        type: string
+      networkPublishedAt:
+        format: date-time
+        type: string
+        x-nullable: true
+      providerId:
+        type: string
+      providerName:
+        type: string
+      shortDesc:
+        type: string
+      validityEnd:
+        format: date-time
+        type: string
+        x-nullable: true
+      validityStart:
+        format: date-time
+        type: string
+        x-nullable: true
+    required:
+    - createdAt
+    - id
+    - isActive
+    - isPublished
+    - name
+    - providerId
+    - providerName
+    - shortDesc
+    type: object
+  dashboardsvc.CatalogDetailOffer:
+    properties:
+      considerationAttributes:
+        description: Attributes of the offer's first consideration (its price).
+        type: object
+        x-nullable: true
+      id:
+        type: string
+      name:
+        type: string
+      resourceIds:
+        items:
+          type: string
+        type: array
+        x-nullable: true
+      shortDesc:
+        type: string
+      validityEnd:
+        format: date-time
+        type: string
+        x-nullable: true
+      validityStart:
+        format: date-time
+        type: string
+        x-nullable: true
+    type: object
+  dashboardsvc.CatalogDetailResource:
+    properties:
+      createdAt:
+        format: date-time
+        type: string
+      id:
+        type: string
+      mediaFiles:
+        items:
+          $ref: '#/definitions/catalog.MediaFile'
+        type: array
+        x-nullable: true
+      name:
+        type: string
+      resourceAttributes:
+        type: object
+        x-nullable: true
+      shortDesc:
+        type: string
+    type: object
+  dashboardsvc.CatalogDetailResponse:
+    properties:
+      catalog:
+        $ref: '#/definitions/dashboardsvc.CatalogDetail'
+      offers:
+        items:
+          $ref: '#/definitions/dashboardsvc.CatalogDetailOffer'
+        type: array
+      resources:
+        items:
+          $ref: '#/definitions/dashboardsvc.CatalogDetailResource'
+        type: array
+    required:
+    - catalog
+    - offers
+    - resources
+    type: object
+  dashboardsvc.CatalogListItem:
+    properties:
+      catalogType:
+        enum:
+        - master
+        - regular
+        type: string
+        x-nullable: true
+      crc:
+        type: string
+        x-nullable: true
+      createdAt:
+        format: date-time
+        type: string
+      id:
+        type: string
+      isActive:
+        type: boolean
+      isPublished:
+        description: True once networkPublishedAt is set.
+        type: boolean
+      name:
+        type: string
+      networkPublishedAt:
+        format: date-time
+        type: string
+        x-nullable: true
+      offerCount:
+        type: integer
+      providerId:
+        type: string
+      resourceCount:
+        type: integer
+      shortDesc:
+        type: string
+      validityEnd:
+        format: date-time
+        type: string
+        x-nullable: true
+      validityStart:
+        format: date-time
+        type: string
+        x-nullable: true
+    required:
+    - createdAt
+    - id
+    - isActive
+    - isPublished
+    - name
+    - offerCount
+    - providerId
+    - resourceCount
+    - shortDesc
+    type: object
+  dashboardsvc.CatalogListResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/dashboardsvc.CatalogListItem'
+        type: array
+      limit:
+        example: 20
+        type: integer
+      page:
+        example: 1
+        type: integer
+      total:
+        description: Total matching rows across all pages.
+        type: integer
+    required:
+    - items
+    - limit
+    - page
+    - total
+    type: object
+  dashboardsvc.CreateCatalogRequest:
+    properties:
+      crc:
+        description: |-
+          CRC is the catalog's ION Catalogue Resource Category (e.g.
+          TRC-fashion; ion-specs docs/ION_Resource_Categories.md), optional.
+          The seller app publishes its products with resourceAttributes.crc set
+          to it. Left unchanged when empty.
+        type: string
+      descriptor:
+        properties:
+          longDesc:
+            type: string
+          name:
+            type: string
+          shortDesc:
+            type: string
+        required:
+        - name
+        type: object
+      id:
+        example: catalog-fashion-001
+        type: string
+      provider:
+        description: |-
+          The seller's own provider is always used: id must be present but is
+          ignored; descriptor.name becomes the provider's display name.
+        properties:
+          descriptor:
+            properties:
+              name:
+                type: string
+            required:
+            - name
+            type: object
+          id:
+            type: string
+        required:
+        - descriptor
+        - id
+        type: object
+      validity:
+        properties:
+          endDate:
+            type: string
+          startDate:
+            type: string
+        type: object
+    required:
+    - descriptor
+    - id
+    - provider
+    type: object
+  dashboardsvc.CreateCatalogResponse:
+    properties:
+      id:
+        example: catalog-fashion-001
+        type: string
+      status:
+        enum:
+        - ok
+        example: ok
+        type: string
+    required:
+    - id
+    - status
+    type: object
+  dashboardsvc.DashboardStatsResponse:
+    properties:
+      active_orders:
+        description: Contracts with status ACTIVE.
+        type: integer
+      funnel:
+        additionalProperties:
+          type: integer
+        description: Message counts per action. Always has select, init and confirm.
+        type: object
+      low_stock:
+        description: Products published as LOW_STOCK.
+        type: integer
+      offer_count:
+        type: integer
+      out_of_stock:
+        description: Products published as OUT_OF_STOCK.
+        type: integer
+      pending_orders:
+        description: Contracts with status DRAFT.
+        type: integer
+      resource_count:
+        type: integer
+      today_orders:
+        description: Contracts created in the last 24 hours.
+        type: integer
+    required:
+    - active_orders
+    - funnel
+    - low_stock
+    - offer_count
+    - out_of_stock
+    - pending_orders
+    - resource_count
+    - today_orders
+    type: object
+  dashboardsvc.FulfillmentStatusRequest:
+    properties:
+      status:
+        description: |-
+          New fulfillment status code: any non-empty string not starting with
+          "Return". The dashboard sends Packed and Shipped; Delivered also
+          triggers delivery handling.
+        example: Shipped
+        type: string
+    required:
+    - status
+    type: object
+  dashboardsvc.IDName:
+    properties:
+      id:
+        type: string
+      name:
+        type: string
+    required:
+    - id
+    - name
+    type: object
+  dashboardsvc.IDNameListResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/dashboardsvc.IDName'
+        type: array
+    required:
+    - items
+    type: object
+  dashboardsvc.InventoryItem:
+    properties:
+      availability:
+        description: Published resourceAttributes.availability.status, or "".
+        example: IN_STOCK
+        type: string
+      catalogId:
+        type: string
+      catalogName:
+        type: string
+      createdAt:
+        format: date-time
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      providerId:
+        type: string
+      providerName:
+        type: string
+      shortDesc:
+        type: string
+    type: object
+  dashboardsvc.InventoryItemsResponse:
+    properties:
+      availability:
+        additionalProperties:
+          type: integer
+        description: |-
+          Product count per resourceAttributes.availability.status over all
+          matching rows (not just this page). Products with no status are
+          counted under "".
+        type: object
+      items:
+        items:
+          $ref: '#/definitions/dashboardsvc.InventoryItem'
+        type: array
+      limit:
+        example: 20
+        type: integer
+      page:
+        example: 1
+        type: integer
+      total:
+        description: Total matching rows across all pages.
+        type: integer
+    required:
+    - availability
+    - items
+    - limit
+    - page
+    - total
+    type: object
+  dashboardsvc.MessageListResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/dashboardsvc.MessageLogItem'
+        type: array
+    required:
+    - items
+    type: object
+  dashboardsvc.MessageLogItem:
+    properties:
+      ack_status:
+        $ref: '#/definitions/dashboardsvc.NullAckStatus'
+      action:
+        description: |-
+          Beckn action (select, on_select, ..., catalog_publish, catalog_retire,
+          reconcile, on_reconcile).
+        type: string
+      created_at:
+        format: date-time
+        type: string
+        x-nullable: true
+      direction:
+        enum:
+        - INBOUND
+        - OUTBOUND
+        type: string
+      error_message:
+        type: string
+        x-nullable: true
+      id:
+        format: uuid
+        type: string
+      message_id:
+        format: uuid
+        type: string
+      request_payload:
+        type: object
+        x-nullable: true
+      response_payload:
+        type: object
+        x-nullable: true
+      transaction_id:
+        format: uuid
+        type: string
+        x-nullable: true
+      url:
+        type: string
+        x-nullable: true
+    type: object
+  dashboardsvc.NullAckStatus:
+    properties:
+      ack_status:
+        enum:
+        - ACK
+        - NACK
+        - ""
+        type: string
+      valid:
+        type: boolean
+    type: object
+  dashboardsvc.OfferListResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/dashboardsvc.OfferRow'
+        type: array
+      limit:
+        example: 20
+        type: integer
+      page:
+        example: 1
+        type: integer
+      total:
+        description: Total matching rows across all pages.
+        type: integer
+    required:
+    - items
+    - limit
+    - page
+    - total
+    type: object
+  dashboardsvc.OfferResponse:
+    properties:
+      offer:
+        $ref: '#/definitions/catalog.Offer'
+    required:
+    - offer
+    type: object
+  dashboardsvc.OfferRow:
+    properties:
+      catalog_id:
+        type: string
+      created_at:
+        format: date-time
+        type: string
+        x-nullable: true
+      descriptor_name:
+        type: string
+        x-nullable: true
+      descriptor_short_desc:
+        type: string
+        x-nullable: true
+      id:
+        type: string
+      resource_ids:
+        items:
+          type: string
+        type: array
+      validity_end:
+        format: date-time
+        type: string
+        x-nullable: true
+      validity_start:
+        format: date-time
+        type: string
+        x-nullable: true
+    type: object
+  dashboardsvc.OrderCommitment:
+    properties:
+      commitment_attributes:
+        type: object
+        x-nullable: true
+      id:
+        type: string
+      offer_descriptor:
+        type: object
+        x-nullable: true
+      offer_id:
+        type: string
+        x-nullable: true
+      resource_ids:
+        items:
+          type: string
+        type: array
+        x-nullable: true
+      status:
+        enum:
+        - DRAFT
+        - ACTIVE
+        - CLOSED
+        type: string
+    type: object
+  dashboardsvc.OrderConsideration:
+    properties:
+      consideration_attributes:
+        type: object
+        x-nullable: true
+      id:
+        type: string
+      status_code:
+        type: string
+      status_name:
+        type: string
+        x-nullable: true
+    type: object
+  dashboardsvc.OrderContract:
+    properties:
+      bap_id:
+        type: string
+      bap_uri:
+        type: string
+      contract_attributes:
+        description: Latest stored Beckn contract JSON.
+        type: object
+        x-nullable: true
+      created_at:
+        format: date-time
+        type: string
+        x-nullable: true
+      domain:
+        type: string
+        x-nullable: true
+      id:
+        format: uuid
+        type: string
+      status:
+        enum:
+        - DRAFT
+        - ACTIVE
+        - CANCELLED
+        - COMPLETE
+        type: string
+      transaction_id:
+        format: uuid
+        type: string
+      updated_at:
+        format: date-time
+        type: string
+        x-nullable: true
+    type: object
+  dashboardsvc.OrderDetailResponse:
+    properties:
+      commitments:
+        items:
+          $ref: '#/definitions/dashboardsvc.OrderCommitment'
+        type: array
+      considerations:
+        items:
+          $ref: '#/definitions/dashboardsvc.OrderConsideration'
+        type: array
+      contract:
+        $ref: '#/definitions/dashboardsvc.OrderContract'
+    required:
+    - commitments
+    - considerations
+    - contract
+    type: object
+  dashboardsvc.OrderListItem:
+    properties:
+      bap_id:
+        type: string
+      created_at:
+        format: date-time
+        type: string
+        x-nullable: true
+      fulfillment_status:
+        description: Delivery progress (e.g. PENDING, Packed, Shipped, Delivered),
+          or "".
+        type: string
+      id:
+        format: uuid
+        type: string
+      offer_descriptor:
+        description: The order's offer descriptor, or {}.
+        type: object
+      return_status:
+        description: Latest return outcome (e.g. Return_Approved, Return_Rejected),
+          or "".
+        type: string
+      status:
+        enum:
+        - DRAFT
+        - ACTIVE
+        - CANCELLED
+        - COMPLETE
+        type: string
+      transaction_id:
+        format: uuid
+        type: string
+    type: object
+  dashboardsvc.OrderListResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/dashboardsvc.OrderListItem'
+        type: array
+      limit:
+        example: 20
+        type: integer
+      page:
+        example: 1
+        type: integer
+      total:
+        description: Total matching rows across all pages.
+        type: integer
+    required:
+    - items
+    - limit
+    - page
+    - total
+    type: object
+  dashboardsvc.PublishCatalogRequest:
+    properties:
+      forceBaseline:
+        description: |-
+          Skip onix-catalog-publish's diff against the last published state and
+          write a fresh baseline (manual compaction).
+        example: false
+        type: boolean
+    type: object
+  dashboardsvc.PublishCatalogResponse:
+    properties:
+      message:
+        example: Catalog published to CDS
+        type: string
+      status:
+        example: ACK
+        type: string
+    required:
+    - message
+    - status
+    type: object
+  dashboardsvc.Rating:
+    properties:
+      bapId:
+        type: string
+      contractId:
+        format: uuid
+        type: string
+      createdAt:
+        format: date-time
+        type: string
+      id:
+        format: uuid
+        type: string
+      isPreview:
+        type: boolean
+      range:
+        description: Beckn rating range as the BAP sent it (raw JSON).
+        type: object
+      targetId:
+        type: string
+      transactionId:
+        format: uuid
+        type: string
+    required:
+    - bapId
+    - contractId
+    - createdAt
+    - id
+    - isPreview
+    - range
+    - targetId
+    - transactionId
+    type: object
+  dashboardsvc.RatingListResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/dashboardsvc.Rating'
+        type: array
+      limit:
+        example: 20
+        type: integer
+      page:
+        example: 1
+        type: integer
+      total:
+        description: Total matching rows across all pages.
+        type: integer
+    required:
+    - items
+    - limit
+    - page
+    - total
+    type: object
+  dashboardsvc.ResourceListResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/dashboardsvc.ResourceRow'
+        type: array
+      limit:
+        example: 20
+        type: integer
+      page:
+        example: 1
+        type: integer
+      total:
+        description: Total matching rows across all pages.
+        type: integer
+    required:
+    - items
+    - limit
+    - page
+    - total
+    type: object
+  dashboardsvc.ResourceResponse:
+    properties:
+      resource:
+        $ref: '#/definitions/catalog.Resource'
+    required:
+    - resource
+    type: object
+  dashboardsvc.ResourceRow:
+    properties:
+      catalog_id:
+        type: string
+      created_at:
+        format: date-time
+        type: string
+        x-nullable: true
+      descriptor_name:
+        type: string
+        x-nullable: true
+      descriptor_short_desc:
+        type: string
+        x-nullable: true
+      id:
+        type: string
+      resource_attributes:
+        type: object
+        x-nullable: true
+    type: object
+  dashboardsvc.SetCatalogActiveRequest:
+    properties:
+      isActive:
+        type: boolean
+    required:
+    - isActive
+    type: object
+  dashboardsvc.SetCatalogActiveResponse:
+    properties:
+      isActive:
+        type: boolean
+      publishError:
+        description: 'Only when the automatic republish failed: its error text.'
+        type: string
+      published:
+        description: |-
+          Only for a catalog published before: whether the automatic republish
+          succeeded.
+        type: boolean
+      status:
+        enum:
+        - updated
+        example: updated
+        type: string
+    required:
+    - isActive
+    - status
+    type: object
+  dashboardsvc.StatusDeletedResponse:
+    properties:
+      status:
+        enum:
+        - deleted
+        example: deleted
+        type: string
+    required:
+    - status
+    type: object
+  dashboardsvc.StatusOKResponse:
+    properties:
+      status:
+        enum:
+        - ok
+        example: ok
+        type: string
+    required:
+    - status
+    type: object
+  dashboardsvc.StatusUpdatedResponse:
+    properties:
+      status:
+        enum:
+        - updated
+        example: updated
+        type: string
+    required:
+    - status
+    type: object
+  dashboardsvc.SupportTicket:
+    properties:
+      bapId:
+        type: string
+      contractId:
+        description: Contract UUID, or "" when the ticket isn't linked to one.
+        type: string
+      createdAt:
+        format: date-time
+        type: string
+      id:
+        format: uuid
+        type: string
+      isPreview:
+        type: boolean
+      name:
+        type: string
+      resolvedAt:
+        description: Left out when the ticket isn't resolved.
+        format: date-time
+        type: string
+      shortDesc:
+        type: string
+      status:
+        enum:
+        - OPEN
+        - IN_PROGRESS
+        - RESOLVED
+        - CLOSED
+        type: string
+      transactionId:
+        description: Transaction UUID, or "".
+        type: string
+    required:
+    - bapId
+    - contractId
+    - createdAt
+    - id
+    - isPreview
+    - name
+    - shortDesc
+    - status
+    - transactionId
+    type: object
+  dashboardsvc.SupportTicketListResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/dashboardsvc.SupportTicket'
+        type: array
+      limit:
+        example: 20
+        type: integer
+      page:
+        example: 1
+        type: integer
+      total:
+        description: Total matching rows across all pages.
+        type: integer
+    required:
+    - items
+    - limit
+    - page
+    - total
+    type: object
+  reconsvc.Diff:
+    properties:
+      diff:
+        type: number
+      field:
+        type: string
+      ours:
+        type: number
+      theirs:
+        type: number
+    type: object
+  reconsvc.DueContract:
+    properties:
+      bap_id:
+        type: string
+      bap_uri:
+        type: string
+      basis_at:
+        format: date-time
+        type: string
+        x-nullable: true
+      basis_event:
+        description: |-
+          BasisEvent is what started the payout clock ("delivered", "cancelled",
+          ...); BasisAt is when. Zero BasisAt: the event hasn't happened.
+        type: string
+      breakup:
+        description: |-
+          Breakup itemizes the refund (settlement.RefundBreakup); Collections
+          says who collected the buyer's money (settlement.Collections).
+        items: {}
+        type: array
+      collected_by:
+        type: string
+      collections:
+        items: {}
+        type: array
+      commission:
+        type: number
+      consideration_id:
+        type: string
+      contract_id:
+        format: uuid
+        type: string
+      created_at:
+        description: CreatedAt is when the contract was created.
+        format: date-time
+        type: string
+      currency:
+        type: string
+      due:
+        type: boolean
+      due_at:
+        format: date-time
+        type: string
+        x-nullable: true
+      due_date:
+        format: date
+        type: string
+      in_next_batch:
+        description: |-
+          InNextBatch: the contract goes in this BPP's next /reconcile to its BAP
+          (see nextBatch).
+        type: boolean
+      last_result:
+        allOf:
+        - $ref: '#/definitions/reconsvc.Result'
+        description: |-
+          LastResult: for a contract its last batch didn't reconcile (disputed,
+          or sent before its settlement window), how it fared there.
+      net_payable:
+        type: number
+      network_id:
+        type: string
+      order_amount:
+        type: number
+      order_date:
+        description: |-
+          OrderDate is the order's creation date in Asia/Jakarta time; DueDate
+          the date the payout falls due, once known. Set by the caller.
+        format: date
+        type: string
+      reconciliation_id:
+        description: ReconciliationID is the batch the contract was last in.
+        type: string
+      reconciliation_status:
+        description: |-
+          ReconciliationStatus is the payment's state in reconciliation: "" (not
+          sent yet, or pending in its last batch) or DISPUTED (sent again).
+        type: string
+      refund:
+        type: number
+      refund_settlement_ids:
+        description: RefundSettlementIDs are the pre-payout refunds counted in Refund.
+        items:
+          type: string
+        type: array
+      refunded_after_payout:
+        description: |-
+          RefundedAfterPayout is refunded by the BPP itself after the payout; it
+          is outside reconciliation (ION Release 1) and only reported.
+        type: number
+      selectable:
+        description: |-
+          Selectable: the operator can choose the contract for a /reconcile (due
+          or disputed; see choose).
+        type: boolean
+      settlement_accounts:
+        items: {}
+        type: array
+      settlement_basis:
+        description: |-
+          Basis / Window are the payout term the contract falls due by: of its
+          Terms, the one giving the latest due date (see assess).
+        type: string
+      settlement_id:
+        type: string
+      settlement_window:
+        type: string
+      status:
+        type: string
+      transaction_id:
+        format: uuid
+        type: string
+      withholding:
+        type: number
+    type: object
+  reconsvc.OrderDayCount:
+    properties:
+      orderDate:
+        type: string
+      remainingOrderCount:
+        type: integer
+      reportedOrderCount:
+        type: integer
+    type: object
+  reconsvc.ReconciliationBap:
+    properties:
+      bap_id:
+        type: string
+      due:
+        description: Contracts due now or disputed.
+        items:
+          $ref: '#/definitions/reconsvc.DueContract'
+        type: array
+      resend_id:
+        description: The disputed batch the next /reconcile sends again in full.
+        type: string
+      summary:
+        allOf:
+        - $ref: '#/definitions/reconsvc.Summary'
+        description: Summary of the next batch, or null when there is none.
+        x-nullable: true
+      upcoming:
+        items:
+          $ref: '#/definitions/reconsvc.DueContract'
+        type: array
+    required:
+    - bap_id
+    - due
+    - summary
+    - upcoming
+    type: object
+  reconsvc.ReconciliationBatch:
+    properties:
+      bap_id:
+        type: string
+      contract_ids:
+        items:
+          type: string
+        type: array
+      created_at:
+        format: date-time
+        type: string
+      direction:
+        enum:
+        - OUTBOUND
+        - INBOUND
+        type: string
+      error_message:
+        type: string
+        x-nullable: true
+      id:
+        description: reconciliationId.
+        type: string
+      request_payload:
+        description: The /reconcile Beckn message sent or received.
+        type: object
+        x-nullable: true
+      response_payload:
+        description: The /on_reconcile Beckn message received or sent.
+        type: object
+        x-nullable: true
+      settlement_date:
+        description: Settlement date (YYYY-MM-DD).
+        format: date
+        type: string
+      status:
+        description: |-
+          SENDING, SENT and FAILED come from this BPP's sending; AGREED,
+          DISPUTED and PENDING are the reconcile outcome.
+        enum:
+        - SENDING
+        - SENT
+        - FAILED
+        - AGREED
+        - DISPUTED
+        - PENDING
+        type: string
+      summary:
+        allOf:
+        - $ref: '#/definitions/reconsvc.Summary'
+        description: The settlementSummary of the /reconcile.
+        x-nullable: true
+      transaction_id:
+        type: string
+      updated_at:
+        format: date-time
+        type: string
+    type: object
+  reconsvc.ReconciliationOverviewResponse:
+    properties:
+      baps:
+        items:
+          $ref: '#/definitions/reconsvc.ReconciliationBap'
+        type: array
+      batches:
+        description: The 50 most recent batches for this seller, newest first.
+        items:
+          $ref: '#/definitions/reconsvc.ReconciliationBatch'
+        type: array
+      now:
+        format: date-time
+        type: string
+      terms:
+        $ref: '#/definitions/reconsvc.ReconciliationTerms'
+    required:
+    - baps
+    - batches
+    - now
+    - terms
+    type: object
+  reconsvc.ReconciliationSendErrorResponse:
+    properties:
+      batch:
+        $ref: '#/definitions/reconsvc.ReconciliationBatch'
+      error:
+        example: 'reconcile not delivered: ...'
+        type: string
+    required:
+    - batch
+    - error
+    type: object
+  reconsvc.ReconciliationSendRequest:
+    properties:
+      bap_id:
+        example: bap.example.com
+        type: string
+      contract_ids:
+        description: |-
+          Contract UUIDs to send. Only the ones that are due or disputed are
+          included. Leave empty to send the default batch.
+        items:
+          type: string
+        type: array
+    required:
+    - bap_id
+    type: object
+  reconsvc.ReconciliationSendResponse:
+    properties:
+      batch:
+        $ref: '#/definitions/reconsvc.ReconciliationBatch'
+    required:
+    - batch
+    type: object
+  reconsvc.ReconciliationTerms:
+    properties:
+      settlement_basis:
+        example: AFTER_DELIVERY
+        type: string
+      settlement_window:
+        example: P1D
+        type: string
+    type: object
+  reconsvc.Result:
+    properties:
+      accord:
+        type: boolean
+      code:
+        type: string
+      diffs:
+        description: Diffs are the figures the two participants differ on.
+        items:
+          $ref: '#/definitions/reconsvc.Diff'
+        type: array
+      field:
+        description: Field is the figure the dispute names (dispute.field), when it
+          does.
+        type: string
+      pending:
+        description: |-
+          Pending: accord false with a pending code; the contract is sent again
+          later rather than disputed.
+        type: boolean
+      reason:
+        type: string
+    type: object
+  reconsvc.Summary:
+    properties:
+      agreedCount:
+        description: |-
+          Contracts by outcome: disputed when any of its settlements is,
+          otherwise pending when any is, otherwise agreed.
+        type: integer
+      agreedSettlementCount:
+        description: The same per settlement.
+        type: integer
+      bapId:
+        type: string
+      bppId:
+        type: string
+      contractCount:
+        type: integer
+      currency:
+        example: IDR
+        type: string
+      disputedCount:
+        type: integer
+      disputedSettlementCount:
+        type: integer
+      orderDayCounts:
+        description: |-
+          OrderDayCounts: for each order day in the message, the sender's own
+          count of the pair's orders created that day and of those not yet
+          reconciled.
+        items:
+          $ref: '#/definitions/reconsvc.OrderDayCount'
+        type: array
+      pendingCount:
+        type: integer
+      pendingSettlementCount:
+        type: integer
+      settlementCount:
+        type: integer
+      settlementDate:
+        format: date
+        type: string
+      totalAgreedCommission:
+        description: |-
+          The BAP's (commission) and the BPP's (netPayable) entitlements over the
+          settlements with accord true, and the answerer's own claim over the
+          others -- not an agreed amount.
+        type: number
+      totalAgreedNetPayable:
+        type: number
+      totalCommission:
+        type: number
+      totalNetPayable:
+        type: number
+      totalOrderAmount:
+        type: number
+      totalRefund:
+        type: number
+      totalUnreconciledCommission:
+        type: number
+      totalUnreconciledNetPayable:
+        type: number
+      totalWithholding:
+        type: number
+    type: object
+  server.AckMessage:
+    properties:
+      ack:
+        $ref: '#/definitions/server.AckStatus'
+    required:
+    - ack
+    type: object
+  server.AckStatus:
+    properties:
+      status:
+        enum:
+        - ACK
+        - NACK
+        example: ACK
+        type: string
+    required:
+    - status
+    type: object
+  server.BecknAckResponse:
+    properties:
+      context:
+        $ref: '#/definitions/server.BecknContext'
+      message:
+        $ref: '#/definitions/server.AckMessage'
+    required:
+    - context
+    - message
+    type: object
+  server.BecknContext:
+    properties:
+      action:
+        example: select
+        type: string
+      bapId:
+        example: bap.example.com
+        type: string
+      bapUri:
+        description: |-
+          Required (non-empty) by select, init, confirm, status, update, cancel,
+          rate and support; otherwise the reply is a 400 NACK.
+        example: https://bap.example.com/bap/receiver
+        type: string
+      bppId:
+        example: bpp.example.com
+        type: string
+      bppUri:
+        example: https://bpp.example.com/bpp/receiver
+        type: string
+      messageId:
+        example: 6f1c2a1e-1111-4a5b-9c1d-000000000001
+        format: uuid
+        type: string
+      networkId:
+        example: ion.id/ion-launch
+        type: string
+      timestamp:
+        example: "2026-10-23T10:00:00Z"
+        format: date-time
+        type: string
+      transactionId:
+        description: Used to find the contract (status, rate, update, cancel).
+        example: 6f1c2a1e-2222-4a5b-9c1d-000000000002
+        format: uuid
+        type: string
+      ttl:
+        example: PT30S
+        type: string
+      version:
+        example: 2.0.0
+        type: string
+    type: object
+  server.BecknWebhookRequest:
+    properties:
+      context:
+        $ref: '#/definitions/server.BecknContext'
+      message:
+        description: |-
+          Beckn message for the action. It usually carries contract (select,
+          init, confirm, update, cancel, and status with contract.id),
+          ratingInputs (rate), support (support), or reconciliationId, contracts
+          and settlementSummary (reconcile, on_reconcile).
+        type: object
+    required:
+    - context
+    - message
+    type: object
+  server.HealthData:
+    properties:
+      status:
+        example: ok
+        type: string
+    required:
+    - status
+    type: object
+  server.HealthResponse:
+    properties:
+      data:
+        $ref: '#/definitions/server.HealthData'
+      messages:
+        items:
+          $ref: '#/definitions/server.WscMessage'
+        type: array
+        x-nullable: true
+      status:
+        enum:
+        - success
+        example: success
+        type: string
+    required:
+    - data
+    - status
+    type: object
+  server.ReconAckResponse:
+    properties:
+      context:
+        type: object
+        x-nullable: true
+      message:
+        $ref: '#/definitions/server.AckMessage'
+    required:
+    - context
+    - message
+    type: object
+  server.ReconNackResponse:
+    properties:
+      message:
+        $ref: '#/definitions/server.AckMessage'
+    required:
+    - message
+    type: object
+  server.WscErrorResponse:
+    properties:
+      data:
+        description: Always null on error.
+        type: object
+        x-nullable: true
+      messages:
+        items:
+          $ref: '#/definitions/server.WscMessage'
+        type: array
+      status:
+        enum:
+        - error
+        example: error
+        type: string
+    required:
+    - messages
+    - status
+    type: object
+  server.WscMessage:
+    properties:
+      errcode:
+        example: missing
+        type: string
+      field:
+        type: string
+      msgid:
+        example: 1001
+        type: integer
+      vals:
+        items:
+          type: string
+        type: array
+    required:
+    - errcode
+    - msgid
+    type: object
+  server.WscSuccessResponse:
+    properties:
+      data:
+        description: Always null here.
+        type: object
+        x-nullable: true
+      messages:
+        description: Always null on success.
+        items:
+          $ref: '#/definitions/server.WscMessage'
+        type: array
+        x-nullable: true
+      status:
+        enum:
+        - success
+        example: success
+        type: string
+    required:
+    - status
+    type: object
+info:
+  contact: {}
+  description: 'Seller backend (bpp-application). /api/v1: seller dashboard API for
+    bpp-frontend (scoped to the logged-in seller''s provider), auth bootstrap for
+    landing-page, and the provider catalog API. /api/webhook: Beckn requests delivered
+    by onix-bpp''s receiver; each is ACKed at once and processed asynchronously, with
+    the on_* answer sent back through the onix-bpp caller. See docs/architecture.md.'
+  title: BPP API
+  version: "1.0"
+paths:
+  /api/v1/auth/bootstrap:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Idempotent. If a users row already exists for the token's sub, returns its providerId with isNew false without reading the body. Otherwise requires businessName, fetches the email from Zitadel's userinfo endpoint, and creates a providers row (id provider-<slug of businessName>; a second seller with the same name collides and gets a 500) and a users row in one transaction.
+        The /api/v1/auth group applies a CORS middleware allowing only LANDING_PAGE_ORIGIN (methods POST, OPTIONS; headers Authorization, Content-Type); an OPTIONS /api/v1/auth/bootstrap preflight is answered 204 before the token check.
+      operationId: bootstrapSeller
+      parameters:
+      - description: Required only when no seller profile exists yet for this identity
+        in: body
+        name: body
+        schema:
+          $ref: '#/definitions/authsvc.BootstrapRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Existing or newly created seller profile
+          schema:
+            $ref: '#/definitions/authsvc.BootstrapResponse'
+        "400":
+          description: New identity and the body is missing, invalid, or has no businessName
+            (gin binding error text)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "401":
+          description: Bearer token missing (missing bearer token), or invalid or
+            expired (invalid or expired token)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "500":
+          description: 'DB error, userinfo fetch failure (fetch userinfo: ...), or
+            provider/user insert failure (create provider: ..., create user: ...)'
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Create (or fetch) the seller profile for a Zitadel login
+      tags:
+      - auth
+  /api/v1/catalog-index:
+    get:
+      description: Proxies <catalog files base URL>/index/becknCatalogs.index.json
+        from the catalog file store (CATALOG_FILES_BASE_URL, else CATALOG_BASE_URL)
+        and returns it unchanged. The index is network-wide, not scoped to the seller.
+      operationId: getCatalogIndex
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: The catalog index JSON as published
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: CATALOG_FILES_BASE_URL/CATALOG_BASE_URL not configured
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "401":
+          description: Bearer token missing (missing bearer token), or invalid or
+            expired (invalid or expired token)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "403":
+          description: Valid token, but no seller profile (users row) for it; call
+            POST /api/v1/auth/bootstrap
+          schema:
+            $ref: '#/definitions/auth.NoProviderResponse'
+        "404":
+          description: no catalog has been published yet
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "502":
+          description: The file store could not be reached, or returned a non-2xx
+            status (catalog file store returned <status>)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Published catalog index (proxy)
+      tags:
+      - catalogs
+  /api/v1/catalog/publish:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Provider-facing publish API with no auth middleware. For each catalog it upserts the provider (replacing its locations) and the catalog, and replaces the catalog's resources and offers in one DB transaction; offers without terms get this BPP's default terms.
+        It then POSTs one catalog/publish request (onix-catalog-publish shape, catalog ids namespaced as <bppId>/<catalogId>) to CDS_PUBLISH_URL, signed when a BPP private key is set; when CDS_PUBLISH_URL is empty the forward is skipped and the call still ACKs. Inbound and outbound messages are logged to beckn_message_log.
+      operationId: providerPublishCatalog
+      parameters:
+      - description: Catalogs to save and publish
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/catalog.ProviderPublishRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Saved, and forwarded when configured
+          schema:
+            $ref: '#/definitions/catalog.PublishAckResponse'
+        "400":
+          description: Body is not valid JSON, or catalogs is missing or empty (msgid
+            1001, errcode missing)
+          schema:
+            $ref: '#/definitions/server.WscErrorResponse'
+        "500":
+          description: 'DB save failed, or the CDS forward failed (transport error
+            or non-2xx reply): msgid 1002, errcode database_error'
+          schema:
+            $ref: '#/definitions/server.WscErrorResponse'
+      security: []
+      summary: Provider catalog publish (no auth)
+      tags:
+      - catalogs
+  /api/v1/catalogs:
+    get:
+      description: Paginated list of the seller's catalogs that are not deleted, newest
+        first, with resource and offer counts.
+      operationId: listCatalogs
+      parameters:
+      - description: Case-insensitive substring match on catalog id, catalog name
+          or provider id
+        in: query
+        name: search
+        type: string
+      - default: 1
+        description: 1-based page number; values that are not numbers or below 1 become
+          1
+        in: query
+        minimum: 1
+        name: page
+        type: integer
+      - default: 20
+        description: Page size; values that are not numbers or outside 1..100 fall
+          back to 20
+        in: query
+        maximum: 100
+        minimum: 1
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Page of catalogs
+          schema:
+            $ref: '#/definitions/dashboardsvc.CatalogListResponse'
+        "401":
+          description: Bearer token missing (missing bearer token), or invalid or
+            expired (invalid or expired token)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "403":
+          description: Valid token, but no seller profile (users row) for it; call
+            POST /api/v1/auth/bootstrap
+          schema:
+            $ref: '#/definitions/auth.NoProviderResponse'
+        "500":
+          description: Database or internal error (raw error text)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List the seller's catalogs
+      tags:
+      - catalogs
+    post:
+      consumes:
+      - application/json
+      description: Upserts the catalog's metadata (not its products or offers). Also
+        upserts the seller's own provider with display name provider.descriptor.name
+        (provider.id is ignored). If the seller doesn't own the catalog id and that
+        id exists in any state, including deleted (retired), the call fails with 409.
+        A non-empty crc replaces the catalog's CRC.
+      operationId: createCatalog
+      parameters:
+      - description: Catalog metadata
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dashboardsvc.CreateCatalogRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Saved
+          schema:
+            $ref: '#/definitions/dashboardsvc.CreateCatalogResponse'
+        "400":
+          description: Invalid JSON or a missing required field (gin binding error
+            text)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "401":
+          description: Bearer token missing (missing bearer token), or invalid or
+            expired (invalid or expired token)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "403":
+          description: Valid token, but no seller profile (users row) for it; call
+            POST /api/v1/auth/bootstrap
+          schema:
+            $ref: '#/definitions/auth.NoProviderResponse'
+        "409":
+          description: The id belongs to another seller, or was deleted before and
+            can't be reused
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "500":
+          description: Database or internal error (raw error text)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Create or update catalog metadata
+      tags:
+      - catalogs
+  /api/v1/catalogs/{id}:
+    delete:
+      description: 'If the catalog was ever published (network_published_at set),
+        first sends a catalog/publish request to CDS_PUBLISH_URL carrying retire:
+        [<bppId>/<catalogId>] so discovery stops serving it (logged as a catalog_retire
+        message). Then soft-deletes the catalog. A retired catalog id can never be
+        reused.'
+      operationId: deleteCatalog
+      parameters:
+      - description: Catalog id, without the <bppId>/ prefix
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Deleted
+          schema:
+            $ref: '#/definitions/dashboardsvc.StatusDeletedResponse'
+        "400":
+          description: The catalog was published but CDS_PUBLISH_URL is not configured,
+            so it can't be retired
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "401":
+          description: Bearer token missing (missing bearer token), or invalid or
+            expired (invalid or expired token)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "403":
+          description: Valid token, but no seller profile (users row) for it; call
+            POST /api/v1/auth/bootstrap
+          schema:
+            $ref: '#/definitions/auth.NoProviderResponse'
+        "404":
+          description: Catalog doesn't exist, is deleted, or belongs to another seller
+            (catalog not found)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "500":
+          description: DB error, or the Beckn signature header couldn't be built
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "502":
+          description: 'CDS_PUBLISH_URL couldn''t be reached or returned a non-2xx
+            reply (e.g. CDS returned 400: ...)'
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Retire and delete a catalog
+      tags:
+      - catalogs
+    get:
+      description: Returns one of the seller's catalogs, its resources, and its offers.
+        Each offer carries the attributes of its first consideration (its price).
+      operationId: getCatalog
+      parameters:
+      - description: Catalog id, without the <bppId>/ prefix
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Catalog detail
+          schema:
+            $ref: '#/definitions/dashboardsvc.CatalogDetailResponse'
+        "401":
+          description: Bearer token missing (missing bearer token), or invalid or
+            expired (invalid or expired token)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "403":
+          description: Valid token, but no seller profile (users row) for it; call
+            POST /api/v1/auth/bootstrap
+          schema:
+            $ref: '#/definitions/auth.NoProviderResponse'
+        "404":
+          description: Catalog doesn't exist, is deleted, or belongs to another seller
+            (catalog not found)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "500":
+          description: Database or internal error (raw error text)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Catalog detail with resources and offers
+      tags:
+      - catalogs
+  /api/v1/catalogs/{id}/active:
+    patch:
+      consumes:
+      - application/json
+      description: 'Sets catalogs.is_active: a reversible pause/resume, not a retirement.
+        If the catalog was published before, it is republished to CDS_PUBLISH_URL
+        right away and the response carries published (and publishError when that
+        failed); a failed republish does not fail the toggle. A never-published catalog
+        is a DB-only change.'
+      operationId: setCatalogActive
+      parameters:
+      - description: Catalog id, without the <bppId>/ prefix
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: New active flag
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dashboardsvc.SetCatalogActiveRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Updated
+          schema:
+            $ref: '#/definitions/dashboardsvc.SetCatalogActiveResponse'
+        "400":
+          description: isActive is missing or not a boolean (isActive (boolean) is
+            required)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "401":
+          description: Bearer token missing (missing bearer token), or invalid or
+            expired (invalid or expired token)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "403":
+          description: Valid token, but no seller profile (users row) for it; call
+            POST /api/v1/auth/bootstrap
+          schema:
+            $ref: '#/definitions/auth.NoProviderResponse'
+        "404":
+          description: Catalog doesn't exist, is deleted, or belongs to another seller
+            (catalog not found)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "500":
+          description: Database or internal error (raw error text)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Pause or resume a catalog
+      tags:
+      - catalogs
+  /api/v1/catalogs/{id}/latest-file:
+    get:
+      description: Fetches <catalog files base URL>/catalogs/<id>.latest.json.gz from
+        the catalog file store (CATALOG_FILES_BASE_URL, else CATALOG_BASE_URL), gunzips
+        it, and returns the JSON unchanged. Only for a catalog the seller owns.
+      operationId: getCatalogLatestFile
+      parameters:
+      - description: Catalog id, without the <bppId>/ prefix
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: The catalog's latest published file (JSON)
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: CATALOG_FILES_BASE_URL/CATALOG_BASE_URL not configured
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "401":
+          description: Bearer token missing (missing bearer token), or invalid or
+            expired (invalid or expired token)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "403":
+          description: Valid token, but no seller profile (users row) for it; call
+            POST /api/v1/auth/bootstrap
+          schema:
+            $ref: '#/definitions/auth.NoProviderResponse'
+        "404":
+          description: catalog not found, or this catalog has not been published yet
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "500":
+          description: Database or internal error (raw error text)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "502":
+          description: The file store could not be reached, the file could not be
+            gunzipped, or the store returned a non-2xx status
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: A catalog's latest published file (proxy)
+      tags:
+      - catalogs
+  /api/v1/catalogs/{id}/offers:
+    post:
+      consumes:
+      - application/json
+      description: Inserts one offer and its considerations into the catalog in one
+        transaction. Missing terms (and the consideration fee) are filled with this
+        BPP's defaults. If provider.id is non-empty, the offer is linked to the seller's
+        own provider (and its name updated). Nothing is published until POST /api/v1/catalogs/{id}/publish.
+      operationId: addCatalogOffer
+      parameters:
+      - description: Catalog id, without the <bppId>/ prefix
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Offer with its considerations
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/catalog.Offer'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Added
+          schema:
+            $ref: '#/definitions/dashboardsvc.StatusOKResponse'
+        "400":
+          description: Invalid JSON, or id is empty (offer id is required)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "401":
+          description: Bearer token missing (missing bearer token), or invalid or
+            expired (invalid or expired token)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "403":
+          description: Valid token, but no seller profile (users row) for it; call
+            POST /api/v1/auth/bootstrap
+          schema:
+            $ref: '#/definitions/auth.NoProviderResponse'
+        "404":
+          description: Catalog doesn't exist, is deleted, or belongs to another seller
+            (catalog not found)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "500":
+          description: Database or internal error (raw error text)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Add a standalone offer
+      tags:
+      - catalogs
+  /api/v1/catalogs/{id}/offers/{oid}:
+    delete:
+      description: Soft-deletes the offer (sets deleted_at). Nothing is sent to the
+        network; the next publish leaves the offer out.
+      operationId: deleteCatalogOffer
+      parameters:
+      - description: Catalog id, without the <bppId>/ prefix
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Offer id
+        in: path
+        name: oid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Deleted
+          schema:
+            $ref: '#/definitions/dashboardsvc.StatusDeletedResponse'
+        "401":
+          description: Bearer token missing (missing bearer token), or invalid or
+            expired (invalid or expired token)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "403":
+          description: Valid token, but no seller profile (users row) for it; call
+            POST /api/v1/auth/bootstrap
+          schema:
+            $ref: '#/definitions/auth.NoProviderResponse'
+        "404":
+          description: catalog not found, or offer not found
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "500":
+          description: Database or internal error (raw error text)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Soft-delete an offer
+      tags:
+      - catalogs
+    get:
+      description: Returns one offer of a catalog the seller owns, with its considerations
+        (prices). offerAttributes are returned as stored; default terms are not filled
+        in.
+      operationId: getCatalogOffer
+      parameters:
+      - description: Catalog id, without the <bppId>/ prefix
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Offer id
+        in: path
+        name: oid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Offer
+          schema:
+            $ref: '#/definitions/dashboardsvc.OfferResponse'
+        "401":
+          description: Bearer token missing (missing bearer token), or invalid or
+            expired (invalid or expired token)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "403":
+          description: Valid token, but no seller profile (users row) for it; call
+            POST /api/v1/auth/bootstrap
+          schema:
+            $ref: '#/definitions/auth.NoProviderResponse'
+        "404":
+          description: catalog not found, or offer not found
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "500":
+          description: Database or internal error (raw error text)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get one offer in publish shape
+      tags:
+      - catalogs
+    put:
+      consumes:
+      - application/json
+      description: Replaces the offer's descriptor, resourceIds, offerAttributes and
+        validity, and replaces all of its considerations. Missing terms are filled
+        with this BPP's defaults. The offer's provider link is not changed. Publish
+        again for the change to reach the network.
+      operationId: updateCatalogOffer
+      parameters:
+      - description: Catalog id, without the <bppId>/ prefix
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Offer id
+        in: path
+        name: oid
+        required: true
+        type: string
+      - description: Offer with its considerations
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/catalog.Offer'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Updated
+          schema:
+            $ref: '#/definitions/dashboardsvc.StatusUpdatedResponse'
+        "400":
+          description: Invalid JSON, or descriptor.name or resourceIds is empty (offer
+            name and at least one resource are required)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "401":
+          description: Bearer token missing (missing bearer token), or invalid or
+            expired (invalid or expired token)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "403":
+          description: Valid token, but no seller profile (users row) for it; call
+            POST /api/v1/auth/bootstrap
+          schema:
+            $ref: '#/definitions/auth.NoProviderResponse'
+        "404":
+          description: catalog not found, or offer not found
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "500":
+          description: Database or internal error (raw error text)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Replace an offer
+      tags:
+      - catalogs
+  /api/v1/catalogs/{id}/products:
+    post:
+      consumes:
+      - application/json
+      description: Inserts one resource into the catalog and, if offer is given, an
+        offer with its considerations, in one transaction. Offers and considerations
+        without terms get this BPP's defaults. An offer with a provider is linked
+        to the seller's own provider, whatever id was sent. Nothing is published until
+        POST /api/v1/catalogs/{id}/publish.
+      operationId: addCatalogProduct
+      parameters:
+      - description: Catalog id, without the <bppId>/ prefix
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Product, and optional offer
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dashboardsvc.AddProductRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Added
+          schema:
+            $ref: '#/definitions/dashboardsvc.StatusOKResponse'
+        "400":
+          description: Invalid JSON or a missing required field (gin binding error
+            text)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "401":
+          description: Bearer token missing (missing bearer token), or invalid or
+            expired (invalid or expired token)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "403":
+          description: Valid token, but no seller profile (users row) for it; call
+            POST /api/v1/auth/bootstrap
+          schema:
+            $ref: '#/definitions/auth.NoProviderResponse'
+        "404":
+          description: Catalog doesn't exist, is deleted, or belongs to another seller
+            (catalog not found)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "500":
+          description: 'DB error, e.g. a duplicate resource or offer id (insert resource:
+            ..., insert offer: ...)'
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Add a product (and optionally an offer)
+      tags:
+      - catalogs
+  /api/v1/catalogs/{id}/publish:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Builds the catalog from the DB (resources, offers and considerations, default terms filled in, isActive from the pause flag; media with a blank uri dropped) and sends it as a signed catalog/publish request to CDS_PUBLISH_URL (onix-catalog-publish), logged to beckn_message_log. On a 2xx reply network_published_at is stamped. Publishing doesn't lock the catalog; it can be edited and published again.
+        The body is optional; {"forceBaseline": true} makes onix-catalog-publish write a fresh baseline instead of a diff.
+      operationId: publishCatalog
+      parameters:
+      - description: Catalog id, without the <bppId>/ prefix
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Optional publish options
+        in: body
+        name: body
+        schema:
+          $ref: '#/definitions/dashboardsvc.PublishCatalogRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Accepted by the publish endpoint
+          schema:
+            $ref: '#/definitions/dashboardsvc.PublishCatalogResponse'
+        "400":
+          description: CDS_PUBLISH_URL not configured, or catalog has no products
+            or offers to publish
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "401":
+          description: Bearer token missing (missing bearer token), or invalid or
+            expired (invalid or expired token)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "403":
+          description: Valid token, but no seller profile (users row) for it; call
+            POST /api/v1/auth/bootstrap
+          schema:
+            $ref: '#/definitions/auth.NoProviderResponse'
+        "404":
+          description: Catalog doesn't exist, is deleted, or belongs to another seller
+            (catalog not found)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "500":
+          description: 'DB error, or the Beckn signature header couldn''t be built
+            (build auth header: ...)'
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "502":
+          description: 'CDS_PUBLISH_URL couldn''t be reached or returned a non-2xx
+            reply (e.g. CDS returned 400: ...)'
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Publish a catalog to the network
+      tags:
+      - catalogs
+  /api/v1/catalogs/{id}/resources:
+    get:
+      description: Lightweight list of a catalog's resources, sorted by name, for
+        the offer picker. Filtered by the seller's provider_id; a catalog that doesn't
+        exist or isn't the seller's returns an empty list, not a 404.
+      operationId: listCatalogResources
+      parameters:
+      - description: Catalog id, without the <bppId>/ prefix
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Resources
+          schema:
+            $ref: '#/definitions/dashboardsvc.IDNameListResponse'
+        "401":
+          description: Bearer token missing (missing bearer token), or invalid or
+            expired (invalid or expired token)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "403":
+          description: Valid token, but no seller profile (users row) for it; call
+            POST /api/v1/auth/bootstrap
+          schema:
+            $ref: '#/definitions/auth.NoProviderResponse'
+        "500":
+          description: Database or internal error (raw error text)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Resource ids and names of a catalog
+      tags:
+      - catalogs
+  /api/v1/catalogs/{id}/resources/{rid}:
+    get:
+      description: Returns one resource of a catalog the seller owns, in the shape
+        it is published in.
+      operationId: getCatalogResource
+      parameters:
+      - description: Catalog id, without the <bppId>/ prefix
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Resource (product) id
+        in: path
+        name: rid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Resource
+          schema:
+            $ref: '#/definitions/dashboardsvc.ResourceResponse'
+        "401":
+          description: Bearer token missing (missing bearer token), or invalid or
+            expired (invalid or expired token)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "403":
+          description: Valid token, but no seller profile (users row) for it; call
+            POST /api/v1/auth/bootstrap
+          schema:
+            $ref: '#/definitions/auth.NoProviderResponse'
+        "404":
+          description: catalog not found, or resource not found
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "500":
+          description: Database or internal error (raw error text)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get one product in publish shape
+      tags:
+      - catalogs
+    put:
+      consumes:
+      - application/json
+      description: Replaces the resource's descriptor (name, code, descriptions, media)
+        and resourceAttributes, including availability. The id in the body is ignored;
+        rid from the path is used. Publish again for the change to reach the network.
+      operationId: updateCatalogResource
+      parameters:
+      - description: Catalog id, without the <bppId>/ prefix
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Resource (product) id
+        in: path
+        name: rid
+        required: true
+        type: string
+      - description: Resource in publish shape
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/catalog.Resource'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Updated
+          schema:
+            $ref: '#/definitions/dashboardsvc.StatusUpdatedResponse'
+        "400":
+          description: Invalid JSON, or descriptor.name is empty (resource name is
+            required)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "401":
+          description: Bearer token missing (missing bearer token), or invalid or
+            expired (invalid or expired token)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "403":
+          description: Valid token, but no seller profile (users row) for it; call
+            POST /api/v1/auth/bootstrap
+          schema:
+            $ref: '#/definitions/auth.NoProviderResponse'
+        "404":
+          description: catalog not found, or resource not found
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "500":
+          description: Database or internal error (raw error text)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Replace a product
+      tags:
+      - catalogs
+  /api/v1/dashboard/stats:
+    get:
+      description: Order counts (ACTIVE, DRAFT, created in the last 24 hours), resource
+        and offer counts, the select/init/confirm message funnel, and how many products
+        are published as OUT_OF_STOCK or LOW_STOCK. Order and inventory counts are
+        scoped to the seller; the funnel counts come from beckn_message_log and are
+        filtered only by bpp_id, not by provider.
+      operationId: getDashboardStats
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Stats
+          schema:
+            $ref: '#/definitions/dashboardsvc.DashboardStatsResponse'
+        "401":
+          description: Bearer token missing (missing bearer token), or invalid or
+            expired (invalid or expired token)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "403":
+          description: Valid token, but no seller profile (users row) for it; call
+            POST /api/v1/auth/bootstrap
+          schema:
+            $ref: '#/definitions/auth.NoProviderResponse'
+        "500":
+          description: Database or internal error (raw error text)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Dashboard key metrics
+      tags:
+      - dashboard
+  /api/v1/inventory/items:
+    get:
+      description: Paginated list of the seller's resources, each with its catalog,
+        provider and published availability status. Also returns product counts per
+        availability status across all matching rows, not just the current page.
+      operationId: listInventoryItems
+      parameters:
+      - description: Narrow to one catalog; another provider's catalog just returns
+          no rows
+        in: query
+        name: catalog_id
+        type: string
+      - description: Case-insensitive substring match on resource name or id
+        in: query
+        name: search
+        type: string
+      - default: 1
+        description: 1-based page number; values that are not numbers or below 1 become
+          1
+        in: query
+        minimum: 1
+        name: page
+        type: integer
+      - default: 20
+        description: Page size; values that are not numbers or outside 1..100 fall
+          back to 20
+        in: query
+        maximum: 100
+        minimum: 1
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Page of items
+          schema:
+            $ref: '#/definitions/dashboardsvc.InventoryItemsResponse'
+        "401":
+          description: Bearer token missing (missing bearer token), or invalid or
+            expired (invalid or expired token)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "403":
+          description: Valid token, but no seller profile (users row) for it; call
+            POST /api/v1/auth/bootstrap
+          schema:
+            $ref: '#/definitions/auth.NoProviderResponse'
+        "500":
+          description: Database or internal error (raw error text)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Inventory items with catalog and provider info
+      tags:
+      - inventory
+  /api/v1/inventory/offers:
+    get:
+      description: Paginated list of the seller's offers.
+      operationId: listInventoryOffers
+      parameters:
+      - default: 1
+        description: 1-based page number; values that are not numbers or below 1 become
+          1
+        in: query
+        minimum: 1
+        name: page
+        type: integer
+      - default: 20
+        description: Page size; values that are not numbers or outside 1..100 fall
+          back to 20
+        in: query
+        maximum: 100
+        minimum: 1
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Page of offers
+          schema:
+            $ref: '#/definitions/dashboardsvc.OfferListResponse'
+        "401":
+          description: Bearer token missing (missing bearer token), or invalid or
+            expired (invalid or expired token)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "403":
+          description: Valid token, but no seller profile (users row) for it; call
+            POST /api/v1/auth/bootstrap
+          schema:
+            $ref: '#/definitions/auth.NoProviderResponse'
+        "500":
+          description: Database or internal error (raw error text)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List the seller's offers
+      tags:
+      - inventory
+  /api/v1/inventory/resources:
+    get:
+      description: Paginated list of the seller's resources, read straight from the
+        resources table.
+      operationId: listInventoryResources
+      parameters:
+      - default: 1
+        description: 1-based page number; values that are not numbers or below 1 become
+          1
+        in: query
+        minimum: 1
+        name: page
+        type: integer
+      - default: 20
+        description: Page size; values that are not numbers or outside 1..100 fall
+          back to 20
+        in: query
+        maximum: 100
+        minimum: 1
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Page of resources
+          schema:
+            $ref: '#/definitions/dashboardsvc.ResourceListResponse'
+        "401":
+          description: Bearer token missing (missing bearer token), or invalid or
+            expired (invalid or expired token)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "403":
+          description: Valid token, but no seller profile (users row) for it; call
+            POST /api/v1/auth/bootstrap
+          schema:
+            $ref: '#/definitions/auth.NoProviderResponse'
+        "500":
+          description: Database or internal error (raw error text)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List the seller's resources (products)
+      tags:
+      - inventory
+  /api/v1/messages:
+    get:
+      description: The most recent beckn_message_log entries (inbound and outbound)
+        for the seller.
+      operationId: listMessages
+      parameters:
+      - default: 50
+        description: Maximum number of rows; values that are not numbers or outside
+          1..200 fall back to 50
+        in: query
+        maximum: 200
+        minimum: 1
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Messages
+          schema:
+            $ref: '#/definitions/dashboardsvc.MessageListResponse'
+        "401":
+          description: Bearer token missing (missing bearer token), or invalid or
+            expired (invalid or expired token)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "403":
+          description: Valid token, but no seller profile (users row) for it; call
+            POST /api/v1/auth/bootstrap
+          schema:
+            $ref: '#/definitions/auth.NoProviderResponse'
+        "500":
+          description: Database or internal error (raw error text)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Recent Beckn messages
+      tags:
+      - dashboard
+  /api/v1/orders:
+    get:
+      description: Paginated list of the seller's contracts, newest first, with the
+        order's offer descriptor, fulfillment progress and latest return outcome.
+      operationId: listOrders
+      parameters:
+      - default: 1
+        description: 1-based page number; values that are not numbers or below 1 become
+          1
+        in: query
+        minimum: 1
+        name: page
+        type: integer
+      - default: 20
+        description: Page size; values that are not numbers or outside 1..100 fall
+          back to 20
+        in: query
+        maximum: 100
+        minimum: 1
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Page of orders
+          schema:
+            $ref: '#/definitions/dashboardsvc.OrderListResponse'
+        "401":
+          description: Bearer token missing (missing bearer token), or invalid or
+            expired (invalid or expired token)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "403":
+          description: Valid token, but no seller profile (users row) for it; call
+            POST /api/v1/auth/bootstrap
+          schema:
+            $ref: '#/definitions/auth.NoProviderResponse'
+        "500":
+          description: Database or internal error (raw error text)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List the seller's orders (contracts)
+      tags:
+      - orders
+  /api/v1/orders/{id}:
+    get:
+      description: Returns one of the seller's contracts with its commitments (and
+        their offers) and its considerations.
+      operationId: getOrder
+      parameters:
+      - description: Contract (order) id
+        format: uuid
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Order detail
+          schema:
+            $ref: '#/definitions/dashboardsvc.OrderDetailResponse'
+        "400":
+          description: id is not a UUID (invalid contract id)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "401":
+          description: Bearer token missing (missing bearer token), or invalid or
+            expired (invalid or expired token)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "403":
+          description: Valid token, but no seller profile (users row) for it; call
+            POST /api/v1/auth/bootstrap
+          schema:
+            $ref: '#/definitions/auth.NoProviderResponse'
+        "404":
+          description: No such contract for this seller (order not found)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "500":
+          description: Database or internal error (raw error text)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get one order with commitments and considerations
+      tags:
+      - orders
+  /api/v1/orders/{id}/fulfillment-status:
+    put:
+      consumes:
+      - application/json
+      description: |-
+        Writes the status to contract_performances and into the stored contract's first non-RETURN performance, then sends an unsolicited on_status to the BAP through the onix-bpp caller (synchronously, 30 s timeout; errors are only logged) and logs it to beckn_message_log.
+        Delivered stamps delivered_at (starting the return window) and can make the contract COMPLETE. A background sweep (every 2 s) moves Shipped orders to Delivered after 10 s and sends on_status again. Statuses starting with Return are rejected; the offer's return policy sets them.
+      operationId: updateFulfillmentStatus
+      parameters:
+      - description: Contract (order) id
+        format: uuid
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: New fulfillment status
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dashboardsvc.FulfillmentStatusRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Updated
+          schema:
+            $ref: '#/definitions/dashboardsvc.StatusUpdatedResponse'
+        "400":
+          description: id is not a UUID, status is missing, or status starts with
+            Return (return status is set by the return policy, not manually)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "401":
+          description: Bearer token missing (missing bearer token), or invalid or
+            expired (invalid or expired token)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "403":
+          description: Valid token, but no seller profile (users row) for it; call
+            POST /api/v1/auth/bootstrap
+          schema:
+            $ref: '#/definitions/auth.NoProviderResponse'
+        "404":
+          description: No such contract for this seller (order not found)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "500":
+          description: Database or internal error (raw error text)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Set an order's fulfillment status
+      tags:
+      - orders
+  /api/v1/providers:
+    get:
+      description: Returns a list with only the seller's own provider (at most one
+        row); a list for frontend compatibility.
+      operationId: listProviders
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Provider list
+          schema:
+            $ref: '#/definitions/dashboardsvc.IDNameListResponse'
+        "401":
+          description: Bearer token missing (missing bearer token), or invalid or
+            expired (invalid or expired token)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "403":
+          description: Valid token, but no seller profile (users row) for it; call
+            POST /api/v1/auth/bootstrap
+          schema:
+            $ref: '#/definitions/auth.NoProviderResponse'
+        "500":
+          description: Database or internal error (raw error text)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: The seller's own provider
+      tags:
+      - catalogs
+  /api/v1/ratings:
+    get:
+      description: Paginated list of ratings received through /rate on the seller's
+        orders.
+      operationId: listRatings
+      parameters:
+      - default: 1
+        description: 1-based page number; values that are not numbers or below 1 become
+          1
+        in: query
+        minimum: 1
+        name: page
+        type: integer
+      - default: 20
+        description: Page size; values that are not numbers or outside 1..100 fall
+          back to 20
+        in: query
+        maximum: 100
+        minimum: 1
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Page of ratings
+          schema:
+            $ref: '#/definitions/dashboardsvc.RatingListResponse'
+        "401":
+          description: Bearer token missing (missing bearer token), or invalid or
+            expired (invalid or expired token)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "403":
+          description: Valid token, but no seller profile (users row) for it; call
+            POST /api/v1/auth/bootstrap
+          schema:
+            $ref: '#/definitions/auth.NoProviderResponse'
+        "500":
+          description: Database or internal error (raw error text)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List ratings
+      tags:
+      - dashboard
+  /api/v1/reconciliation:
+    get:
+      description: 'For each BAP: the seller''s contracts whose settlement is not
+        yet agreed, split into due (due now or disputed) and upcoming; the summary
+        the next /reconcile would carry; and the disputed batch that would be sent
+        again. Also returns the BPP''s default payout terms and the 50 most recent
+        reconciliation batches (sent or received). Read-only.'
+      operationId: getReconciliationOverview
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Overview
+          schema:
+            $ref: '#/definitions/reconsvc.ReconciliationOverviewResponse'
+        "401":
+          description: Bearer token missing (missing bearer token), or invalid or
+            expired (invalid or expired token)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "403":
+          description: Valid token, but no seller profile (users row) for it; call
+            POST /api/v1/auth/bootstrap
+          schema:
+            $ref: '#/definitions/auth.NoProviderResponse'
+        "500":
+          description: Database or internal error (raw error text)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Reconciliation overview per BAP
+      tags:
+      - reconciliation
+  /api/v1/reconciliation/send:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Builds a /reconcile for one BAP and sends it through the onix-bpp caller. With contract_ids it sends the listed contracts that are due or disputed, as a new batch; without them, the disputed batch again in full, or else everything due.
+        The batch is first recorded in reconciliations (status SENDING) and its payments marked PENDING; if the send fails the batch is marked FAILED and the payments go back to their earlier state. The BAP's /on_reconcile arrives later at /api/webhook/on_reconcile. On 200 the batch status is SENT, or already the BAP's outcome if /on_reconcile arrived first.
+      operationId: sendReconciliation
+      parameters:
+      - description: BAP and optional contracts
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/reconsvc.ReconciliationSendRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Sent
+          schema:
+            $ref: '#/definitions/reconsvc.ReconciliationSendResponse'
+        "400":
+          description: Invalid JSON or a missing required field (gin binding error
+            text)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "401":
+          description: Bearer token missing (missing bearer token), or invalid or
+            expired (invalid or expired token)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "403":
+          description: Valid token, but no seller profile (users row) for it; call
+            POST /api/v1/auth/bootstrap
+          schema:
+            $ref: '#/definitions/auth.NoProviderResponse'
+        "409":
+          description: None of the seller's contracts with the BAP is due, or none
+            of the selected ones is (no contracts are due for reconciliation with
+            this BAP)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "500":
+          description: Database or internal error (raw error text)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "502":
+          description: Not delivered; the batch is still recorded as FAILED and returned
+          schema:
+            $ref: '#/definitions/reconsvc.ReconciliationSendErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Send /reconcile to a BAP
+      tags:
+      - reconciliation
+  /api/v1/support-tickets:
+    get:
+      description: Paginated list of support tickets raised by BAPs through /support
+        on the seller's orders.
+      operationId: listSupportTickets
+      parameters:
+      - default: 1
+        description: 1-based page number; values that are not numbers or below 1 become
+          1
+        in: query
+        minimum: 1
+        name: page
+        type: integer
+      - default: 20
+        description: Page size; values that are not numbers or outside 1..100 fall
+          back to 20
+        in: query
+        maximum: 100
+        minimum: 1
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Page of tickets
+          schema:
+            $ref: '#/definitions/dashboardsvc.SupportTicketListResponse'
+        "401":
+          description: Bearer token missing (missing bearer token), or invalid or
+            expired (invalid or expired token)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "403":
+          description: Valid token, but no seller profile (users row) for it; call
+            POST /api/v1/auth/bootstrap
+          schema:
+            $ref: '#/definitions/auth.NoProviderResponse'
+        "500":
+          description: Database or internal error (raw error text)
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List support tickets
+      tags:
+      - dashboard
+  /api/webhook/cancel:
+    post:
+      consumes:
+      - application/json
+      description: 'Returns a synchronous ACK, then works asynchronously: fully cancels
+        the ACTIVE contract (every commitment CLOSED, the price consideration CANCELLED,
+        a cancellation fee and refund settlement added, stock restored; reason from
+        message.contract.contractAttributes.cancellation) and sends on_cancel. If
+        the cancellation fails, nothing is sent.'
+      operationId: becknCancel
+      parameters:
+      - description: Beckn message forwarded by onix-bpp
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/server.BecknWebhookRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Synchronous ACK; context echoes the inbound context fields
+          schema:
+            $ref: '#/definitions/server.BecknAckResponse'
+        "400":
+          description: 'NACK: body not decodable into the request type (context then
+            all empty strings), or context.bapUri empty (context echoed). No reason
+            field'
+          schema:
+            $ref: '#/definitions/server.BecknAckResponse'
+      security: []
+      summary: Beckn cancel
+      tags:
+      - beckn webhooks
+  /api/webhook/catalog/on_publish:
+    post:
+      consumes:
+      - application/json
+      description: 'STUB, meant for the CDS to report whether a published catalog
+        was indexed. It does nothing yet: always returns the alya success envelope
+        with data null and stores nothing.'
+      operationId: becknCatalogOnPublish
+      parameters:
+      - description: Indexing result from the CDS (ignored)
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/server.BecknWebhookRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: alya success envelope with no data
+          schema:
+            $ref: '#/definitions/server.WscSuccessResponse'
+      security: []
+      summary: Catalog indexing result (STUB)
+      tags:
+      - beckn webhooks
+  /api/webhook/confirm:
+    post:
+      consumes:
+      - application/json
+      description: 'Returns a synchronous ACK, then works asynchronously: checks that
+        the contract carries settlements (payment proof), applies the stored offer
+        terms, and in one transaction makes the DRAFT contract and its commitments
+        ACTIVE and records the settlements as COMPLETE; then sends on_confirm. If
+        the state change fails, no on_confirm is sent and the failure is only logged
+        as NACK in beckn_message_log.'
+      operationId: becknConfirm
+      parameters:
+      - description: Beckn message forwarded by onix-bpp
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/server.BecknWebhookRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Synchronous ACK; context echoes the inbound context fields
+          schema:
+            $ref: '#/definitions/server.BecknAckResponse'
+        "400":
+          description: 'NACK: body not decodable into the request type (context then
+            all empty strings), or context.bapUri empty (context echoed). No reason
+            field'
+          schema:
+            $ref: '#/definitions/server.BecknAckResponse'
+      security: []
+      summary: Beckn confirm
+      tags:
+      - beckn webhooks
+  /api/webhook/init:
+    post:
+      consumes:
+      - application/json
+      description: 'Returns a synchronous ACK, then works asynchronously: adds the
+        seller''s payout terms and settlement account to the contract, creates the
+        DRAFT contract for this transaction (or updates the existing one) with its
+        participants, commitments, considerations and performances, and sends on_init
+        echoing the contract with its assigned id.'
+      operationId: becknInit
+      parameters:
+      - description: Beckn message forwarded by onix-bpp
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/server.BecknWebhookRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Synchronous ACK; context echoes the inbound context fields
+          schema:
+            $ref: '#/definitions/server.BecknAckResponse'
+        "400":
+          description: 'NACK: body not decodable into the request type (context then
+            all empty strings), or context.bapUri empty (context echoed). No reason
+            field'
+          schema:
+            $ref: '#/definitions/server.BecknAckResponse'
+      security: []
+      summary: Beckn init
+      tags:
+      - beckn webhooks
+  /api/webhook/on_reconcile:
+    post:
+      consumes:
+      - application/json
+      description: 'Returns a synchronous ACK echoing context as received, then works
+        asynchronously: sets the outbound batch message.reconciliationId to AGREED
+        (only when every due contract has accord true and the BAP said AGREED), DISPUTED,
+        or PENDING (some contracts were sent before their settlement window), and
+        updates each contract''s settlement reconciliation state to match. Nothing
+        is sent back.'
+      operationId: becknOnReconcile
+      parameters:
+      - description: Beckn message forwarded by onix-bpp
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/server.BecknWebhookRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: ACK; context is the inbound context as received
+          schema:
+            $ref: '#/definitions/server.ReconAckResponse'
+        "400":
+          description: The body is not a JSON object (NACK, no context)
+          schema:
+            $ref: '#/definitions/server.ReconNackResponse'
+      security: []
+      summary: BAP's answer to this BPP's /reconcile
+      tags:
+      - beckn webhooks
+  /api/webhook/rate:
+    post:
+      consumes:
+      - application/json
+      description: 'Returns a synchronous ACK, then works asynchronously: finds the
+        contract by context.transactionId, stores each message.ratingInputs[] entry
+        as a rating (target_id is always the contract id), and sends on_rate echoing
+        the targets and ranges. If no contract is found, nothing is stored or sent.'
+      operationId: becknRate
+      parameters:
+      - description: Beckn message forwarded by onix-bpp
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/server.BecknWebhookRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Synchronous ACK; context echoes the inbound context fields
+          schema:
+            $ref: '#/definitions/server.BecknAckResponse'
+        "400":
+          description: 'NACK: body not decodable into the request type (context then
+            all empty strings), or context.bapUri empty (context echoed). No reason
+            field'
+          schema:
+            $ref: '#/definitions/server.BecknAckResponse'
+      security: []
+      summary: Beckn rate
+      tags:
+      - beckn webhooks
+  /api/webhook/reconcile:
+    post:
+      consumes:
+      - application/json
+      description: 'Returns a synchronous ACK echoing context as received, then works
+        asynchronously: checks each contract''s figures against this BPP''s own (the
+        batch is AGREED only if every contract agrees, otherwise DISPUTED), records
+        an INBOUND reconciliations row, updates the settlement states, and sends on_reconcile
+        through the onix-bpp caller.'
+      operationId: becknReconcile
+      parameters:
+      - description: Beckn message forwarded by onix-bpp
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/server.BecknWebhookRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: ACK; context is the inbound context as received
+          schema:
+            $ref: '#/definitions/server.ReconAckResponse'
+        "400":
+          description: The body is not a JSON object (NACK, no context)
+          schema:
+            $ref: '#/definitions/server.ReconNackResponse'
+      security: []
+      summary: A BAP's own /reconcile
+      tags:
+      - beckn webhooks
+  /api/webhook/select:
+    post:
+      consumes:
+      - application/json
+      description: 'Returns a synchronous ACK, then works asynchronously: looks up
+        each commitment''s offer and resources in the DB and adds full details, prices
+        the quote (per-unit BASE_PRICE and TAX lines times quantity, plus a contract
+        consideration with status QUOTED), adds the seller''s offer terms and commission,
+        and sends on_select through the onix-bpp caller. Nothing is written except
+        the message log.'
+      operationId: becknSelect
+      parameters:
+      - description: Beckn message forwarded by onix-bpp
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/server.BecknWebhookRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Synchronous ACK; context echoes the inbound context fields
+          schema:
+            $ref: '#/definitions/server.BecknAckResponse'
+        "400":
+          description: 'NACK: body not decodable into the request type (context then
+            all empty strings), or context.bapUri empty (context echoed). No reason
+            field'
+          schema:
+            $ref: '#/definitions/server.BecknAckResponse'
+      security: []
+      summary: Beckn select
+      tags:
+      - beckn webhooks
+  /api/webhook/status:
+    post:
+      consumes:
+      - application/json
+      description: 'Returns a synchronous ACK, then works asynchronously: finds the
+        contract by context.transactionId, loads its latest stored state, and sends
+        on_status with the contract id and status code. If the transaction id is invalid
+        or no contract is found, nothing is sent.'
+      operationId: becknStatus
+      parameters:
+      - description: Beckn message forwarded by onix-bpp
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/server.BecknWebhookRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Synchronous ACK; context echoes the inbound context fields
+          schema:
+            $ref: '#/definitions/server.BecknAckResponse'
+        "400":
+          description: 'NACK: body not decodable into the request type (context then
+            all empty strings), or context.bapUri empty (context echoed). No reason
+            field'
+          schema:
+            $ref: '#/definitions/server.BecknAckResponse'
+      security: []
+      summary: Beckn status
+      tags:
+      - beckn webhooks
+  /api/webhook/support:
+    post:
+      consumes:
+      - application/json
+      description: 'Returns a synchronous ACK, then works asynchronously: creates
+        a support ticket from message.support (orderId is treated as a transaction
+        id when linking it to a contract) and sends on_support with the ticket id
+        and the BPP''s hard-coded support channels.'
+      operationId: becknSupport
+      parameters:
+      - description: Beckn message forwarded by onix-bpp
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/server.BecknWebhookRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Synchronous ACK; context echoes the inbound context fields
+          schema:
+            $ref: '#/definitions/server.BecknAckResponse'
+        "400":
+          description: 'NACK: body not decodable into the request type (context then
+            all empty strings), or context.bapUri empty (context echoed). No reason
+            field'
+          schema:
+            $ref: '#/definitions/server.BecknAckResponse'
+      security: []
+      summary: Beckn support
+      tags:
+      - beckn webhooks
+  /api/webhook/track:
+    post:
+      consumes:
+      - application/json
+      description: 'STUB, not implemented: always returns the alya success envelope
+        with data null, not a Beckn ACK. Nothing is stored and no on_track is sent.'
+      operationId: becknTrack
+      parameters:
+      - description: Beckn message forwarded by onix-bpp (ignored)
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/server.BecknWebhookRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: alya success envelope with no data
+          schema:
+            $ref: '#/definitions/server.WscSuccessResponse'
+      security: []
+      summary: Beckn track (STUB)
+      tags:
+      - beckn webhooks
+  /api/webhook/update:
+    post:
+      consumes:
+      - application/json
+      description: Returns a synchronous ACK, then works asynchronously. An update
+        adding a RETURN performance is a return request, decided by the offer's return
+        policy; one lowering a commitment's quantity or marking it CLOSED is a partial
+        cancellation; any other update is stored as the contract's latest state. Then
+        sends on_update with the resulting contract, unless the update failed.
+      operationId: becknUpdate
+      parameters:
+      - description: Beckn message forwarded by onix-bpp
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/server.BecknWebhookRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Synchronous ACK; context echoes the inbound context fields
+          schema:
+            $ref: '#/definitions/server.BecknAckResponse'
+        "400":
+          description: 'NACK: body not decodable into the request type (context then
+            all empty strings), or context.bapUri empty (context echoed). No reason
+            field'
+          schema:
+            $ref: '#/definitions/server.BecknAckResponse'
+      security: []
+      summary: Beckn update
+      tags:
+      - beckn webhooks
+  /health:
+    get:
+      description: 'Liveness probe for load balancers and Kubernetes. Always returns
+        the alya success envelope with data {"status": "ok"}.'
+      operationId: getHealth
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Service is up
+          schema:
+            $ref: '#/definitions/server.HealthResponse'
+      security: []
+      summary: Health check
+      tags:
+      - health
+securityDefinitions:
+  BearerAuth:
+    description: Zitadel access token, as "Bearer <token>". Dashboard routes also
+      require a seller profile (403 NO_PROVIDER otherwise).
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"

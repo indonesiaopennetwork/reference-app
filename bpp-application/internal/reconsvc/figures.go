@@ -25,6 +25,9 @@ type Terms struct {
 	// an order placed before payout accounts were declared -- so the
 	// reconcile figures always name it.
 	Account map[string]any
+	// SelfID is this participant's subscriber ID: its account is marked with
+	// the share it receives (settlement.Allocate).
+	SelfID string
 }
 
 // Figures are one contract's reconciliation figures. The buyer's payment is
@@ -32,10 +35,10 @@ type Terms struct {
 // Commission to the BAP, and returns Refund to the buyer:
 // OrderAmount = NetPayable + Commission + Withholding + Refund.
 type Figures struct {
-	SettlementID    string         `json:"settlement_id"`
-	ConsiderationID string         `json:"consideration_id"`
-	CollectedBy     string         `json:"collected_by,omitempty"`
-	Currency        string         `json:"currency"`
+	SettlementID    string `json:"settlement_id"`
+	ConsiderationID string `json:"consideration_id"`
+	CollectedBy     string `json:"collected_by,omitempty"`
+	Currency        string `json:"currency"`
 	// Basis / Window are the payout term the contract falls due by: of its
 	// Terms, the one giving the latest due date (see assess).
 	Basis  string `json:"settlement_basis,omitempty"`
@@ -49,10 +52,19 @@ type Figures struct {
 	Refund      float64 `json:"refund"`
 	NetPayable  float64 `json:"net_payable"`
 
-	Accounts []any `json:"-"`
+	Accounts []any `json:"settlement_accounts,omitempty"`
 	// Payment is the settlement object's payment details (status, paidAt,
 	// gatewayRef, ...), sent on with the figures.
 	Payment map[string]any `json:"-"`
+
+	// OrderDate is the order's creation date in Asia/Jakarta time; DueDate
+	// the date the payout falls due, once known. Set by the caller.
+	OrderDate string `json:"order_date,omitempty" format:"date"`
+	DueDate   string `json:"due_date,omitempty" format:"date"`
+	// Breakup itemizes the refund (settlement.RefundBreakup); Collections
+	// says who collected the buyer's money (settlement.Collections).
+	Breakup     []any `json:"breakup,omitempty"`
+	Collections []any `json:"collections,omitempty"`
 
 	// RefundSettlementIDs are the pre-payout refunds counted in Refund.
 	RefundSettlementIDs []string `json:"refund_settlement_ids"`
@@ -99,6 +111,15 @@ func contractFigures(contract map[string]any, defaults Terms) (*Figures, error) 
 		NetPayable:          a.Net,
 		RefundSettlementIDs: a.RefundIDs,
 		RefundedAfterPayout: a.RefundedAfterPayout,
+		Breakup:             settlement.RefundBreakup(contract),
+		Collections:         settlement.Collections(pa, a.Order),
+	}
+	if role := str(defaults.Account["holderRole"]); role != "" && defaults.SelfID != "" {
+		share := f.NetPayable
+		if role == "BAP" {
+			share = f.Commission
+		}
+		f.Accounts = settlement.Allocate(f.Accounts, role, defaults.SelfID, share)
 	}
 	if f.Currency == "" {
 		f.Currency = "IDR"
@@ -153,6 +174,17 @@ func (f *Figures) bag() map[string]any {
 		}(),
 	} {
 		b[k] = v
+	}
+	for k, v := range map[string]string{"orderDate": f.OrderDate, "dueDate": f.DueDate} {
+		if v != "" {
+			b[k] = v
+		}
+	}
+	if len(f.Breakup) > 0 {
+		b["breakup"] = f.Breakup
+	}
+	if len(f.Collections) > 0 {
+		b["collections"] = f.Collections
 	}
 	return b
 }
@@ -211,7 +243,7 @@ var reconcileComponents = []struct{ key, code string }{
 	{"commission", "COMMISSION_MISMATCH"},
 	{"withholdingAmount", "WITHHOLDING_MISMATCH"},
 	{"refundAmount", "REFUND_MISMATCH"},
-	{"netPayable", "NET_PAYABLE_MISMATCH"},
+	{"netPayable", "OTHER"}, // differs alone only when the arithmetic does
 }
 
 // compare answers a received bag with this participant's own figures: the
@@ -227,7 +259,7 @@ func compare(received map[string]any, own *Figures) (reply map[string]any, accor
 		if diff := round2(mine - theirs); diff != 0 {
 			asMap(reply[c.key])["diffValue"] = diff
 			if accord {
-				dispute = map[string]any{"code": c.code}
+				dispute = map[string]any{"code": c.code, "field": c.key}
 			}
 			accord = false
 			reasons = append(reasons, fmt.Sprintf("%s %v here, %v received", c.key, mine, theirs))
@@ -238,6 +270,12 @@ func compare(received map[string]any, own *Figures) (reply map[string]any, accor
 	}
 	return reply, accord, dispute
 }
+
+// Dispute codes for a contract or settlement this participant cannot match.
+const (
+	codeMissingContract   = "MISSING_CONTRACT"
+	codeMissingSettlement = "MISSING_SETTLEMENT"
+)
 
 // disagree is the reply for a contract or settlement this participant cannot
 // match: the received figures, accord false, and why.

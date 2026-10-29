@@ -22,14 +22,14 @@ import (
 // DueContract is a contract whose settlement is not yet agreed, and when it
 // falls due.
 type DueContract struct {
-	ContractID    uuid.UUID `json:"contract_id"`
-	TransactionID uuid.UUID `json:"transaction_id"`
+	ContractID    uuid.UUID `json:"contract_id" swaggertype:"string" format:"uuid"`
+	TransactionID uuid.UUID `json:"transaction_id" swaggertype:"string" format:"uuid"`
 	BapID         string    `json:"bap_id"`
 	BapURI        string    `json:"bap_uri"`
 	NetworkID     string    `json:"network_id"`
 	Status        string    `json:"status"`
 	// ReconciliationStatus is the payment's state in reconciliation: "" (not
-	// sent yet) or DISPUTED (sent again in the next batch).
+	// sent yet, or pending in its last batch) or DISPUTED (sent again).
 	ReconciliationStatus string `json:"reconciliation_status,omitempty"`
 	// ReconciliationID is the batch the contract was last in.
 	ReconciliationID string `json:"reconciliation_id,omitempty"`
@@ -40,38 +40,20 @@ type DueContract struct {
 	// or disputed; see choose).
 	Selectable bool `json:"selectable"`
 	// CreatedAt is when the contract was created.
-	CreatedAt time.Time `json:"created_at"`
+	CreatedAt time.Time `json:"created_at" format:"date-time"`
 	// LastResult: for a contract its last batch didn't reconcile (disputed,
 	// or sent before its settlement window), how it fared there.
 	LastResult *Result `json:"last_result,omitempty"`
 	// BasisEvent is what started the payout clock ("delivered", "cancelled",
 	// ...); BasisAt is when. Zero BasisAt: the event hasn't happened.
 	BasisEvent string     `json:"basis_event"`
-	BasisAt    *time.Time `json:"basis_at"`
-	DueAt      *time.Time `json:"due_at"`
+	BasisAt    *time.Time `json:"basis_at" format:"date-time" extensions:"x-nullable"`
+	DueAt      *time.Time `json:"due_at" format:"date-time" extensions:"x-nullable"`
 	Due        bool       `json:"due"`
 
 	*Figures
 
 	contract map[string]any
-}
-
-// Summary is the settlementSummary of a /reconcile.
-type Summary struct {
-	BapID            string  `json:"bapId"`
-	BppID            string  `json:"bppId"`
-	Currency         string  `json:"currency"`
-	SettlementDate   string  `json:"settlementDate"`
-	ContractCount    int     `json:"contractCount"`
-	TotalOrderAmount float64 `json:"totalOrderAmount"`
-	TotalCommission  float64 `json:"totalCommission"`
-	TotalWithholding float64 `json:"totalWithholding"`
-	TotalRefund      float64 `json:"totalRefund"`
-	TotalNetPayable  float64 `json:"totalNetPayable"`
-	// AgreedCount / DisputedCount count the contracts by accord; an
-	// /on_reconcile answer only.
-	AgreedCount   *int `json:"agreedCount,omitempty"`
-	DisputedCount *int `json:"disputedCount,omitempty"`
 }
 
 // Contracts returns this provider's contracts whose settlement is not yet
@@ -187,6 +169,7 @@ func (s *Service) assess(d *DueContract, deliveredAt, cancelledAt *time.Time, no
 			// A term whose event hasn't happened: the due date isn't known yet.
 			f.Basis, f.Window = t.Basis, t.Window
 			d.BasisEvent, d.BasisAt, d.DueAt, d.Due = event, nil, nil, false
+			f.OrderDate = settlement.OrderDate(d.CreatedAt)
 			return true
 		}
 		if d.DueAt == nil || due.After(*d.DueAt) {
@@ -195,6 +178,10 @@ func (s *Service) assess(d *DueContract, deliveredAt, cancelledAt *time.Time, no
 		}
 	}
 	d.Due = d.DueAt != nil && !now.Before(*d.DueAt)
+	f.OrderDate = settlement.OrderDate(d.CreatedAt)
+	if d.DueAt != nil {
+		f.DueDate = settlement.Date(*d.DueAt)
+	}
 	return true
 }
 
@@ -222,67 +209,6 @@ func termDue(t settlement.Term, paidAt, deliveredAt, cancelledAt *time.Time, con
 		window = 0
 	}
 	return event, at, at.Add(window), true
-}
-
-// summarize totals the figures of one BAP's due contracts.
-func summarize(bapID, bppID string, due []DueContract, date string) Summary {
-	sm := Summary{BapID: bapID, BppID: bppID, SettlementDate: date, ContractCount: len(due), Currency: "IDR"}
-	for i, d := range due {
-		if i == 0 && d.Currency != "" {
-			sm.Currency = d.Currency
-		}
-		sm.TotalOrderAmount += d.OrderAmount
-		sm.TotalCommission += d.Commission
-		sm.TotalWithholding += d.Withholding
-		sm.TotalRefund += d.Refund
-		sm.TotalNetPayable += d.NetPayable
-	}
-	sm.TotalOrderAmount = round2(sm.TotalOrderAmount)
-	sm.TotalCommission = round2(sm.TotalCommission)
-	sm.TotalWithholding = round2(sm.TotalWithholding)
-	sm.TotalRefund = round2(sm.TotalRefund)
-	sm.TotalNetPayable = round2(sm.TotalNetPayable)
-	return sm
-}
-
-// summaryOf totals the reconciliation bags of a received or sent message.
-func summaryOf(bapID, bppID, date string, contracts []any) Summary {
-	sm := Summary{BapID: bapID, BppID: bppID, SettlementDate: date, Currency: "IDR"}
-	answered := false
-	agreed, disputed := 0, 0
-	for _, raw := range contracts {
-		sm.ContractCount++
-		contractAgreed := true
-		for _, st := range slice(asMap(raw)["settlements"]) {
-			b := asMap(asMap(st)["settlementAttributes"])
-			if accord, ok := b["accord"].(bool); ok {
-				answered = true
-				contractAgreed = contractAgreed && accord
-			}
-			if c := str(b["currency"]); c != "" {
-				sm.Currency = c
-			}
-			sm.TotalOrderAmount += num(asMap(b["orderAmount"])["value"])
-			sm.TotalCommission += num(asMap(b["commission"])["value"])
-			sm.TotalWithholding += num(asMap(b["withholdingAmount"])["value"])
-			sm.TotalRefund += num(asMap(b["refundAmount"])["value"])
-			sm.TotalNetPayable += num(asMap(b["netPayable"])["value"])
-		}
-		if contractAgreed {
-			agreed++
-		} else {
-			disputed++
-		}
-	}
-	if answered {
-		sm.AgreedCount, sm.DisputedCount = &agreed, &disputed
-	}
-	sm.TotalOrderAmount = round2(sm.TotalOrderAmount)
-	sm.TotalCommission = round2(sm.TotalCommission)
-	sm.TotalWithholding = round2(sm.TotalWithholding)
-	sm.TotalRefund = round2(sm.TotalRefund)
-	sm.TotalNetPayable = round2(sm.TotalNetPayable)
-	return sm
 }
 
 // reconciliationID names a batch by when it is sent and who sends it:

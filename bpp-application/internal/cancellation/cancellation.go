@@ -209,6 +209,11 @@ func Apply(contract map[string]any, items []Item, req Request, now time.Time) (*
 	activePriceID := str(price["id"])
 	if len(remaining) > 0 {
 		breakup, total := priceBreakup(remaining)
+		// The order's delivery charge stays while any item is still ordered.
+		for _, l := range deliveryLines(priceAttrs) {
+			breakup = append(breakup, l)
+			total = round2(total + num(l["amount"]))
+		}
 		newTotal = total
 		attrs := map[string]any{
 			"@context": priceAttrs["@context"], "@type": priceAttrs["@type"],
@@ -506,6 +511,19 @@ func unitLines(cm map[string]any) []map[string]any {
 		lines = append(lines, map[string]any{"type": "BASE_PRICE", "title": name, "amount": price})
 	}
 	return lines
+}
+
+// deliveryLines are a price consideration's DELIVERY_CHARGE lines: the
+// order's delivery fee (IONDeliveryFee), charged once per order.
+func deliveryLines(priceAttrs map[string]any) []map[string]any {
+	var out []map[string]any
+	for _, b := range slice(priceAttrs["breakup"]) {
+		if bm := asMap(b); str(bm["type"]) == "DELIVERY_CHARGE" {
+			line, _ := deepCopyMap(bm)
+			out = append(out, line)
+		}
+	}
+	return out
 }
 
 func unitTotal(cm map[string]any) float64 {

@@ -15,6 +15,14 @@ routingRules:
   - version: "2.0.0"
     targetType: "url"
     target:
-      url: "https://34.47.138.217.sslip.io/beckn"
+      # discovery-service, not mock-cds: the real, spec-compliant crawler
+      # (retiredAt tombstones, isActive pause/resume, textSearch matching)
+      # -- mock-cds.py just globs every *.latest.json.gz file on disk with
+      # no lifecycle awareness at all, so a retired/paused catalog kept
+      # showing up in search through it indefinitely. discovery-service's
+      # TRUSTED_CALLER_KEY_ID/TRUSTED_CALLER_PUBLIC_KEY_BASE64 (docker-
+      # compose.yml) already trust onix-bap's own signing key (BAP_KEY_ID/
+      # BAP_ONIX_SIGNING_PUBLIC_KEY), so its signed requests are accepted.
+      url: "http://discovery-service:8087"
     endpoints:
       - discover

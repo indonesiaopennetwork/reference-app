@@ -28,8 +28,8 @@ import (
 	"github.com/remiges-tech/logharbour/logharbour"
 
 	dbsqlc "github.com/ion/winroom/bap/db/sqlc"
-	"github.com/ion/winroom/bap/internal/settlement"
 	"github.com/ion/winroom/bap/internal/config"
+	"github.com/ion/winroom/bap/internal/settlement"
 )
 
 const (
@@ -50,7 +50,7 @@ var defaultTerms = Terms{Basis: "AFTER_DELIVERY", Window: "P1D"}
 // Terms.Account).
 func (s *Service) terms() Terms {
 	t := defaultTerms
-	t.Account = s.account()
+	t.Account, t.SelfID = s.account(), s.cfg.BapID
 	return t
 }
 
@@ -99,11 +99,14 @@ type Context struct {
 type Request struct {
 	Context Context `json:"context"`
 	Message struct {
-		ReconciliationID     string         `json:"reconciliationId"`
-		ReconciliationStatus string         `json:"reconciliationStatus"`
-		SettlementDate       string         `json:"settlementDate"`
-		Contracts            []any          `json:"contracts"`
-		SettlementSummary    map[string]any `json:"settlementSummary"`
+		// On /on_reconcile, the BPP's batch verdict (e.g. AGREED, DISPUTED).
+		ReconciliationStatus string `json:"reconciliationStatus"`
+		SettlementDate       string `json:"settlementDate" format:"date"`
+		// Contracts with their settlements[0].settlementAttributes figures
+		// (orderAmount, commission, withholding, refund, netPayable, accord,
+		// dispute, ...).
+		Contracts         []any          `json:"contracts" swaggertype:"array,object"`
+		SettlementSummary map[string]any `json:"settlementSummary"`
 	} `json:"message"`
 }
 
@@ -117,24 +120,6 @@ type Verdict struct {
 	Commission   float64        `json:"commission"`
 }
 
-// Summary is a settlementSummary.
-type Summary struct {
-	BapID            string  `json:"bapId"`
-	BppID            string  `json:"bppId"`
-	Currency         string  `json:"currency"`
-	SettlementDate   string  `json:"settlementDate"`
-	ContractCount    int     `json:"contractCount"`
-	TotalOrderAmount float64 `json:"totalOrderAmount"`
-	TotalCommission  float64 `json:"totalCommission"`
-	TotalWithholding float64 `json:"totalWithholding"`
-	TotalRefund      float64 `json:"totalRefund"`
-	TotalNetPayable  float64 `json:"totalNetPayable"`
-	// AgreedCount / DisputedCount count the contracts by accord; an
-	// /on_reconcile answer only.
-	AgreedCount   *int `json:"agreedCount,omitempty"`
-	DisputedCount *int `json:"disputedCount,omitempty"`
-}
-
 // stored is this BAP's latest copy of a contract.
 type stored struct {
 	txnID    uuid.UUID
@@ -142,10 +127,10 @@ type stored struct {
 	contract map[string]any
 }
 
-// Process answers a BPP's /reconcile: each contract's figures against this
-// BAP's own copy, accord per settlement, the batch recorded and every
-// contract's outcome stamped on a new snapshot -- AGREED only when the whole
-// batch is (see batchStatus) -- then /on_reconcile.
+// Process answers a BPP's /reconcile: each settlement's figures against this
+// BAP's own copy, accord per settlement, the answer recorded in the
+// exchange's batch (one per transactionId), and each contract's own outcome
+// stamped on a new snapshot (settlementOutcome) -- then /on_reconcile.
 func (s *Service) Process(ctx context.Context, raw []byte) error {
 	var req Request
 	if err := json.Unmarshal(raw, &req); err != nil {
@@ -154,7 +139,8 @@ func (s *Service) Process(ctx context.Context, raw []byte) error {
 	m := req.Message
 	batchTxn, _ := uuid.Parse(req.Context.TransactionID)
 	msgID, _ := uuid.Parse(req.Context.MessageID)
-	s.logMessage(ctx, batchTxn, msgID, actionReconcile, dbsqlc.MessageDirectionINBOUND, "/api/webhook/reconcile", req.Context, raw, nil, nil)
+	s.logMessage(ctx, messageLog{txn: batchTxn, msgID: msgID, action: actionReconcile, dir: dbsqlc.MessageDirectionINBOUND,
+		url: "/api/webhook/reconcile", context: req.Context, payload: raw})
 
 	replies := make([]any, 0, len(m.Contracts))
 	verdicts := make([]Verdict, 0, len(m.Contracts))
@@ -162,12 +148,10 @@ func (s *Service) Process(ctx context.Context, raw []byte) error {
 		st     stored
 		ids    []string
 		status string
-		early  bool
 	}
 	var stamps []stamp
 	// Contracts whose settlement window hasn't passed here are answered
-	// accord false, CodeBeforeWindow; they keep only this batch's id (for
-	// the reason) and are reconciled once due.
+	// accord false, CodeBeforeWindow: pending, reconciled once due.
 	// RECONCILE_WAIT_FOR_SETTLEMENT_WINDOW only lets this BAP send early.
 	early := map[string]string{}
 	if list, err := s.Contracts(ctx, req.Context.BppID, time.Now().UTC()); err == nil {
@@ -177,15 +161,13 @@ func (s *Service) Process(ctx context.Context, raw []byte) error {
 			}
 		}
 	}
-	agreed, sentEarly := 0, 0
 	for _, rawC := range m.Contracts {
 		c := asMap(rawC)
 		first := asMap(firstOf(slice(c["settlements"])))
 		received := asMap(first["settlementAttributes"])
 		v := Verdict{ContractID: str(c["id"]), SettlementID: str(first["id"])}
 		bag, own, f := s.verify(ctx, c, received, v.SettlementID, m.SettlementDate)
-		reason, tooEarly := early[v.ContractID]
-		if tooEarly && own != nil {
+		if reason, tooEarly := early[v.ContractID]; tooEarly && own != nil {
 			bag["accord"] = false
 			delete(bag, "dueDate")
 			bag["dispute"] = map[string]any{"code": CodeBeforeWindow, "description": reason}
@@ -196,25 +178,15 @@ func (s *Service) Process(ctx context.Context, raw []byte) error {
 		v.Commission = num(asMap(bag["commission"])["value"])
 		replies = append(replies, reply(c, v.SettlementID, first["considerationId"], bag))
 		verdicts = append(verdicts, v)
-		switch {
-		case tooEarly && own != nil:
-			sentEarly++
-		case v.Accord:
-			agreed++
-		}
 		if own != nil {
-			stamps = append(stamps, stamp{*own, append([]string{f.SettlementID}, f.RefundSettlementIDs...), "", tooEarly})
-		}
-	}
-	status := batchOutcome(agreed, len(m.Contracts)-sentEarly, sentEarly)
-	for i := range stamps {
-		if !stamps[i].early { // an early one keeps only the batch id
-			stamps[i].status = contractOutcome(status)
+			stamps = append(stamps, stamp{*own, append([]string{f.SettlementID}, f.RefundSettlementIDs...),
+				settlementOutcome(v.Accord, str(v.Dispute["code"]))})
 		}
 	}
 	computed := summaryOf(s.cfg.BapID, req.Context.BppID, m.SettlementDate, replies)
+	status := computed.status()
 	on := map[string]any{"context": s.replyContext(req.Context), "message": map[string]any{
-		"reconciliationId": m.ReconciliationID, "reconciliationStatus": status,
+		"settlementDate": m.SettlementDate, "reconciliationStatus": status,
 		"contracts": replies, "settlementSummary": computed,
 	}}
 	body, _ := json.Marshal(on)
@@ -227,18 +199,26 @@ func (s *Service) Process(ctx context.Context, raw []byte) error {
 		return err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+	// The exchange's batch: the one this transactionId already has, or a new
+	// one named after the BPP that started it.
+	var id string
+	if err := tx.QueryRow(ctx, `SELECT id FROM reconciliations WHERE direction = $1 AND transaction_id = $2`,
+		directionInbound, req.Context.TransactionID).Scan(&id); err != nil {
+		id = reconciliationID(time.Now().UTC(), firstNonEmpty(req.Context.SenderID, req.Context.BppID), s.idTaken(ctx))
+	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO reconciliations (id, direction, bpp_id, settlement_date, status, claimed_summary, computed_summary,
-		                             contracts, request_message_id, request_payload, response_payload)
-		VALUES ($1, $2, $3, $4::date, $5, $6, $7, $8, $9, $10, $11)
+		                             contracts, request_message_id, request_payload, response_payload, transaction_id)
+		VALUES ($1, $2, $3, $4::date, $5, $6, $7, $8, $9, $10, $11, $12)
 		ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, claimed_summary = EXCLUDED.claimed_summary,
 		    computed_summary = EXCLUDED.computed_summary, contracts = EXCLUDED.contracts,
+		    request_message_id = EXCLUDED.request_message_id,
 		    request_payload = EXCLUDED.request_payload, response_payload = EXCLUDED.response_payload, updated_at = NOW()`,
-		m.ReconciliationID, directionInbound, req.Context.BppID, m.SettlementDate, status, claimed, comp, vj, msgID, raw, body); err != nil {
+		id, directionInbound, req.Context.BppID, m.SettlementDate, status, claimed, comp, vj, msgID, raw, body, req.Context.TransactionID); err != nil {
 		return fmt.Errorf("record reconciliation: %w", err)
 	}
 	for _, st := range stamps {
-		if err := stampOwn(ctx, tx, st.st, st.ids, m.ReconciliationID, st.status); err != nil {
+		if err := stampOwn(ctx, tx, st.st, st.ids, id, st.status); err != nil {
 			return err
 		}
 	}
@@ -247,27 +227,31 @@ func (s *Service) Process(ctx context.Context, raw []byte) error {
 	}
 
 	respBody, sendErr := s.post(ctx, "on_reconcile", body)
-	s.logMessage(ctx, batchTxn, msgID, actionOnReconcile, dbsqlc.MessageDirectionOUTBOUND, s.cfg.BapCallerURL+"/on_reconcile", req.Context, body, respBody, sendErr)
+	s.logMessage(ctx, messageLog{txn: batchTxn, msgID: msgID, action: actionOnReconcile, dir: dbsqlc.MessageDirectionOUTBOUND,
+		url: s.cfg.BapCallerURL + "/on_reconcile", context: req.Context, payload: body, response: respBody, err: sendErr})
 	if sendErr != nil {
 		e := sendErr.Error()
-		_, _ = s.pool.Exec(ctx, `UPDATE reconciliations SET error_message = $2, updated_at = NOW() WHERE id = $1`, m.ReconciliationID, e)
+		_, _ = s.pool.Exec(ctx, `UPDATE reconciliations SET error_message = $2, updated_at = NOW() WHERE id = $1`, id, e)
 	}
 	return sendErr
 }
 
 // verify answers one received contract: the reply bag with accord, and --
 // when this BAP holds the contract and can judge it -- its copy and figures.
+// A settlement already agreed is agreed again, with nothing to record: it is
+// never paid twice.
 func (s *Service) verify(ctx context.Context, c, received map[string]any, settlementID, settlementDate string) (map[string]any, *stored, *Figures) {
 	own, err := s.latest(ctx, s.pool, str(c["id"]))
 	if err != nil {
-		return disagree(received, "UNKNOWN_CONTRACT", "the buyer app has no record of this contract"), nil, nil
+		return disagree(received, codeMissingContract, "the buyer app has no record of this contract"), nil, nil
 	}
 	f, err := contractFigures(own.contract, s.terms())
 	if err != nil || f.SettlementID != settlementID {
-		return disagree(received, "UNKNOWN_SETTLEMENT", fmt.Sprintf("settlement %s is not this contract's payment", settlementID)), nil, nil
+		return disagree(received, codeMissingSettlement, fmt.Sprintf("settlement %s is not this contract's payment", settlementID)), nil, nil
 	}
-	if st := str(asMap(asMap(paymentOf(own.contract))["settlementAttributes"])["reconciliationStatus"]); st == "AGREED" || st == "ADJUSTED" {
-		return disagree(received, "ALREADY_SETTLED", "this contract's settlement is already agreed"), nil, nil
+	var createdAt *time.Time
+	if s.pool.QueryRow(ctx, `SELECT min(created_at) FROM contract_snapshots WHERE transaction_id = $1`, own.txnID).Scan(&createdAt) == nil && createdAt != nil {
+		f.OrderDate = settlement.OrderDate(*createdAt)
 	}
 	bag, accord, dispute := compare(received, f)
 	bag["accord"] = accord
@@ -275,6 +259,9 @@ func (s *Service) verify(ctx context.Context, c, received map[string]any, settle
 		bag["dueDate"] = dueDate(settlementDate)
 	} else {
 		bag["dispute"] = dispute
+	}
+	if st := str(asMap(asMap(paymentOf(own.contract))["settlementAttributes"])["reconciliationStatus"]); (st == "AGREED" || st == "ADJUSTED") && accord {
+		return bag, nil, nil // agreed before: agreed again, not paid again
 	}
 	return bag, own, f
 }
@@ -297,10 +284,10 @@ func reply(c map[string]any, settlementID string, considerationID any, bag map[s
 // not yet agreed, and when it falls due.
 type DueContract struct {
 	ContractID           string `json:"contract_id"`
-	TransactionID        string `json:"transaction_id"`
+	TransactionID        string `json:"transaction_id" format:"uuid"`
 	BppID                string `json:"bpp_id"`
 	BppURI               string `json:"bpp_uri"`
-	Status               string `json:"status"`
+	Status               string `json:"status" enums:"SELECT_SENT,QUOTE_RECEIVED,INIT_SENT,INIT_RECEIVED,CONFIRM_SENT,CONFIRMED,CANCELLED,COMPLETE,STATUS_SENT,CANCEL_SENT,UPDATE_SENT,RATE_SENT,SUPPORT_SENT,DISCOVER_SENT,DISCOVER_RECEIVED"`
 	ReconciliationStatus string `json:"reconciliation_status,omitempty"`
 	// ReconciliationID is the batch the contract was last in.
 	ReconciliationID string `json:"reconciliation_id,omitempty"`
@@ -311,12 +298,12 @@ type DueContract struct {
 	// or disputed; see choose).
 	Selectable bool `json:"selectable"`
 	// CreatedAt is when the contract was created: its first snapshot.
-	CreatedAt *time.Time `json:"created_at"`
+	CreatedAt *time.Time `json:"created_at" format:"date-time" extensions:"x-nullable"`
 	// LastResult: for a contract its last batch didn't reconcile (disputed,
 	// or sent before its settlement window), how it fared there.
 	LastResult *Result    `json:"last_result,omitempty"`
 	BasisEvent string     `json:"basis_event"`
-	DueAt      *time.Time `json:"due_at"`
+	DueAt      *time.Time `json:"due_at" format:"date-time" extensions:"x-nullable"`
 	Due        bool       `json:"due"`
 	*Figures
 
@@ -366,7 +353,7 @@ func (s *Service) Contracts(ctx context.Context, bppID string, now time.Time) ([
 		if !assess(&d, deliveredAt, snapAt, now) {
 			continue
 		}
-		d.Figures.Accounts = withAccount(d.Figures.Accounts, s.account())
+		d.Figures.Accounts = settlement.Allocate(withAccount(d.Figures.Accounts, s.account()), "BAP", s.cfg.BapID, d.Commission)
 		d.windowDue = d.Due
 		if s.cfg.ReconcileBeforeWindow { // RECONCILE_WAIT_FOR_SETTLEMENT_WINDOW=false
 			d.Due = true
@@ -410,6 +397,9 @@ func assess(d *DueContract, deliveredAt *time.Time, snapAt, now time.Time) bool 
 		return false
 	}
 	d.Figures = f
+	if d.CreatedAt != nil {
+		f.OrderDate = settlement.OrderDate(*d.CreatedAt)
+	}
 	// When each payout term falls due; the contract falls due at the latest.
 	var paid *time.Time
 	if paidAt, err := time.Parse(time.RFC3339, str(pa["paidAt"])); err == nil {
@@ -430,6 +420,9 @@ func assess(d *DueContract, deliveredAt *time.Time, snapAt, now time.Time) bool 
 		}
 	}
 	d.Due = d.DueAt != nil && !now.Before(*d.DueAt)
+	if d.DueAt != nil {
+		f.DueDate = settlement.Date(*d.DueAt)
+	}
 	return true
 }
 
@@ -460,8 +453,9 @@ func termDue(t settlement.Term, paidAt, deliveredAt *time.Time, cancelled bool, 
 }
 
 // Send sends this BAP's /reconcile to a BPP: the selected contracts, or by
-// default the batch it disputed (again in full, under the same
-// reconciliationId) or else every contract with it due now; see choose.
+// default the unresolved settlements of an exchange this BAP started (again
+// in that exchange: same transactionId, new messageId) or else every
+// contract with it due now; see choose.
 func (s *Service) Send(ctx context.Context, bppID string, selected []string) (*BatchView, error) {
 	now := time.Now().UTC()
 	all, err := s.Contracts(ctx, bppID, now)
@@ -486,19 +480,23 @@ func (s *Service) Send(ctx context.Context, bppID string, selected []string) (*B
 		}
 	}
 	date := now.Format("2006-01-02")
-	if id == "" {
-		id = reconciliationID(now, s.cfg.BapID, func(candidate string) bool {
-			var exists bool
-			_ = s.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM reconciliations WHERE id = $1)`, candidate).Scan(&exists)
-			return exists
-		})
+	txnID := ""
+	if id != "" {
+		_ = s.pool.QueryRow(ctx, `SELECT COALESCE(transaction_id, '') FROM reconciliations WHERE id = $1`, id).Scan(&txnID)
+	} else {
+		id = reconciliationID(now, s.cfg.BapID, s.idTaken(ctx))
+	}
+	batchTxn, err := uuid.Parse(txnID)
+	if err != nil {
+		batchTxn = uuid.New()
 	}
 	contracts := make([]any, 0, len(due))
 	for _, d := range due {
 		contracts = append(contracts, snapshot(d.own.contract, d.Figures, d.Figures.bag()))
 	}
 	summary := summaryOf(s.cfg.BapID, bppID, date, contracts)
-	msgID, batchTxn := uuid.New(), uuid.New()
+	summary.OrderDayCounts = s.orderDayCounts(ctx, bppID, due, all)
+	msgID := uuid.New()
 	rc := Context{
 		Version: "2.0.0", Action: "reconcile", Timestamp: now.Format(time.RFC3339),
 		MessageID: msgID.String(), TransactionID: batchTxn.String(),
@@ -506,7 +504,7 @@ func (s *Service) Send(ctx context.Context, bppID string, selected []string) (*B
 		SenderID: s.cfg.BapID, ReceiverID: bppID, TTL: "PT30S", NetworkID: s.cfg.NetworkID,
 	}
 	body, _ := json.Marshal(map[string]any{"context": rc, "message": map[string]any{
-		"reconciliationId": id, "settlementDate": date, "contracts": contracts, "settlementSummary": summary,
+		"settlementDate": date, "contracts": contracts, "settlementSummary": summary,
 	}})
 	sj, _ := json.Marshal(summary)
 
@@ -517,12 +515,13 @@ func (s *Service) Send(ctx context.Context, bppID string, selected []string) (*B
 	defer tx.Rollback(ctx) //nolint:errcheck
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO reconciliations (id, direction, bpp_id, settlement_date, status, claimed_summary,
-		                             request_message_id, request_payload)
-		VALUES ($1, $2, $3, $4::date, 'SENDING', $5, $6, $7)
+		                             request_message_id, request_payload, transaction_id)
+		VALUES ($1, $2, $3, $4::date, 'SENDING', $5, $6, $7, $8)
 		ON CONFLICT (id) DO UPDATE SET status = 'SENDING', settlement_date = EXCLUDED.settlement_date,
 		    claimed_summary = EXCLUDED.claimed_summary, request_message_id = EXCLUDED.request_message_id,
-		    request_payload = EXCLUDED.request_payload, error_message = NULL, updated_at = NOW()`,
-		id, directionOutbound, bppID, date, sj, msgID, body); err != nil {
+		    request_payload = EXCLUDED.request_payload, transaction_id = EXCLUDED.transaction_id,
+		    error_message = NULL, updated_at = NOW()`,
+		id, directionOutbound, bppID, date, sj, msgID, body, batchTxn.String()); err != nil {
 		return nil, fmt.Errorf("record batch: %w", err)
 	}
 	for _, d := range due {
@@ -535,7 +534,8 @@ func (s *Service) Send(ctx context.Context, bppID string, selected []string) (*B
 	}
 
 	respBody, sendErr := s.post(ctx, "reconcile", body)
-	s.logMessage(ctx, batchTxn, msgID, actionReconcile, dbsqlc.MessageDirectionOUTBOUND, s.cfg.BapCallerURL+"/reconcile", rc, body, respBody, sendErr)
+	s.logMessage(ctx, messageLog{txn: batchTxn, msgID: msgID, action: actionReconcile, dir: dbsqlc.MessageDirectionOUTBOUND,
+		url: s.cfg.BapCallerURL + "/reconcile", context: rc, payload: body, response: respBody, err: sendErr})
 	status := "SENT"
 	var errMsg *string
 	if sendErr == nil {
@@ -551,12 +551,54 @@ func (s *Service) Send(ctx context.Context, bppID string, selected []string) (*B
 			return nil, err
 		}
 	}
-	b := &BatchView{ID: id, Direction: directionOutbound, SettlementDate: date, Status: status,
+	b := &BatchView{ID: id, TransactionID: batchTxn.String(), Direction: directionOutbound, SettlementDate: date, Status: status,
 		ClaimedSummary: sj, RequestPayload: body, ErrorMessage: errMsg, CreatedAt: now}
 	if sendErr != nil {
 		return b, fmt.Errorf("reconcile not delivered: %w", sendErr)
 	}
 	return b, nil
+}
+
+// idTaken reports whether a batch id is already used.
+func (s *Service) idTaken(ctx context.Context) func(string) bool {
+	return func(candidate string) bool {
+		var exists bool
+		_ = s.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM reconciliations WHERE id = $1)`, candidate).Scan(&exists)
+		return exists
+	}
+}
+
+// orderDayCounts is the settlementSummary's orderDayCounts for a batch to a
+// BPP: for each order day of its contracts, this BAP's orders with the BPP
+// created that day, and how many of them are not yet reconciled (open: every
+// contract still to reconcile with it).
+func (s *Service) orderDayCounts(ctx context.Context, bppID string, batch, open []DueContract) []OrderDayCount {
+	var out []OrderDayCount
+	seen := map[string]bool{}
+	for _, d := range batch {
+		day := d.OrderDate
+		if day == "" || seen[day] {
+			continue
+		}
+		seen[day] = true
+		c := OrderDayCount{OrderDate: day}
+		if err := s.pool.QueryRow(ctx, `
+			SELECT count(*) FROM transactions t
+			 WHERE t.bpp_id = $1
+			   AND t.status IN ('CONFIRMED', 'CANCELLED', 'COMPLETE', 'UPDATE_SENT', 'CANCEL_SENT', 'STATUS_SENT')
+			   AND ((SELECT min(created_at) FROM contract_snapshots f WHERE f.transaction_id = t.transaction_id)
+			        AT TIME ZONE 'Asia/Jakarta')::date = $2::date`, bppID, day).Scan(&c.ReportedOrderCount); err != nil {
+			continue
+		}
+		for _, o := range open {
+			if o.BppID == bppID && o.OrderDate == day {
+				c.RemainingOrderCount++
+			}
+		}
+		out = append(out, c)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].OrderDate < out[j].OrderDate })
+	return out
 }
 
 // revert marks an undelivered batch FAILED and restores its contracts'
@@ -582,9 +624,11 @@ func (s *Service) revert(ctx context.Context, id string, due []DueContract, reas
 	return tx.Commit(ctx)
 }
 
-// ApplyOnReconcile records a BPP's answer to this BAP's /reconcile: the
-// batch outcome, and every contract AGREED when the whole batch is agreed,
-// otherwise DISPUTED -- the batch is then sent again in full.
+// ApplyOnReconcile records a BPP's answer to this BAP's /reconcile -- found
+// by its messageId (or, failing that, its exchange's transactionId): the
+// answer and its reconciliationStatus, and each settlement's own outcome
+// (settlementOutcome): AGREED ones go on to SEAM, DISPUTED and pending ones
+// are sent again.
 func (s *Service) ApplyOnReconcile(ctx context.Context, raw []byte) error {
 	var req Request
 	if err := json.Unmarshal(raw, &req); err != nil {
@@ -593,26 +637,19 @@ func (s *Service) ApplyOnReconcile(ctx context.Context, raw []byte) error {
 	m := req.Message
 	batchTxn, _ := uuid.Parse(req.Context.TransactionID)
 	msgID, _ := uuid.Parse(req.Context.MessageID)
-	defer s.logMessage(ctx, batchTxn, msgID, actionOnReconcile, dbsqlc.MessageDirectionINBOUND, "/api/webhook/on_reconcile", req.Context, raw, nil, nil)
+	defer s.logMessage(ctx, messageLog{txn: batchTxn, msgID: msgID, action: actionOnReconcile, dir: dbsqlc.MessageDirectionINBOUND,
+		url: "/api/webhook/on_reconcile", context: req.Context, payload: raw})
 
 	verdicts := make([]Verdict, 0, len(m.Contracts))
-	agreed := 0
 	for _, rawC := range m.Contracts {
 		c := asMap(rawC)
 		first := asMap(firstOf(slice(c["settlements"])))
 		bag := asMap(first["settlementAttributes"])
 		accord, _ := bag["accord"].(bool)
-		if accord {
-			agreed++
-		}
 		verdicts = append(verdicts, Verdict{ContractID: str(c["id"]), SettlementID: str(first["id"]), Accord: accord,
 			Dispute: asMap(bag["dispute"]), NetPayable: num(asMap(bag["netPayable"])["value"]), Commission: num(asMap(bag["commission"])["value"])})
 	}
-	// Agreed only as a whole: the BPP's status and every accord.
-	status := batchStatus(agreed, len(verdicts))
-	if m.ReconciliationStatus != "AGREED" {
-		status = "DISPUTED"
-	}
+	status := firstNonEmpty(summaryOf(s.cfg.BapID, req.Context.BppID, m.SettlementDate, m.Contracts).status(), m.ReconciliationStatus)
 	comp, _ := json.Marshal(m.SettlementSummary)
 	vj, _ := json.Marshal(verdicts)
 	tx, err := s.pool.Begin(ctx)
@@ -620,21 +657,25 @@ func (s *Service) ApplyOnReconcile(ctx context.Context, raw []byte) error {
 		return err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
-	tag, err := tx.Exec(ctx, `
-		UPDATE reconciliations SET status = $2, computed_summary = $3, contracts = $4, response_payload = $5, updated_at = NOW()
-		 WHERE id = $1 AND direction = $6`, m.ReconciliationID, status, comp, vj, raw, directionOutbound)
-	if err != nil {
-		return err
+	var id string
+	if err := tx.QueryRow(ctx, `
+		SELECT id FROM reconciliations
+		 WHERE direction = $1 AND (request_message_id = $2 OR transaction_id = $3)
+		 ORDER BY (request_message_id = $2) DESC, updated_at DESC LIMIT 1`,
+		directionOutbound, msgID, req.Context.TransactionID).Scan(&id); err != nil {
+		return fmt.Errorf("no /reconcile with messageId %s or transactionId %s", req.Context.MessageID, req.Context.TransactionID)
 	}
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("unknown reconciliationId %q", m.ReconciliationID)
+	if _, err := tx.Exec(ctx, `
+		UPDATE reconciliations SET status = $2, computed_summary = $3, contracts = $4, response_payload = $5, updated_at = NOW()
+		 WHERE id = $1`, id, status, comp, vj, raw); err != nil {
+		return err
 	}
 	for _, v := range verdicts {
 		own, err := s.latest(ctx, tx, v.ContractID)
 		if err != nil {
 			continue
 		}
-		if err := stampOwn(ctx, tx, *own, batchSettlements(own.contract, m.ReconciliationID), m.ReconciliationID, contractOutcome(status)); err != nil {
+		if err := stampOwn(ctx, tx, *own, batchSettlements(own.contract, id), id, settlementOutcome(v.Accord, str(v.Dispute["code"]))); err != nil {
 			return err
 		}
 	}
@@ -713,46 +754,6 @@ func stampOwn(ctx context.Context, tx pgx.Tx, own stored, ids []string, reconID,
 	return nil
 }
 
-// summaryOf totals the reconciliation bags of a message.
-func summaryOf(bapID, bppID, date string, contracts []any) Summary {
-	sm := Summary{BapID: bapID, BppID: bppID, SettlementDate: date, Currency: "IDR"}
-	answered := false
-	agreed, disputed := 0, 0
-	for _, raw := range contracts {
-		sm.ContractCount++
-		contractAgreed := true
-		for _, st := range slice(asMap(raw)["settlements"]) {
-			b := asMap(asMap(st)["settlementAttributes"])
-			if accord, ok := b["accord"].(bool); ok {
-				answered = true
-				contractAgreed = contractAgreed && accord
-			}
-			if c := str(b["currency"]); c != "" {
-				sm.Currency = c
-			}
-			sm.TotalOrderAmount += num(asMap(b["orderAmount"])["value"])
-			sm.TotalCommission += num(asMap(b["commission"])["value"])
-			sm.TotalWithholding += num(asMap(b["withholdingAmount"])["value"])
-			sm.TotalRefund += num(asMap(b["refundAmount"])["value"])
-			sm.TotalNetPayable += num(asMap(b["netPayable"])["value"])
-		}
-		if contractAgreed {
-			agreed++
-		} else {
-			disputed++
-		}
-	}
-	if answered {
-		sm.AgreedCount, sm.DisputedCount = &agreed, &disputed
-	}
-	sm.TotalOrderAmount = round2(sm.TotalOrderAmount)
-	sm.TotalCommission = round2(sm.TotalCommission)
-	sm.TotalWithholding = round2(sm.TotalWithholding)
-	sm.TotalRefund = round2(sm.TotalRefund)
-	sm.TotalNetPayable = round2(sm.TotalNetPayable)
-	return sm
-}
-
 // reconciliationID names a batch by when it is sent and who sends it:
 // recon-<settlement date>T<HHMMSS>Z-<senderId>.
 func reconciliationID(at time.Time, senderID string, taken func(string) bool) string {
@@ -817,32 +818,45 @@ func (s *Service) post(ctx context.Context, action string, body []byte) ([]byte,
 	return respBody, nil
 }
 
-func (s *Service) logMessage(ctx context.Context, txn, msgID uuid.UUID, action dbsqlc.BecknAction, dir dbsqlc.MessageDirection,
-	url string, c Context, payload, response []byte, callErr error) {
+// messageLog is one reconciliation message for the message log: the batch
+// transaction, the message, where it went or came from, its context, what
+// was sent or received, the answer, and the error of a failed send.
+type messageLog struct {
+	txn, msgID        uuid.UUID
+	action            dbsqlc.BecknAction
+	dir               dbsqlc.MessageDirection
+	url               string
+	context           Context
+	payload, response []byte
+	err               error
+}
+
+func (s *Service) logMessage(ctx context.Context, e messageLog) {
 	ack := dbsqlc.NullAckStatus{AckStatus: dbsqlc.AckStatusACK, Valid: true}
 	var errMsg *string
-	if callErr != nil {
+	if e.err != nil {
 		ack = dbsqlc.NullAckStatus{AckStatus: dbsqlc.AckStatusNACK, Valid: true}
-		e := callErr.Error()
-		errMsg = &e
+		msg := e.err.Error()
+		errMsg = &msg
 	}
 	var resp json.RawMessage
-	if len(response) > 0 && json.Valid(response) {
-		resp = response
+	if len(e.response) > 0 && json.Valid(e.response) {
+		resp = e.response
 	}
+	c := e.context
 	if err := dbsqlc.New(s.pool).InsertMessageLog(ctx, dbsqlc.InsertMessageLogParams{
-		TransactionID:   pgtype.UUID{Bytes: txn, Valid: txn != uuid.Nil},
-		MessageID:       msgID,
-		Action:          action,
-		Direction:       dir,
-		Url:             &url,
+		TransactionID:   pgtype.UUID{Bytes: e.txn, Valid: e.txn != uuid.Nil},
+		MessageID:       e.msgID,
+		Action:          e.action,
+		Direction:       e.dir,
+		Url:             &e.url,
 		BapID:           &c.BapID,
 		BapUri:          &c.BapURI,
 		BppID:           &c.BppID,
 		BppUri:          &c.BppURI,
 		NetworkID:       &c.NetworkID,
 		AckStatus:       ack,
-		RequestPayload:  payload,
+		RequestPayload:  e.payload,
 		ResponsePayload: resp,
 		ErrorMessage:    errMsg,
 	}); err != nil {
@@ -862,3 +876,12 @@ func slice(v any) []any          { s, _ := v.([]any); return s }
 func str(v any) string           { s, _ := v.(string); return s }
 func num(v any) float64          { f, _ := v.(float64); return f }
 func round2(f float64) float64   { return math.Round(f*100) / 100 }
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}

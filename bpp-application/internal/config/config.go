@@ -77,6 +77,15 @@ type Config struct {
 	// value here just means PublishedBppURI() falls back to BppURI.
 	CatalogBaseURL string
 
+	// CatalogFilesBaseURL is where published catalog/index files can
+	// actually be fetched from, for proxying "view index/catalog file"
+	// requests server-side. Usually the same domain as CatalogBaseURL (in
+	// the cloud, one public domain serves both the BPP receiver and the
+	// static files) -- but kept as a separate field since locally they
+	// diverge (a plain static file server, not the BPP itself). Falls back
+	// to CatalogBaseURL when unset; see CatalogFilesURL().
+	CatalogFilesBaseURL string
+
 	// BppPrivateKey is the base64-encoded Ed25519 private key (64 bytes) or seed (32 bytes)
 	// used to sign outbound Beckn requests. Required when CDSPublishURL is set.
 	// Env: BPP_PRIVATE_KEY
@@ -144,8 +153,9 @@ func Load() (*Config, error) {
 		SettlementAccountNumber: getEnv("SETTLEMENT_ACCOUNT_NUMBER", "8730000000001"),
 		SettlementAccountName:   os.Getenv("SETTLEMENT_ACCOUNT_NAME"),
 
-		CDSPublishURL:  os.Getenv("CDS_PUBLISH_URL"),
-		CatalogBaseURL: os.Getenv("CATALOG_BASE_URL"),
+		CDSPublishURL:       os.Getenv("CDS_PUBLISH_URL"),
+		CatalogBaseURL:      os.Getenv("CATALOG_BASE_URL"),
+		CatalogFilesBaseURL: os.Getenv("CATALOG_FILES_BASE_URL"),
 
 		BppPrivateKey: os.Getenv("BPP_PRIVATE_KEY"),
 		BppKeyID:      os.Getenv("BPP_KEY_ID"),
@@ -207,6 +217,16 @@ func (c *Config) PublishedBppURI() string {
 		return c.BppURI
 	}
 	return c.CatalogBaseURL + "/bpp/receiver/"
+}
+
+// CatalogFilesURL returns where published catalog/index files can actually
+// be fetched from -- CatalogFilesBaseURL if set, else CatalogBaseURL (the
+// cloud default, where one public domain serves both roles).
+func (c *Config) CatalogFilesURL() string {
+	if c.CatalogFilesBaseURL != "" {
+		return c.CatalogFilesBaseURL
+	}
+	return c.CatalogBaseURL
 }
 
 func (c *Config) validate() error {

@@ -5,10 +5,10 @@ import {
   ShoppingCart, Search, X, Package, CheckCircle2, Loader2,
   ArrowRight, ChevronRight, Minus, Plus, Sparkles, Tag,
   RotateCcw, CreditCard, ShieldCheck, Clock,
-  Star, Info, Receipt, Store, MapPin, Calendar, Zap,
+  Star, Info, Receipt, Store, MapPin, Calendar, Zap, Truck, HandCoins,
   User, Phone, Home, ChevronLeft, Banknote,
   Ban, MessageSquare, RefreshCw, ThumbsUp,
-  History, Wand2, ExternalLink, ChevronDown, ChevronUp,
+  History, Wand2, ExternalLink, ChevronDown,
   Compass, AlertCircle, Copy,
 } from 'lucide-react';
 import Tour from './Tour.jsx';
@@ -30,7 +30,7 @@ async function apiFetch(path, opts = {}) {
   const res = await fetch(`${API_BASE}${path}`, {
     ...opts,
     headers: {
-      ...(opts.headers || {}),
+      ...opts.headers,
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
   });
@@ -99,7 +99,6 @@ function parseCatalogs(data) {
       const policies = oa.policies || {};
       const serviceability = oa.serviceability || {};
       const timing = serviceability.timing?.[0] || {};
-      const distance = serviceability.distanceConstraint || {};
 
       // Composite dedup key: bpp + resource so cross-BPP resources with
       // the same resource ID (unlikely but possible) are treated as distinct.
@@ -127,6 +126,12 @@ function parseCatalogs(data) {
         bppUri,
         offerAttr: oa,
         offerConsiderations: offer.considerations || [],
+        // The seller's delivery charge per order (IONTradeConsideration
+        // deliveryFee); null when the offer states none.
+        deliveryFee: cons.deliveryFee?.amount ?? null,
+        // The fee the seller pays this buyer app (IONTradeConsideration
+        // buyerFinderFee: feeType, feeValue, appliesTo); null when none.
+        finderFee: cons.buyerFinderFee?.feeType ? cons.buyerFinderFee : null,
         // The resource as discover returned it, sent on in select.
         resourceDetail: { descriptor: res.descriptor, resourceAttributes: res.resourceAttributes },
         breakup,
@@ -134,7 +139,6 @@ function parseCatalogs(data) {
         returnPolicy: policies.returns,
         cancelPolicy: policies.cancellation,
         codAvailable: oa.paymentConstraints?.codAvailable,
-        deliveryRange: distance.maxDistance ? `${distance.maxDistance} ${distance.unit || 'KM'}` : '',
         deliveryDays: timing.daysOfWeek || [],
         deliveryHours: timing.timeRange ? `${timing.timeRange.start}–${timing.timeRange.end}` : '',
         // ISO date; shown with fmtDay() in the current language.
@@ -161,6 +165,20 @@ function combineTax(breakup) {
   return [...items, ...taxes.values()];
 }
 
+// React keys for rows that carry no id of their own: built from the row's
+// fields, with a #n suffix on repeats so identical rows still differ.
+// Returns [key, row] pairs.
+function keyedRows(rows, keyOf) {
+  const seen = new Map();
+  return rows.map(row => {
+    const base = String(keyOf(row));
+    const n = seen.get(base) || 0;
+    seen.set(base, n + 1);
+    return [n ? `${base}#${n}` : base, row];
+  });
+}
+const lineKey = b => `${b.type}|${b.title}|${b.amount}`;
+
 function parseOnSelectContract(contract) {
   if (!contract) return null;
   const consideration = contract.consideration?.[0] ?? contract.considerations?.[0];
@@ -171,6 +189,7 @@ function parseOnSelectContract(contract) {
     total: ca.totalAmount,
     currency: ca.currency || 'IDR',
     breakup: combineTax(ca.breakup),
+    finderFee: ca.buyerFinderFee?.feeAmount ?? null,
     paymentMethods: ca.paymentMethods || [],
     codAvailable: commitment?.offer?.offerAttributes?.paymentConstraints?.codAvailable,
     seller: commitment?.offer?.provider?.descriptor?.name,
@@ -256,12 +275,36 @@ function SkeletonCard() {
   );
 }
 
+/* ─────────────────────────── FinderFeeRow ───────────────────────────────── */
+// The buyer finder fee on an order: what the seller pays this app. It is not
+// part of the buyer's total.
+function FinderFeeRow({ amount, currency, className = 'text-xs' }) {
+  const { t } = useI18n();
+  if (amount == null) return null;
+  return (
+    <div className={`flex justify-between ${className} text-slate-500`} title={t('Paid by the seller to this app; not added to your total')}>
+      <span className="flex items-center gap-1"><HandCoins className="w-3 h-3" /> {t('Buyer finder fee (paid by seller)')}</span>
+      <span>{fmt(amount, currency)}</span>
+    </div>
+  );
+}
+
+// The offer's buyer finder fee terms, e.g. "3% of item total".
+function finderFeeTerms(fee, currency, t) {
+  if (fee.feeType === 'PERCENT') {
+    return fee.appliesTo === 'ORDER_TOTAL'
+      ? t('{pct}% of order total', { pct: fee.feeValue })
+      : t('{pct}% of item total', { pct: fee.feeValue });
+  }
+  return t('{amount} per unit', { amount: fmt(fee.feeValue, currency) });
+}
+
 /* ─────────────────────────── OfferInfoPanel ─────────────────────────────── */
 // Shows catalog offer details: price breakdown, seller, policies, serviceability
 function OfferInfoPanel({ product }) {
   const { breakup, currency, price, sellerName, sellerAddress,
     returnPolicy, cancelPolicy, codAvailable,
-    deliveryRange, deliveryHours, deliveryDays, offerName, offerValidity } = product;
+    deliveryRange, deliveryHours, offerName, offerValidity, deliveryFee, finderFee } = product;
   const { t } = useI18n();
 
   const shortAddr = sellerAddress
@@ -286,8 +329,8 @@ function OfferInfoPanel({ product }) {
         <div className="px-4 py-3 space-y-1.5">
           {breakup.length > 0 ? (
             <>
-              {breakup.map((b, i) => (
-                <div key={i} className="flex justify-between text-sm">
+              {keyedRows(breakup, lineKey).map(([key, b]) => (
+                <div key={key} className="flex justify-between text-sm">
                   <span className="text-slate-400">{b.title}</span>
                   <span className={
                     b.type === 'DISCOUNT' ? 'text-emerald-400 font-medium' :
@@ -311,6 +354,25 @@ function OfferInfoPanel({ product }) {
         </div>
       </div>
 
+      {/* The seller's delivery fee: once per order, added to the quote. */}
+      {deliveryFee != null && (
+        <div className="flex items-center justify-between px-4 py-2.5 rounded-xl border border-white/10 bg-white/[0.03] text-sm">
+          <span className="flex items-center gap-2 text-slate-400"><Truck className="w-4 h-4" /> {t('Delivery fee (per order)')}</span>
+          <span className="text-slate-200">{deliveryFee > 0 ? fmt(deliveryFee, currency) : t('Free delivery')}</span>
+        </div>
+      )}
+
+      {/* The fee the seller pays this app; not charged to the buyer. */}
+      {finderFee && (
+        <div className="px-4 py-2.5 rounded-xl border border-white/10 bg-white/[0.03] text-sm">
+          <div className="flex items-center justify-between">
+            <span className="flex items-center gap-2 text-slate-400"><HandCoins className="w-4 h-4" /> {t('Buyer finder fee')}</span>
+            <span className="text-slate-200">{finderFeeTerms(finderFee, currency, t)}</span>
+          </div>
+          <p className="text-[11px] text-slate-500 mt-1">{t('Paid by the seller to this app; not added to your total')}</p>
+        </div>
+      )}
+
       {/* Seller */}
       {sellerName && (
         <div className="flex items-start gap-3 px-4 py-3 rounded-xl border border-white/10 bg-white/[0.03]">
@@ -324,11 +386,6 @@ function OfferInfoPanel({ product }) {
 
       {/* Delivery & badges */}
       <div className="flex flex-wrap gap-2">
-        {deliveryRange && (
-          <span className="flex items-center gap-1 text-[10px] font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2.5 py-1 rounded-full">
-            <MapPin className="w-3 h-3" /> {t('Delivers within {range}', { range: deliveryRange })}
-          </span>
-        )}
         {deliveryHours && (
           <span className="flex items-center gap-1 text-[10px] font-semibold bg-white/5 text-slate-400 border border-white/10 px-2.5 py-1 rounded-full">
             <Clock className="w-3 h-3" /> {deliveryHours}
@@ -361,7 +418,7 @@ function ConfirmedQuotePanel({ quote, onInit, isLoading, nameOf }) {
   if (!quote) return null;
   if (quoteBlocked(quote)) return <UnavailablePanel quote={quote} nameOf={nameOf} />;
   const { total, currency, breakup, paymentMethods, codAvailable,
-    seller, returnPolicy, cancelPolicy } = quote;
+    seller, returnPolicy, finderFee } = quote;
   return (
     <motion.div
       initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
@@ -375,8 +432,8 @@ function ConfirmedQuotePanel({ quote, onInit, isLoading, nameOf }) {
       <div className="px-4 py-3 space-y-2">
         {breakup.length > 0 && (
           <div className="space-y-1.5">
-            {breakup.map((b, i) => (
-              <div key={i} className="flex justify-between text-sm">
+            {keyedRows(breakup, lineKey).map(([key, b]) => (
+              <div key={key} className="flex justify-between text-sm">
                 <span className="text-slate-400">{b.title}</span>
                 <span className={b.type === 'TAX' ? 'text-amber-400' : b.type === 'DISCOUNT' ? 'text-emerald-400' : 'text-slate-200'}>
                   {fmt(b.amount, currency)}
@@ -387,6 +444,7 @@ function ConfirmedQuotePanel({ quote, onInit, isLoading, nameOf }) {
               <span className="text-slate-200">{t('Total')}</span>
               <span className="text-emerald-300 text-lg">{fmt(total, currency)}</span>
             </div>
+            <FinderFeeRow amount={finderFee} currency={currency} />
           </div>
         )}
         <div className="flex flex-wrap gap-1.5 pt-1">
@@ -398,10 +456,27 @@ function ConfirmedQuotePanel({ quote, onInit, isLoading, nameOf }) {
           onClick={onInit} disabled={isLoading}
           className="w-full mt-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all active:scale-[0.98] shadow-lg shadow-emerald-600/30"
         >
-          {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <><span>{t('Initialize Order')}</span><ArrowRight className="w-4 h-4" /></>}
+          {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <><ShieldCheck className="w-4 h-4" /><span>{t('Place Order')}</span></>}
         </button>
       </div>
     </motion.div>
+  );
+}
+
+/* ─────────────────────────── PlacingStoppedNote ─────────────────────────── */
+// Why placing the order stopped before confirm: the seller's final total
+// (on_init) differs from the quote, or the confirm failed.
+function PlacingStoppedNote({ transaction }) {
+  const { t } = useI18n();
+  const changed = transaction?.priceChanged;
+  return (
+    <div className={`flex items-start gap-2 text-sm rounded-xl px-4 py-3 border ${changed
+      ? 'text-amber-200 bg-amber-500/10 border-amber-500/25' : 'text-slate-300 bg-emerald-500/5 border-emerald-500/20'}`}>
+      <Info className={`w-4 h-4 shrink-0 mt-0.5 ${changed ? 'text-amber-400' : 'text-emerald-400'}`} />
+      <span>{changed
+        ? t('The seller updated the total from {from} to {to}. Place the order at the new total?', { from: fmtIDR(changed.from), to: fmtIDR(changed.to) })
+        : t('Your order is ready. Click below to place it.')}</span>
+    </div>
   );
 }
 
@@ -420,14 +495,14 @@ function ProductModal({ product, transaction, onClose, onSelect, onInit, onConfi
     )
     : null;
 
-  const pendingStatuses = ['SELECT_SENT', 'INIT_SENT', 'CONFIRM_SENT'];
-  const isPending = pendingStatuses.includes(status);
+  // Placing the order: init, then confirm, run in the background (App).
+  const placing = status === 'INIT_SENT' || status === 'CONFIRM_SENT' ||
+    (status === 'INIT_RECEIVED' && transaction?.placing);
+  const isPending = status === 'SELECT_SENT' || placing;
 
-  const pendingLabel = {
-    SELECT_SENT: t('Requesting a quote from the seller…'),
-    INIT_SENT: t('Initializing order…'),
-    CONFIRM_SENT: t('Confirming your order…'),
-  }[status];
+  const pendingLabel = status === 'SELECT_SENT'
+    ? t('Requesting a quote from the seller…')
+    : t('Placing your order…');
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-3 sm:p-4">
@@ -518,16 +593,13 @@ function ProductModal({ product, transaction, onClose, onSelect, onInit, onConfi
               nameOf={id => (id === product.id ? product.name : null)} />
           )}
 
-          {/* Init received — confirm */}
-          {status === 'INIT_RECEIVED' && (
+          {/* Placing stopped (the price changed, or confirm failed): the buyer confirms */}
+          {status === 'INIT_RECEIVED' && !placing && (
             <div className="space-y-3">
-              <div className="flex items-center gap-2 text-sm text-slate-300 bg-emerald-500/5 border border-emerald-500/20 rounded-xl px-4 py-3">
-                <Info className="w-4 h-4 text-emerald-400 shrink-0" />
-                {t('Order initialized. Click below to place and pay.')}
-              </div>
+              <PlacingStoppedNote transaction={transaction} />
               <button onClick={onConfirm} disabled={isLoading}
                 className="w-full flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-white py-3.5 rounded-2xl font-bold text-sm transition-all active:scale-[0.98] shadow-lg shadow-amber-500/30">
-                {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <><ShieldCheck className="w-4 h-4" />{t('Pay & Confirm Order')}</>}
+                {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <><ShieldCheck className="w-4 h-4" />{t('Pay & Place Order')}</>}
               </button>
             </div>
           )}
@@ -595,20 +667,24 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
   const blocked = quoteBlocked(confirmedQuote);
 
   /* ── Stepper ───────────────────────────────────────────────────────── */
-  const STEPS = [t('Quote'), t('Billing'), t('Confirm'), t('Done')];
+  // Placing the order (init, then confirm) runs in the background from
+  // Billing; it stops at INIT_RECEIVED only when the buyer must confirm.
+  const STEPS = [t('Quote'), t('Billing'), t('Done')];
   const stepIndex = {
     SELECT_SENT: 0,
     QUOTE_RECEIVED: 1,
     INIT_SENT: 1,
-    INIT_RECEIVED: 2,
-    CONFIRM_SENT: 2,
-    CONFIRMED: 3,
-    STATUS_SENT: 3,
-    CANCEL_SENT: 3,
-    CANCELLED: 3,
-    RATE_SENT: 3,
-    SUPPORT_SENT: 3,
+    INIT_RECEIVED: 1,
+    CONFIRM_SENT: 1,
+    CONFIRMED: 2,
+    STATUS_SENT: 2,
+    CANCEL_SENT: 2,
+    CANCELLED: 2,
+    RATE_SENT: 2,
+    SUPPORT_SENT: 2,
   }[status] ?? 0;
+  const placing = status === 'INIT_SENT' || status === 'CONFIRM_SENT' ||
+    (status === 'INIT_RECEIVED' && transaction?.placing);
 
   return (
     <div className="flex flex-col flex-grow overflow-hidden">
@@ -620,7 +696,7 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
           <div className="absolute left-0 top-3 h-px bg-emerald-400 transition-all duration-700"
             style={{ width: `${(stepIndex / (STEPS.length - 1)) * 100}%` }} />
           {STEPS.map((label, i) => (
-            <div key={i} className="relative flex flex-col items-center gap-1.5 z-10">
+            <div key={label} className="relative flex flex-col items-center gap-1.5 z-10">
               <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold transition-all duration-500 ${i < stepIndex ? 'bg-emerald-400 text-slate-900' :
                 i === stepIndex ? 'bg-emerald-400 text-slate-900 ring-4 ring-emerald-400/20' :
                   'bg-slate-700 text-slate-400'}`}>
@@ -695,8 +771,8 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
                   )}
                 </div>
                 <div className="px-4 py-3 space-y-1.5">
-                  {confirmedQuote.breakup.map((b, i) => (
-                    <div key={i} className="flex justify-between text-sm">
+                  {keyedRows(confirmedQuote.breakup, lineKey).map(([key, b]) => (
+                    <div key={key} className="flex justify-between text-sm">
                       <span className="text-slate-400">{b.title}</span>
                       <span className={b.type === 'DISCOUNT' ? 'text-emerald-400' : b.type === 'TAX' ? 'text-amber-400' : 'text-slate-200'}>
                         {fmt(b.amount, currency)}
@@ -709,6 +785,7 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
                       <span className="text-emerald-300 text-lg">{fmt(confirmedQuote.total, currency)}</span>
                     </div>
                   )}
+                  <FinderFeeRow amount={confirmedQuote.finderFee} currency={currency} />
                   <div className="flex flex-wrap gap-1.5 pt-1">
                     {confirmedQuote.codAvailable && (
                       <span className="text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded-full flex items-center gap-1">
@@ -814,27 +891,21 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
         )}
 
         {/* ── Step: Waiting for on_init ──────────────────────────────── */}
-        {status === 'INIT_SENT' && (
+        {placing && (
           <div className="flex flex-col items-center gap-3 py-8">
             <div className="relative w-12 h-12">
               <div className="absolute inset-0 rounded-full border-2 border-emerald-500/20 border-t-emerald-400 animate-spin" />
               <ShieldCheck className="absolute inset-0 m-auto w-5 h-5 text-emerald-400" />
             </div>
-            <p className="text-sm text-slate-300">{t('Initializing your order…')}</p>
+            <p className="text-sm text-slate-300">{t('Placing your order…')}</p>
           </div>
         )}
 
         {/* ── Step: Init received → ready to confirm ─────────────────── */}
-        {status === 'INIT_RECEIVED' && (
+        {status === 'INIT_RECEIVED' && !placing && (
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
-            className="rounded-xl border border-blue-500/20 bg-blue-500/5 px-4 py-3 space-y-2">
-            <div className="flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-blue-400 shrink-0" />
-              <p className="text-sm font-medium text-blue-300">{t('Order Initialized')}</p>
-            </div>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              {t('Your order is ready. Review the details above and confirm to place your order on the ION network.')}
-            </p>
+            className="space-y-2">
+            <PlacingStoppedNote transaction={transaction} />
             <div className="pt-1 text-xs text-slate-500 space-y-1">
               <p><span className="text-slate-400">{t('Name:')}</span> {billing.name || t('Customer')}</p>
               <p><span className="text-slate-400">{t('Phone:')}</span> {billing.phone || '—'}</p>
@@ -844,16 +915,6 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
           </motion.div>
         )}
 
-        {/* ── Step: Waiting for on_confirm ──────────────────────────── */}
-        {status === 'CONFIRM_SENT' && (
-          <div className="flex flex-col items-center gap-3 py-8">
-            <div className="relative w-12 h-12">
-              <div className="absolute inset-0 rounded-full border-2 border-emerald-500/20 border-t-emerald-400 animate-spin" />
-              <Banknote className="absolute inset-0 m-auto w-5 h-5 text-emerald-400" />
-            </div>
-            <p className="text-sm text-slate-300">{t('Placing your order…')}</p>
-          </div>
-        )}
 
         {/* ── Step: Status requested ─────────────────────────────────── */}
         {status === 'STATUS_SENT' && (
@@ -991,14 +1052,14 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
       </div>
 
       {/* ── Sticky action footer ────────────────────────────────────── */}
-      {((status === 'QUOTE_RECEIVED' && !blocked) || status === 'INIT_RECEIVED') && (
+      {((status === 'QUOTE_RECEIVED' && !blocked) || (status === 'INIT_RECEIVED' && !placing)) && (
         <div className="px-5 py-4 border-t border-white/[0.07] shrink-0">
           {status === 'QUOTE_RECEIVED' && (
             <button onClick={onInit} disabled={isLoading} data-tour="init"
               className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white py-3.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all active:scale-[0.98] shadow-lg shadow-emerald-600/30">
               {isLoading
-                ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('Initializing…')}</>
-                : <><ArrowRight className="w-4 h-4" /> {t('Initialize Order')}</>}
+                ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('Placing your order…')}</>
+                : <><ShieldCheck className="w-4 h-4" /> {t('Place Order')}</>}
             </button>
           )}
           {status === 'INIT_RECEIVED' && (
@@ -1006,7 +1067,7 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
               className="w-full bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-white py-3.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all active:scale-[0.98] shadow-lg shadow-amber-500/30">
               {isLoading
                 ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('Confirming…')}</>
-                : <><ShieldCheck className="w-4 h-4" /> {t('Pay & Confirm Order')}</>}
+                : <><ShieldCheck className="w-4 h-4" /> {t('Pay & Place Order')}</>}
             </button>
           )}
         </div>
@@ -1074,7 +1135,7 @@ const TXN_STATUS_LABELS = {
   CANCELLED: 'Cancelled', UPDATE_SENT: 'Updating', COMPLETE: 'Completed', RATE_SENT: 'Rating sent', SUPPORT_SENT: 'Support requested',
   Return_Initiated: 'Return requested', Return_Approved: 'Return approved', Return_Rejected: 'Return rejected',
 };
-const txnStatusLabel = (t, s) => (TXN_STATUS_LABELS[s] ? t(TXN_STATUS_LABELS[s]) : String(s || '').replace(/_/g, ' '));
+const txnStatusLabel = (t, s) => (TXN_STATUS_LABELS[s] ? t(TXN_STATUS_LABELS[s]) : String(s || '').replaceAll('_', ' '));
 
 function fmtOrderDate(iso) {
   if (!iso) return '—';
@@ -1159,10 +1220,30 @@ function cancelBlockedReason(policy, fulfillmentStatus) {
 
 // ISO 8601 duration (P7D, PT2H, P1W2DT3H) in milliseconds; null if invalid.
 function isoDurationMs(s) {
-  const m = /^P(?:(\d+(?:\.\d+)?)Y)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)W)?(?:(\d+(?:\.\d+)?)D)?(?:T(?:(\d+(?:\.\d+)?)H)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)S)?)?$/.exec(s || '');
+  const m = /^P([^T]*)(?:T(.*))?$/.exec(s || '');
   if (!m || s === 'P' || s === 'PT') return null;
-  const [y, mo, w, d, h, mi, se] = m.slice(1).map(v => Number(v || 0));
+  const date = durationFields(m[1], 'YMWD');
+  const time = durationFields(m[2] ?? '', 'HMS');
+  if (!date || !time) return null;
+  const [y, mo, w, d] = date, [h, mi, se] = time;
   return ((((y * 365 + mo * 30 + w * 7 + d) * 24 + h) * 60 + mi) * 60 + se) * 1000;
+}
+
+// One part of an ISO 8601 duration ("1Y2M", "3H30M"): numbers each followed
+// by one of `units`, in that order and at most once each. The values in
+// `units` order (0 for a unit not given), or null if the part is malformed.
+function durationFields(part, units) {
+  const values = Array.from(units, () => 0);
+  const field = /(\d+(?:\.\d+)?)([A-Z])/y;
+  let next = 0;
+  while (field.lastIndex < part.length) {
+    const f = field.exec(part);
+    const at = f ? units.indexOf(f[2], next) : -1;
+    if (at < 0) return null;
+    values[at] = Number(f[1]);
+    next = at + 1;
+  }
+  return values;
 }
 
 // Return eligibility under an item's offer policies.returns -- the BAP and
@@ -1270,13 +1351,14 @@ function parseContractDetail(contract) {
     items: (p.commitmentIds || []).map(id => commitments.find(c => c.id === id)?.resources?.[0]?.descriptor?.name
       || commitments.find(c => c.id === id)?.offer?.descriptor?.name || id),
   }));
-  if (returnPerformance && returnPerformance.status?.code) {
+  if (returnPerformance?.status?.code) {
     fulfillmentStatus = returnPerformance.status.code;
   }
 
   return {
     items, price: fullyCancelled && consideration?.status?.code === 'CANCELLED' ? 0 : price,
     currency, breakup: fullyCancelled ? [] : breakup, fees, refunds, returns,
+    finderFee: fullyCancelled ? null : consAttr.buyerFinderFee?.feeAmount ?? null,
     buyer, seller, statusCode, fulfillmentStatus, id: contract.id,
   };
 }
@@ -1367,10 +1449,10 @@ function OrderItemsCard({ txnId, order, txnStatus, deliveredAt, onChanged }) {
         )}
       </div>
       <div className="divide-y divide-white/[0.04]">
-        {order.items.map((item, i) => {
+        {keyedRows(order.items, item => item.id).map(([key, item]) => {
           const q = Math.min(cancelQty[item.id] ?? 1, item.qty);
           return (
-            <div key={i} className={`px-4 py-2.5 ${item.cancelled ? 'opacity-60' : ''}`}>
+            <div key={key} className={`px-4 py-2.5 ${item.cancelled ? 'opacity-60' : ''}`}>
               <div className="flex items-center gap-3">
                 <div className="w-8 h-8 rounded-lg bg-slate-800 flex items-center justify-center shrink-0">
                   {item.cancelled ? <Ban className="w-3.5 h-3.5 text-rose-400" /> : <Package className="w-3.5 h-3.5 text-slate-500" />}
@@ -1464,14 +1546,17 @@ function OrderItemsCard({ txnId, order, txnStatus, deliveredAt, onChanged }) {
       )}
       {order.returns?.length > 0 && (
         <div className="px-4 py-2.5 border-t border-white/[0.06] space-y-1">
-          {order.returns.map(r => (
-            <div key={r.id} className="text-xs flex items-start justify-between gap-3">
-              <span className="text-slate-400">{t('Return')} · {r.items.join(', ') || r.id}</span>
-              <span className={r.code === 'Return_Approved' ? 'text-emerald-400' : r.code === 'Return_Rejected' ? 'text-rose-400 text-right' : 'text-amber-400'}>
-                {r.code === 'Return_Approved' ? t('Approved') : r.code === 'Return_Rejected' ? `${t('Rejected')}${r.reason ? ` — ${r.reason}` : ''}` : t('Requested…')}
-              </span>
-            </div>
-          ))}
+          {order.returns.map(r => {
+            const rejected = r.reason ? `${t('Rejected')} — ${r.reason}` : t('Rejected');
+            return (
+              <div key={r.id} className="text-xs flex items-start justify-between gap-3">
+                <span className="text-slate-400">{t('Return')} · {r.items.join(', ') || r.id}</span>
+                <span className={r.code === 'Return_Approved' ? 'text-emerald-400' : r.code === 'Return_Rejected' ? 'text-rose-400 text-right' : 'text-amber-400'}>
+                  {r.code === 'Return_Approved' ? t('Approved') : r.code === 'Return_Rejected' ? rejected : t('Requested…')}
+                </span>
+              </div>
+            );
+          })}
         </div>
       )}
       {(order.fees.length > 0 || order.refunds.length > 0) && (
@@ -1520,7 +1605,7 @@ function LiveOrderItems({ txnId, onStatus }) {
 }
 
 function OrderDetailPanel({ txnId, onBack }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const [detail, setDetail] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -1530,7 +1615,11 @@ function OrderDetailPanel({ txnId, onBack }) {
   useEffect(() => {
     if (reloadKey === 0) { setLoading(true); setError(null); }
     apiFetch(`/orders/${txnId}`)
-      .then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(e.error || t('Could not load the order'))))
+      .then(async r => {
+        if (r.ok) return r.json();
+        const e = await r.json();
+        throw e.error || t('Could not load the order');
+      })
       .then(d => { setDetail(d); setLoading(false); })
       .catch(e => { setError(String(e)); setLoading(false); });
   }, [txnId, reloadKey]);
@@ -1574,11 +1663,7 @@ function OrderDetailPanel({ txnId, onBack }) {
   // Fallback to top-level contract
   if (!bestContract) bestContract = parseContractDetail(detail.contract);
 
-  const fmt = (amount, cur) => {
-    if (amount == null) return '—';
-    try { return new Intl.NumberFormat('id-ID', { style: 'currency', currency: cur || 'IDR', maximumFractionDigits: 0 }).format(amount); }
-    catch { return `${cur || 'IDR'} ${amount}`; }
-  };
+  const fmt = fmtIDR;
 
   // Pay & Confirm an order left at INIT_RECEIVED (the seller's on_init terms
   // were received but checkout was never completed) -- same /confirm call as
@@ -1671,8 +1756,8 @@ function OrderDetailPanel({ txnId, onBack }) {
             <p className="text-[11px] font-bold uppercase tracking-widest text-slate-500">{t('Payment')}</p>
           </div>
           <div className="px-4 py-3 space-y-1.5">
-            {bestContract.breakup.map((b, i) => (
-              <div key={i} className="flex justify-between text-xs">
+            {keyedRows(bestContract.breakup, lineKey).map(([key, b]) => (
+              <div key={key} className="flex justify-between text-xs">
                 <span className="text-slate-400">{b.title}</span>
                 <span className={b.amount < 0 ? 'text-emerald-400' : 'text-slate-300'}>{fmt(b.amount, bestContract.currency)}</span>
               </div>
@@ -1681,6 +1766,7 @@ function OrderDetailPanel({ txnId, onBack }) {
               <span className="text-sm font-bold text-white">{t('Total')}</span>
               <span className="text-sm font-bold text-emerald-300">{fmt(bestContract.price, bestContract.currency)}</span>
             </div>
+            <FinderFeeRow amount={bestContract.finderFee} currency={bestContract.currency} />
           </div>
         </div>
       )}
@@ -1714,7 +1800,7 @@ function OrderDetailPanel({ txnId, onBack }) {
             <p className="text-[11px] font-bold uppercase tracking-widest text-slate-500">{t('Order Timeline')}</p>
           </div>
           <div className="px-4 py-3 space-y-3">
-            {snaps.map((s, i) => {
+            {keyedRows(snaps, s => `${s.action}@${s.created_at}`).map(([key, s], i) => {
               const al = ACTION_LABELS[s.action] || { icon: '•', label: s.action, color: 'text-slate-500' };
               let displayLabel = ACTION_LABELS[s.action] ? t(al.label) : al.label;
               let displayIcon = al.icon;
@@ -1752,7 +1838,7 @@ function OrderDetailPanel({ txnId, onBack }) {
               }
               
               return (
-                <div key={i} className="flex items-start gap-3">
+                <div key={key} className="flex items-start gap-3">
                   <div className="flex flex-col items-center shrink-0">
                     <div className={`w-7 h-7 rounded-full flex items-center justify-center text-base bg-slate-800 border border-white/[0.07] ${displayColor}`}>
                       {displayIcon}
@@ -1854,7 +1940,7 @@ function PayloadPanel({ message: m }) {
   };
 
   return (
-    <div className="rounded-lg border border-white/[0.07] bg-slate-950/60 overflow-hidden" onClick={e => e.stopPropagation()}>
+    <div className="rounded-lg border border-white/[0.07] bg-slate-950/60 overflow-hidden" role="presentation" onClick={e => e.stopPropagation()}>
       <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 border-b border-white/[0.06] flex-wrap">
         <div className="flex gap-1">
           {tabs.map(x => (
@@ -1910,7 +1996,7 @@ function MessageLogPanel() {
       if (!silent) setLoading(false);
     }
   }, []);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]); // load reports its own errors
   useLive(() => load(true));
 
   const toggle = id => setOpen(prev => {
@@ -2040,7 +2126,7 @@ function OrderHistoryDrawer({ open, onClose }) {
   useLive(() => load(page, true), open && tab === 'orders' && !selectedId);
 
   useEffect(() => {
-    if (open) { load(1); setSelectedId(null); setTab('orders'); }
+    if (open) { void load(1); setSelectedId(null); setTab('orders'); } // load logs its own errors
   }, [open, load]);
 
   const totalPages = Math.ceil(total / limit);
@@ -2198,27 +2284,24 @@ const tourSteps = t => [
   { eyebrow: t('Browse'), target: 'filters', title: t('Categories and sorting'),
     body: <p>{t('Narrow the list by category, or sort by price or name. Tap any product card to see its details, offer, and return and cancellation policies.')}</p> },
 
-  { eyebrow: t('Order · {n} of 4', { n: 1 }), target: 'add-first', action: 'click', waitLabel: t('Click ADD'),
+  { eyebrow: t('Order · {n} of 3', { n: 1 }), target: 'add-first', action: 'click', waitLabel: t('Click ADD'),
     skip: { label: t('Skip this part'), to: 'orders' }, title: t("Let's place an order"),
     body: <><p>{rich(t('Click <b>ADD</b> on the first product to put it in your cart.'))}</p><p className="text-slate-400">{t('No products? A seller has to publish a catalog first, from the BPP app.')}</p></> },
-  { eyebrow: t('Order · {n} of 4', { n: 1 }), target: 'view-cart', until: s => s.isCartOpen, waitLabel: t('Click View Cart'),
+  { eyebrow: t('Order · {n} of 3', { n: 1 }), target: 'view-cart', until: s => s.isCartOpen, waitLabel: t('Click View Cart'),
     title: t('Open your cart'),
     body: <p>{rich(t('Your cart can hold products from different sellers. Click <b>View Cart</b>.'))}</p> },
-  { eyebrow: t('Order · {n} of 4', { n: 2 }), target: 'checkout', until: s => s.cartCheckout, waitLabel: t('Click Checkout'),
+  { eyebrow: t('Order · {n} of 3', { n: 2 }), target: 'checkout', until: s => s.cartCheckout, waitLabel: t('Click Checkout'),
     title: t('Check out'),
     body: <p>{rich(t('Click <b>Proceed to Checkout</b>. The app asks the seller for a <b>quote</b>: live price, stock, tax and delivery.'))}</p> },
-  { eyebrow: t('Order · {n} of 4', { n: 2 }), target: 'checkout-stepper', until: statusIn('QUOTE_RECEIVED', 'INIT_SENT', 'INIT_RECEIVED', 'CONFIRM_SENT', ...PLACED),
+  { eyebrow: t('Order · {n} of 3', { n: 2 }), target: 'checkout-stepper', until: statusIn('QUOTE_RECEIVED', 'INIT_SENT', 'INIT_RECEIVED', 'CONFIRM_SENT', ...PLACED),
     waitLabel: t('Waiting for the seller…'), title: t('Getting a quote'),
     body: <p>{t('The seller is working out your quote. This usually takes a second or two.')}</p> },
-  { eyebrow: t('Order · {n} of 4', { n: 3 }), target: 'billing-autofill', action: 'click', waitLabel: t('Click Auto-fill'),
+  { eyebrow: t('Order · {n} of 3', { n: 3 }), target: 'billing-autofill', action: 'click', waitLabel: t('Click Auto-fill'),
     title: t('Your details'),
     body: <p>{rich(t("The quote shows the seller's price, tax and delivery. Below it, enter who the order is for and where to deliver it. Click <b>Auto-fill</b> for a sample address."))}</p> },
-  { eyebrow: t('Order · {n} of 4', { n: 3 }), target: 'init', until: statusIn('INIT_RECEIVED', 'CONFIRM_SENT', ...PLACED), waitLabel: t('Click Initialize'),
-    title: t('Initialize the order'),
-    body: <p>{rich(t("Click <b>Initialize Order</b>. The seller confirms the final terms and how you'll pay."))}</p> },
-  { eyebrow: t('Order · {n} of 4', { n: 4 }), target: 'confirm', until: statusIn(...PLACED), waitLabel: t('Click Pay & Confirm'),
-    title: t('Pay and confirm'),
-    body: <><p>{rich(t('Click <b>Pay & Confirm Order</b> to place it.'))}</p><p className="text-slate-400">{t('The payment gateway holds your payment until the order is settled with the seller.')}</p></> },
+  { eyebrow: t('Order · {n} of 3', { n: 3 }), target: 'init', until: statusIn(...PLACED), waitLabel: t('Click Place Order'),
+    title: t('Place the order'),
+    body: <><p>{rich(t('Click <b>Place Order</b>. The app agrees the final terms with the seller and places the order in one go.'))}</p><p className="text-slate-400">{t('The payment gateway holds your payment until the order is settled with the seller.')}</p></> },
   { eyebrow: t('Order placed'), target: 'order-placed', title: t('Order placed!'),
     body: <p>{t("The seller has your order. Its items are listed below. You can cancel the whole order, or just some items, if the seller's policy allows it.")}</p> },
   { eyebrow: t('Order placed'), target: 'order-actions', title: t('After you order'),
@@ -2237,7 +2320,7 @@ const tourSteps = t => [
 ];
 
 export default function App() {
-  const { t, locale, chosen: langChosen } = useI18n();
+  const { t, chosen: langChosen } = useI18n();
   const steps = useMemo(() => tourSteps(t), [t]);
   const [catalog, setCatalog] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -2297,7 +2380,10 @@ export default function App() {
     if (params.toString()) path += `?${params.toString()}`;
 
     apiFetch(path, { signal: controller.signal })
-      .then(r => { if (!r.ok) throw new Error(`Status ${r.status}`); return r.json(); })
+      .then(r => {
+        if (!r.ok) throw new Error(`Status ${r.status}`);
+        return r.json();
+      })
       .then(data => {
         // /api/v1/discover now returns the catalog result directly, whether
         // DISCOVER_METHOD routed it via DiscoverSync (a direct call to
@@ -2377,7 +2463,7 @@ export default function App() {
     setCart(p => p.map(i => i.id === id ? { ...i, qty: i.qty + delta } : i).filter(i => i.qty > 0));
 
   const addToCart = p => setCart(prev => {
-    const ex = prev.find(i => i.id === p.id);
+    const ex = prev.some(i => i.id === p.id);
     return ex ? prev.map(i => i.id === p.id ? { ...i, qty: i.qty + 1 } : i) : [...prev, { ...p, qty: 1 }];
   });
 
@@ -2385,6 +2471,15 @@ export default function App() {
   const cartTotal = cart.reduce((s, i) => s + i.price * i.qty, 0);
 
   /* ── Transaction polling ─────────────────────────────────────────────── */
+  // Depends only on transaction?.id, not the whole transaction object --
+  // setTransaction below builds a new object on every tick (even when
+  // nothing changed), and depending on the full object would re-run this
+  // effect on every single poll, tearing down and restarting the interval
+  // from zero each time. That silently doubled the worst-case wait: a
+  // status landing just after a tick found nothing new had to wait a full
+  // fresh interval again instead of the remainder of the original one.
+  // Since this effect no longer re-runs when the status changes, it must
+  // stop itself explicitly once a terminal status is reached.
   useEffect(() => {
     const terminalStatuses = ['CONFIRMED', 'CANCELLED', 'COMPLETE'];
     if (!transaction || terminalStatuses.includes(transaction.status)) return;
@@ -2398,11 +2493,12 @@ export default function App() {
             if (p.status === 'CANCEL_SENT' && d.status === 'CONFIRMED') return p;
             return { ...p, ...d };
           });
+          if (terminalStatuses.includes(d.status)) clearInterval(id);
         })
         .catch(() => { });
-    }, 2000);
+    }, 500);
     return () => clearInterval(id);
-  }, [transaction]);
+  }, [transaction?.id]);
 
   /* ── Beckn: Select (single product from modal) ───────────────────────── */
   const handleSelectProduct = async (product) => {
@@ -2490,7 +2586,10 @@ export default function App() {
         // 409: the seller can no longer supply this order.
         throw new Error(r.status === 409 ? t('Some items are no longer available from the seller.') : (err.error || `HTTP ${r.status}`));
       }
-      setTransaction(p => ({ ...p, status: 'INIT_SENT' }));
+      // Placing: once on_init is in, confirm follows on its own (below).
+      const quoted = parseOnSelectContract(typeof transaction.contract === 'string'
+        ? JSON.parse(transaction.contract) : transaction.contract)?.total ?? null;
+      setTransaction(p => ({ ...p, status: 'INIT_SENT', placing: true, quoteTotal: quoted, priceChanged: null }));
     } catch (e) { alert(t('Init failed: {error}', { error: e.message })); }
     finally { setIsLoading(false); }
   };
@@ -2500,14 +2599,39 @@ export default function App() {
     if (!transaction) return;
     setIsLoading(true);
     try {
-      await apiFetch(`/confirm`, {
+      const r = await apiFetch(`/confirm`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ transaction_id: transaction.id }),
       });
-      setTransaction(p => ({ ...p, status: 'CONFIRM_SENT' }));
-    } catch (e) { alert(t('Confirm failed: {error}', { error: e.message })); }
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
+      setTransaction(p => ({ ...p, status: 'CONFIRM_SENT', placing: false }));
+    } catch (e) {
+      // Stop placing; the buyer can try again with Pay & Place Order.
+      setTransaction(p => ({ ...p, placing: false }));
+      alert(t('Confirm failed: {error}', { error: e.message }));
+    }
     finally { setIsLoading(false); }
   };
+
+  /* ── Placing: confirm once on_init is in ─────────────────────────────── */
+  // The seller's on_init states the final terms. Confirm follows at once
+  // unless its total differs from the quote the buyer saw; then the buyer
+  // decides (PlacingStoppedNote).
+  const confirmedFor = useRef(null);
+  useEffect(() => {
+    if (transaction?.status !== 'INIT_RECEIVED' || !transaction.placing) return;
+    if (confirmedFor.current === transaction.id) return;
+    confirmedFor.current = transaction.id;
+    const contract = typeof transaction.contract === 'string' ? JSON.parse(transaction.contract) : transaction.contract;
+    const total = parseOnSelectContract(contract)?.total ?? null;
+    const quoted = transaction.quoteTotal;
+    if (quoted != null && total != null && Math.abs(Number(total) - Number(quoted)) > 0.005) {
+      setTransaction(p => ({ ...p, placing: false, priceChanged: { from: quoted, to: total } }));
+      return;
+    }
+    handleConfirm();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transaction?.status, transaction?.placing, transaction?.id]);
 
   /* ── Beckn: Request Status ───────────────────────────────────────────── */
   const handleRequestStatus = async () => {
@@ -2538,7 +2662,7 @@ export default function App() {
         ratingCategory: 'order',
         range: { min: 1, max: 5, value: rating },
       };
-      if (feedback && feedback.trim()) {
+      if (feedback?.trim()) {
         ratingInput.feedbackFormSubmission = { data: { comment: feedback.trim() } };
       }
       const r = await apiFetch(`/rate`, {
@@ -2796,7 +2920,7 @@ export default function App() {
         )}
 
         {visibleCatalog.length > 0 && catalogSections.map((section, sIdx) => (
-          <div key={sIdx} className={`rounded-3xl p-6 sm:p-8 border border-white/[0.05] bg-white/[0.02] ${sIdx > 0 ? "mt-8" : ""}`}>
+          <div key={section.title} className={`rounded-3xl p-6 sm:p-8 border border-white/[0.05] bg-white/[0.02] ${sIdx > 0 ? "mt-8" : ""}`}>
             {section.title && (
               <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-3">
                 <div className="p-2 rounded-xl bg-white/[0.04]">
@@ -2865,6 +2989,12 @@ export default function App() {
                             </p>
                           )}
                           <div className="flex gap-1.5 flex-wrap">
+                            {product.deliveryFee != null && (
+                              <span className="text-[10px] text-slate-400 flex items-center gap-0.5">
+                                <Truck className="w-2.5 h-2.5" />
+                                {product.deliveryFee > 0 ? t('Delivery {amount}', { amount: fmt(product.deliveryFee, product.currency) }) : t('Free delivery')}
+                              </span>
+                            )}
                             {product.deliveryRange && (
                               <span className="text-[10px] text-blue-400 flex items-center gap-0.5">
                                 <MapPin className="w-2.5 h-2.5" />{product.deliveryRange}
@@ -2884,6 +3014,7 @@ export default function App() {
 
                           {inCart ? (
                             <div
+                              role="presentation"
                               onClick={e => e.stopPropagation()}
                               className="flex items-center gap-0 rounded-xl overflow-hidden border"
                               style={{ borderColor: 'rgba(0,184,230,0.3)', background: 'rgba(0,184,230,0.1)' }}
@@ -3074,13 +3205,8 @@ export default function App() {
                             )}
 
                             {/* Delivery badges */}
-                            {(item.deliveryRange || item.deliveryHours || item.codAvailable || item.returnPolicy?.allowed || item.cancelPolicy?.allowed) && (
+                            {(item.deliveryHours || item.codAvailable || item.returnPolicy?.allowed || item.cancelPolicy?.allowed) && (
                               <div className="flex flex-wrap gap-1.5">
-                                {item.deliveryRange && (
-                                  <span className="flex items-center gap-1 text-[10px] font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded-full">
-                                    <MapPin className="w-2.5 h-2.5" /> {t('Delivers within {range}', { range: item.deliveryRange })}
-                                  </span>
-                                )}
                                 {item.deliveryHours && (
                                   <span className="flex items-center gap-1 text-[10px] font-semibold bg-white/5 text-slate-400 border border-white/10 px-2 py-0.5 rounded-full">
                                     <Clock className="w-2.5 h-2.5" /> {item.deliveryHours}

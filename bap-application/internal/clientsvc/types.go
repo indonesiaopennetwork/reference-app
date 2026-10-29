@@ -13,16 +13,16 @@ type SelectItem struct {
 	ResourceID      string          `json:"resource_id"`
 	OfferID         string          `json:"offer_id"`
 	OfferName       string          `json:"offer_name,omitempty"`
-	Quantity        int             `json:"quantity"`
+	Quantity        int             `json:"quantity" example:"1"`
 	ProviderID      string          `json:"provider_id,omitempty"`
 	ProviderName    string          `json:"provider_name,omitempty"`
-	OfferAttributes json.RawMessage `json:"offer_attributes,omitempty"`
+	OfferAttributes json.RawMessage `json:"offer_attributes,omitempty" swaggertype:"object"`
 	// OfferConsiderations is the offer's considerations[] (pricing) exactly as
 	// the discover response carried it; sent on as offer.considerations.
-	OfferConsiderations json.RawMessage `json:"offer_considerations,omitempty"`
+	OfferConsiderations json.RawMessage `json:"offer_considerations,omitempty" swaggertype:"array,object"`
 	// Resource is the resource's descriptor / resourceAttributes as discover
 	// returned them; sent on in commitments[].resources[].
-	Resource json.RawMessage `json:"resource,omitempty"`
+	Resource json.RawMessage `json:"resource,omitempty" swaggertype:"object"`
 	// BppID and BppURI are populated from the catalog's bppId/bppUri fields in the
 	// discover response. They override the server-config defaults so the select is
 	// routed to the BPP that actually owns the resource.
@@ -41,21 +41,21 @@ type ClientSelectRequest struct {
 // Billing carries the structured buyer address/contact details; the BAP service
 // patches them into the on_select contract snapshot before sending to the adapter.
 type ClientInitRequest struct {
-	TransactionID string          `json:"transaction_id" binding:"required"`
-	Billing       json.RawMessage `json:"billing" binding:"required"`
+	TransactionID string          `json:"transaction_id" binding:"required" format:"uuid"`
+	Billing       json.RawMessage `json:"billing" binding:"required" swaggertype:"object"`
 }
 
 // ClientConfirmRequest — frontend initiates Confirm.
 type ClientConfirmRequest struct {
-	TransactionID string `json:"transaction_id" binding:"required"`
+	TransactionID string `json:"transaction_id" binding:"required" format:"uuid"`
 }
 
 // ClientStatusResponse returns the current state of a transaction/contract.
 type ClientStatusResponse struct {
-	TransactionID string          `json:"transaction_id"`
-	Status        string          `json:"status"`
-	Contract      json.RawMessage `json:"contract,omitempty"` // Latest snapshot
-	UpdatedAt     time.Time       `json:"updated_at"`
+	TransactionID string          `json:"transaction_id" format:"uuid" validate:"required"`
+	Status        string          `json:"status" enums:"SELECT_SENT,QUOTE_RECEIVED,INIT_SENT,INIT_RECEIVED,CONFIRM_SENT,CONFIRMED,CANCELLED,COMPLETE,STATUS_SENT,CANCEL_SENT,UPDATE_SENT,RATE_SENT,SUPPORT_SENT,DISCOVER_SENT,DISCOVER_RECEIVED" validate:"required"`
+	Contract      json.RawMessage `json:"contract,omitempty" swaggertype:"object"` // Latest snapshot
+	UpdatedAt     time.Time       `json:"updated_at" format:"date-time" validate:"required"`
 }
 
 // BecknRequest is the base structure for outbound Beckn calls (select/init/confirm).
@@ -67,16 +67,16 @@ type BecknRequest struct {
 // BecknContext follows the Beckn Protocol v2.0 context schema.
 // Field names are camelCase as required by the v2 spec.
 type BecknContext struct {
-	Version       string `json:"version"`
-	Action        string `json:"action"`
-	Timestamp     string `json:"timestamp"`
-	MessageID     string `json:"messageId"`
-	TransactionID string `json:"transactionId"`
+	Version       string `json:"version" example:"2.0.0"`
+	Action        string `json:"action" example:"on_select"`
+	Timestamp     string `json:"timestamp" example:"2026-10-23T10:00:00Z"`
+	MessageID     string `json:"messageId" format:"uuid"`
+	TransactionID string `json:"transactionId" format:"uuid"`
 	BapID         string `json:"bapId"`
 	BapURI        string `json:"bapUri"`
 	BppID         string `json:"bppId,omitempty"`
 	BppURI        string `json:"bppUri,omitempty"`
-	TTL           string `json:"ttl,omitempty"`
+	TTL           string `json:"ttl,omitempty" example:"PT30S"`
 	NetworkID     string `json:"networkId"`
 }
 
@@ -92,26 +92,26 @@ type ClientDiscoverRequest struct {
 
 // ClientCancelRequest — frontend initiates Cancel.
 type ClientCancelRequest struct {
-	TransactionID string `json:"transaction_id" binding:"required"`
+	TransactionID string `json:"transaction_id" binding:"required" format:"uuid"`
 	// ReasonCode is an ION cancellation reason (e.g. CHANGE_OF_MIND), sent as
 	// contractAttributes.cancellation.reason.code.
-	ReasonCode string `json:"reason_code" binding:"required"`
+	ReasonCode string `json:"reason_code" binding:"required" example:"CHANGE_OF_MIND"`
 }
 
 // ClientCancelItemsRequest — frontend cancels some or all units of a confirmed
 // order. Cancelling everything still active is sent as /cancel; anything less
 // as /update (a partial cancellation).
 type ClientCancelItemsRequest struct {
-	TransactionID string       `json:"transaction_id" binding:"required"`
+	TransactionID string       `json:"transaction_id" binding:"required" format:"uuid"`
 	Items         []CancelItem `json:"items" binding:"required,min=1"`
-	ReasonCode    string       `json:"reason_code" binding:"required"`
+	ReasonCode    string       `json:"reason_code" binding:"required" enums:"CHANGE_OF_MIND,WRONG_ITEM_ORDERED,ORDERED_WRONG_VARIANT,FOUND_BETTER_PRICE,DELIVERY_TOO_LONG,INCORRECT_ADDRESS,DUPLICATE_ORDER,PAYMENT_METHOD_CHANGE,ITEM_NO_LONGER_NEEDED,SELLER_UNRESPONSIVE,BUYER_FRAUD_SUSPECTED,QUALITY_ISSUE_AT_PREVIEW"`
 }
 
 // ClientReturnItemsRequest — frontend returns some or all units of a delivered
 // order; sent as Beckn update with a RETURN performance. The offer's return
 // policy decides it (no manual approval).
 type ClientReturnItemsRequest struct {
-	TransactionID string       `json:"transaction_id" binding:"required"`
+	TransactionID string       `json:"transaction_id" binding:"required" format:"uuid"`
 	Items         []CancelItem `json:"items" binding:"required,min=1"`
 }
 
@@ -123,33 +123,33 @@ type CancelItem struct {
 
 // ClientRequestStatusRequest — frontend triggers a Beckn status request.
 type ClientRequestStatusRequest struct {
-	TransactionID string `json:"transaction_id" binding:"required"`
+	TransactionID string `json:"transaction_id" binding:"required" format:"uuid"`
 }
 
 // ClientUpdateRequest — frontend triggers a Beckn update with partial contract changes.
 type ClientUpdateRequest struct {
-	TransactionID string          `json:"transaction_id" binding:"required"`
-	Contract      json.RawMessage `json:"contract" binding:"required"`
+	TransactionID string          `json:"transaction_id" binding:"required" format:"uuid"`
+	Contract      json.RawMessage `json:"contract" binding:"required" swaggertype:"object"`
 }
 
 // RatingInput mirrors the Beckn ratingInput shape.
 type RatingInput struct {
-	ID                    string          `json:"id" binding:"required"`
-	RatingCategory        string          `json:"ratingCategory,omitempty"`
-	Descriptor            json.RawMessage `json:"descriptor,omitempty"`
-	Range                 json.RawMessage `json:"range" binding:"required"`
-	FeedbackFormSubmission json.RawMessage `json:"feedbackFormSubmission,omitempty"`
+	ID                     string          `json:"id" binding:"required"`
+	RatingCategory         string          `json:"ratingCategory,omitempty"`
+	Descriptor             json.RawMessage `json:"descriptor,omitempty" swaggertype:"object"`
+	Range                  json.RawMessage `json:"range" binding:"required" swaggertype:"object"`
+	FeedbackFormSubmission json.RawMessage `json:"feedbackFormSubmission,omitempty" swaggertype:"object"`
 }
 
 // ClientRateRequest — frontend submits ratings.
 type ClientRateRequest struct {
-	TransactionID string        `json:"transaction_id" binding:"required"`
+	TransactionID string        `json:"transaction_id" binding:"required" format:"uuid"`
 	RatingInputs  []RatingInput `json:"ratingInputs" binding:"required"`
 }
 
 // ClientSupportRequest — frontend raises a support request.
 type ClientSupportRequest struct {
-	TransactionID string `json:"transaction_id" binding:"required"`
+	TransactionID string `json:"transaction_id" binding:"required" format:"uuid"`
 	OrderID       string `json:"orderId,omitempty"`
 	Description   string `json:"description,omitempty"`
 }

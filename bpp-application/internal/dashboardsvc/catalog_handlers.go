@@ -2,8 +2,10 @@ package dashboardsvc
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,13 +14,14 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	dbsqlc "github.com/ion/winroom/bpp/db/sqlc"
-	"github.com/ion/winroom/bpp/internal/offerterms"
 	"github.com/ion/winroom/bpp/internal/auth"
 	"github.com/ion/winroom/bpp/internal/catalog"
 	"github.com/ion/winroom/bpp/internal/httpclient"
+	"github.com/ion/winroom/bpp/internal/offerterms"
 )
 
 // actionCatalogRetire is a 'catalog_retire' beckn_action -- added by
@@ -47,6 +50,22 @@ func (h *Handler) catalogOwnedByProvider(ctx context.Context, catalogID, provide
 // is no longer a client-chosen filter (there's only ever one to choose).
 // ---------------------------------------------------------------------------
 
+// HandleListCatalogs returns a page of the seller's catalogs.
+//
+//	@Summary		List the seller's catalogs
+//	@ID			listCatalogs
+//	@Description	Paginated list of the seller's catalogs that are not deleted, newest first, with resource and offer counts.
+//	@Tags			catalogs
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			search	query	string	false	"Case-insensitive substring match on catalog id, catalog name or provider id"
+//	@Param			page	query	int	false	"1-based page number; values that are not numbers or below 1 become 1"	default(1) minimum(1)
+//	@Param			limit	query	int	false	"Page size; values that are not numbers or outside 1..100 fall back to 20"	default(20) minimum(1) maximum(100)
+//	@Success		200	{object}	CatalogListResponse	"Page of catalogs"
+//	@Failure		401	{object}	auth.ErrorResponse	"Bearer token missing (missing bearer token), or invalid or expired (invalid or expired token)"
+//	@Failure		403	{object}	auth.NoProviderResponse	"Valid token, but no seller profile (users row) for it; call POST /api/v1/auth/bootstrap"
+//	@Failure		500	{object}	auth.ErrorResponse	"Database or internal error (raw error text)"
+//	@Router			/api/v1/catalogs [get]
 func (h *Handler) HandleListCatalogs(c *gin.Context) {
 	page, limit := parsePagination(c)
 	search := c.DefaultQuery("search", "")
@@ -169,6 +188,18 @@ func (h *Handler) HandleListCatalogs(c *gin.Context) {
 // HandleListProviders returns only the authenticated seller's own provider
 // -- one row, always. (Kept as a list response for frontend compatibility;
 // there's nothing left to filter since a seller has exactly one provider.)
+//
+//	@Summary		The seller's own provider
+//	@ID			listProviders
+//	@Description	Returns a list with only the seller's own provider (at most one row); a list for frontend compatibility.
+//	@Tags			catalogs
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Success		200	{object}	IDNameListResponse	"Provider list"
+//	@Failure		401	{object}	auth.ErrorResponse	"Bearer token missing (missing bearer token), or invalid or expired (invalid or expired token)"
+//	@Failure		403	{object}	auth.NoProviderResponse	"Valid token, but no seller profile (users row) for it; call POST /api/v1/auth/bootstrap"
+//	@Failure		500	{object}	auth.ErrorResponse	"Database or internal error (raw error text)"
+//	@Router			/api/v1/providers [get]
 func (h *Handler) HandleListProviders(c *gin.Context) {
 	ctx := c.Request.Context()
 	rows, err := h.pool.Query(ctx,
@@ -200,12 +231,14 @@ func (h *Handler) HandleListProviders(c *gin.Context) {
 // ---------------------------------------------------------------------------
 
 type CreateCatalogRequest struct {
-	ID         string `json:"id"         binding:"required"`
+	ID         string `json:"id"         binding:"required" example:"catalog-fashion-001"`
 	Descriptor struct {
 		Name      string `json:"name"      binding:"required"`
 		ShortDesc string `json:"shortDesc"`
 		LongDesc  string `json:"longDesc"`
 	} `json:"descriptor" binding:"required"`
+	// The seller's own provider is always used: id must be present but is
+	// ignored; descriptor.name becomes the provider's display name.
 	Provider struct {
 		ID         string `json:"id"         binding:"required"`
 		Descriptor struct {
@@ -223,6 +256,23 @@ type CreateCatalogRequest struct {
 	CRC string `json:"crc"`
 }
 
+// HandleCreateCatalog creates or updates a catalog's metadata.
+//
+//	@Summary		Create or update catalog metadata
+//	@ID			createCatalog
+//	@Description	Upserts the catalog's metadata (not its products or offers). Also upserts the seller's own provider with display name provider.descriptor.name (provider.id is ignored). If the seller doesn't own the catalog id and that id exists in any state, including deleted (retired), the call fails with 409. A non-empty crc replaces the catalog's CRC.
+//	@Tags			catalogs
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			body	body	CreateCatalogRequest	true	"Catalog metadata"
+//	@Success		200	{object}	CreateCatalogResponse	"Saved"
+//	@Failure		400	{object}	auth.ErrorResponse	"Invalid JSON or a missing required field (gin binding error text)"
+//	@Failure		401	{object}	auth.ErrorResponse	"Bearer token missing (missing bearer token), or invalid or expired (invalid or expired token)"
+//	@Failure		403	{object}	auth.NoProviderResponse	"Valid token, but no seller profile (users row) for it; call POST /api/v1/auth/bootstrap"
+//	@Failure		409	{object}	auth.ErrorResponse	"The id belongs to another seller, or was deleted before and can't be reused"
+//	@Failure		500	{object}	auth.ErrorResponse	"Database or internal error (raw error text)"
+//	@Router			/api/v1/catalogs [post]
 func (h *Handler) HandleCreateCatalog(c *gin.Context) {
 	var req CreateCatalogRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -278,18 +328,18 @@ func (h *Handler) HandleCreateCatalog(c *gin.Context) {
 
 	// Upsert catalog.
 	if err := q.UpsertCatalog(ctx, dbsqlc.UpsertCatalogParams{
-		ID:              req.ID,
-		BppID:           h.cfg.BppID,
-		BppUri:          h.cfg.BppURI,
-		ProviderID:      providerID,
-		DescriptorName:  req.Descriptor.Name,
-		DescriptorShortDesc: strPtr(req.Descriptor.ShortDesc),
-		DescriptorLongDesc:  strPtr(req.Descriptor.LongDesc),
-		DescriptorDocs:      json.RawMessage(`[]`),
+		ID:                   req.ID,
+		BppID:                h.cfg.BppID,
+		BppUri:               h.cfg.BppURI,
+		ProviderID:           providerID,
+		DescriptorName:       req.Descriptor.Name,
+		DescriptorShortDesc:  strPtr(req.Descriptor.ShortDesc),
+		DescriptorLongDesc:   strPtr(req.Descriptor.LongDesc),
+		DescriptorDocs:       json.RawMessage(`[]`),
 		DescriptorMediaFiles: json.RawMessage(`[]`),
-		CatalogType:     dbsqlc.NullCatalogType{},
-		ValidityStart:   parseTS(req.Validity, true),
-		ValidityEnd:     parseTS(req.Validity, false),
+		CatalogType:          dbsqlc.NullCatalogType{},
+		ValidityStart:        parseTS(req.Validity, true),
+		ValidityEnd:          parseTS(req.Validity, false),
 	}); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "upsert catalog: " + err.Error()})
 		return
@@ -308,6 +358,22 @@ func (h *Handler) HandleCreateCatalog(c *gin.Context) {
 // GET /api/v1/catalogs/:id  — catalog detail with resources + offers
 // ---------------------------------------------------------------------------
 
+// HandleGetCatalog returns one of the seller's catalogs with its resources
+// and offers.
+//
+//	@Summary		Catalog detail with resources and offers
+//	@ID			getCatalog
+//	@Description	Returns one of the seller's catalogs, its resources, and its offers. Each offer carries the attributes of its first consideration (its price).
+//	@Tags			catalogs
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id	path	string	true	"Catalog id, without the <bppId>/ prefix"
+//	@Success		200	{object}	CatalogDetailResponse	"Catalog detail"
+//	@Failure		401	{object}	auth.ErrorResponse	"Bearer token missing (missing bearer token), or invalid or expired (invalid or expired token)"
+//	@Failure		403	{object}	auth.NoProviderResponse	"Valid token, but no seller profile (users row) for it; call POST /api/v1/auth/bootstrap"
+//	@Failure		404	{object}	auth.ErrorResponse	"Catalog doesn't exist, is deleted, or belongs to another seller (catalog not found)"
+//	@Failure		500	{object}	auth.ErrorResponse	"Database or internal error (raw error text)"
+//	@Router			/api/v1/catalogs/{id} [get]
 func (h *Handler) HandleGetCatalog(c *gin.Context) {
 	catalogID := c.Param("id")
 	ctx := c.Request.Context()
@@ -349,10 +415,12 @@ func (h *Handler) HandleGetCatalog(c *gin.Context) {
 	cat.ShortDesc = ptrStr(sd)
 	cat.CatalogType = catType
 	if vs.Valid {
-		s := vs.Time.UTC().Format(time.RFC3339); cat.ValidityStart = &s
+		s := vs.Time.UTC().Format(time.RFC3339)
+		cat.ValidityStart = &s
 	}
 	if ve.Valid {
-		s := ve.Time.UTC().Format(time.RFC3339); cat.ValidityEnd = &s
+		s := ve.Time.UTC().Format(time.RFC3339)
+		cat.ValidityEnd = &s
 	}
 	if ca.Valid {
 		cat.CreatedAt = ca.Time.UTC().Format(time.RFC3339)
@@ -439,10 +507,12 @@ func (h *Handler) HandleGetCatalog(c *gin.Context) {
 		o.ResourceIDs = rids
 		o.ConsiderationAttributes = consAttrs
 		if ovs.Valid {
-			s := ovs.Time.UTC().Format(time.RFC3339); o.ValidityStart = &s
+			s := ovs.Time.UTC().Format(time.RFC3339)
+			o.ValidityStart = &s
 		}
 		if ove.Valid {
-			s := ove.Time.UTC().Format(time.RFC3339); o.ValidityEnd = &s
+			s := ove.Time.UTC().Format(time.RFC3339)
+			o.ValidityEnd = &s
 		}
 		offers = append(offers, o)
 	}
@@ -456,14 +526,38 @@ func (h *Handler) HandleGetCatalog(c *gin.Context) {
 // isActive is a freely-reversible ACTIVE<->PAUSED toggle (Beckn protocol
 // NFH-014 Catalog_Publishing_and_Discovery.md §10.4), distinct from
 // retiring a catalog: pausing never deletes or locks its data, it only
-// changes what the next publish advertises. The seller must click Publish
-// again afterwards for the change to reach the network.
+// changes what's advertised on the network. If the catalog has already
+// been published, this handler auto-republishes right away (via
+// publishCatalogToCDS) so the toggle takes effect immediately without a
+// separate manual Publish click -- a republish failure is reported back
+// as published:false/publishError rather than failing the toggle itself,
+// since the local state change must never be blocked by a network hiccup.
+// A catalog that has never been published is left as a DB-only change, the
+// same as before.
 // ---------------------------------------------------------------------------
 
 type SetCatalogActiveRequest struct {
 	IsActive *bool `json:"isActive" binding:"required"`
 }
 
+// HandleSetCatalogActive pauses or resumes a catalog.
+//
+//	@Summary		Pause or resume a catalog
+//	@ID			setCatalogActive
+//	@Description	Sets catalogs.is_active: a reversible pause/resume, not a retirement. If the catalog was published before, it is republished to CDS_PUBLISH_URL right away and the response carries published (and publishError when that failed); a failed republish does not fail the toggle. A never-published catalog is a DB-only change.
+//	@Tags			catalogs
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id	path	string	true	"Catalog id, without the <bppId>/ prefix"
+//	@Param			body	body	SetCatalogActiveRequest	true	"New active flag"
+//	@Success		200	{object}	SetCatalogActiveResponse	"Updated"
+//	@Failure		400	{object}	auth.ErrorResponse	"isActive is missing or not a boolean (isActive (boolean) is required)"
+//	@Failure		401	{object}	auth.ErrorResponse	"Bearer token missing (missing bearer token), or invalid or expired (invalid or expired token)"
+//	@Failure		403	{object}	auth.NoProviderResponse	"Valid token, but no seller profile (users row) for it; call POST /api/v1/auth/bootstrap"
+//	@Failure		404	{object}	auth.ErrorResponse	"Catalog doesn't exist, is deleted, or belongs to another seller (catalog not found)"
+//	@Failure		500	{object}	auth.ErrorResponse	"Database or internal error (raw error text)"
+//	@Router			/api/v1/catalogs/{id}/active [patch]
 func (h *Handler) HandleSetCatalogActive(c *gin.Context) {
 	catalogID := c.Param("id")
 	var req SetCatalogActiveRequest
@@ -474,19 +568,32 @@ func (h *Handler) HandleSetCatalogActive(c *gin.Context) {
 	if !h.ownedCatalog(c, catalogID) {
 		return
 	}
-	tag, err := h.pool.Exec(c.Request.Context(), `
+	ctx := c.Request.Context()
+	var publishedAt pgtype.Timestamptz
+	err := h.pool.QueryRow(ctx, `
 		UPDATE catalogs SET is_active = $1, updated_at = NOW()
-		 WHERE id = $2 AND bpp_id = $3 AND deleted_at IS NULL`,
-		*req.IsActive, catalogID, h.cfg.BppID)
+		 WHERE id = $2 AND bpp_id = $3 AND deleted_at IS NULL
+		 RETURNING network_published_at`,
+		*req.IsActive, catalogID, h.cfg.BppID,
+	).Scan(&publishedAt)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "catalog not found"})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	if tag.RowsAffected() == 0 {
-		c.JSON(http.StatusNotFound, gin.H{"error": "catalog not found"})
-		return
+
+	resp := gin.H{"status": "updated", "isActive": *req.IsActive}
+	if publishedAt.Valid {
+		res := h.publishCatalogToCDS(ctx, catalogID, false)
+		resp["published"] = res.ok()
+		if !res.ok() {
+			resp["publishError"] = res.errMessage()
+		}
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "updated", "isActive": *req.IsActive})
+	c.JSON(http.StatusOK, resp)
 }
 
 // ---------------------------------------------------------------------------
@@ -499,6 +606,25 @@ type AddProductRequest struct {
 	Offer    *catalog.Offer   `json:"offer,omitempty"`
 }
 
+// HandleAddProduct adds one product (resource), and optionally an offer for
+// it, to a catalog.
+//
+//	@Summary		Add a product (and optionally an offer)
+//	@ID			addCatalogProduct
+//	@Description	Inserts one resource into the catalog and, if offer is given, an offer with its considerations, in one transaction. Offers and considerations without terms get this BPP's defaults. An offer with a provider is linked to the seller's own provider, whatever id was sent. Nothing is published until POST /api/v1/catalogs/{id}/publish.
+//	@Tags			catalogs
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id	path	string	true	"Catalog id, without the <bppId>/ prefix"
+//	@Param			body	body	AddProductRequest	true	"Product, and optional offer"
+//	@Success		200	{object}	StatusOKResponse	"Added"
+//	@Failure		400	{object}	auth.ErrorResponse	"Invalid JSON or a missing required field (gin binding error text)"
+//	@Failure		401	{object}	auth.ErrorResponse	"Bearer token missing (missing bearer token), or invalid or expired (invalid or expired token)"
+//	@Failure		403	{object}	auth.NoProviderResponse	"Valid token, but no seller profile (users row) for it; call POST /api/v1/auth/bootstrap"
+//	@Failure		404	{object}	auth.ErrorResponse	"Catalog doesn't exist, is deleted, or belongs to another seller (catalog not found)"
+//	@Failure		500	{object}	auth.ErrorResponse	"DB error, e.g. a duplicate resource or offer id (insert resource: ..., insert offer: ...)"
+//	@Router			/api/v1/catalogs/{id}/products [post]
 func (h *Handler) HandleAddProduct(c *gin.Context) {
 	catalogID := c.Param("id")
 	var req AddProductRequest
@@ -585,6 +711,7 @@ func (h *Handler) insertOffer(ctx context.Context, q *dbsqlc.Queries, catalogID,
 
 	// Insert offer, with this seller's default terms where it has none.
 	d := offerterms.FromConfig(h.cfg)
+	origAttrs := offer.OfferAttributes
 	offer.OfferAttributes = offerterms.FillAttributes(offer.OfferAttributes, d)
 	oAttrsCtx, oAttrsType := extractContextType(offer.OfferAttributes)
 	var validityStart, validityEnd pgtype.Timestamptz
@@ -612,7 +739,7 @@ func (h *Handler) insertOffer(ctx context.Context, q *dbsqlc.Queries, catalogID,
 
 	// Insert considerations.
 	for _, consid := range offer.Considerations {
-		consid.ConsiderationAttributes = offerterms.FillConsideration(consid.ConsiderationAttributes, d)
+		consid.ConsiderationAttributes = offerterms.FillFee(consid.ConsiderationAttributes, origAttrs, d)
 		cAttrsCtx, cAttrsType := extractContextType(consid.ConsiderationAttributes)
 		if err := q.InsertOfferConsideration(ctx, dbsqlc.InsertOfferConsiderationParams{
 			OfferID:                        offer.ID,
@@ -636,14 +763,38 @@ func (h *Handler) insertOffer(ctx context.Context, q *dbsqlc.Queries, catalogID,
 // POST /api/v1/catalogs/:id/publish  — read from DB and forward to CDS
 // ---------------------------------------------------------------------------
 
+// HandlePublishCatalog publishes a catalog from the DB to the network.
+//
+//	@Summary		Publish a catalog to the network
+//	@ID			publishCatalog
+//	@Description	Builds the catalog from the DB (resources, offers and considerations, default terms filled in, isActive from the pause flag; media with a blank uri dropped) and sends it as a signed catalog/publish request to CDS_PUBLISH_URL (onix-catalog-publish), logged to beckn_message_log. On a 2xx reply network_published_at is stamped. Publishing doesn't lock the catalog; it can be edited and published again.
+//	@Description	The body is optional; {"forceBaseline": true} makes onix-catalog-publish write a fresh baseline instead of a diff.
+//	@Tags			catalogs
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id	path	string	true	"Catalog id, without the <bppId>/ prefix"
+//	@Param			body	body	PublishCatalogRequest	false	"Optional publish options"
+//	@Success		200	{object}	PublishCatalogResponse	"Accepted by the publish endpoint"
+//	@Failure		400	{object}	auth.ErrorResponse	"CDS_PUBLISH_URL not configured, or catalog has no products or offers to publish"
+//	@Failure		401	{object}	auth.ErrorResponse	"Bearer token missing (missing bearer token), or invalid or expired (invalid or expired token)"
+//	@Failure		403	{object}	auth.NoProviderResponse	"Valid token, but no seller profile (users row) for it; call POST /api/v1/auth/bootstrap"
+//	@Failure		404	{object}	auth.ErrorResponse	"Catalog doesn't exist, is deleted, or belongs to another seller (catalog not found)"
+//	@Failure		500	{object}	auth.ErrorResponse	"DB error, or the Beckn signature header couldn't be built (build auth header: ...)"
+//	@Failure		502	{object}	auth.ErrorResponse	"CDS_PUBLISH_URL couldn't be reached or returned a non-2xx reply (e.g. CDS returned 400: ...)"
+//	@Router			/api/v1/catalogs/{id}/publish [post]
 func (h *Handler) HandlePublishCatalog(c *gin.Context) {
 	catalogID := c.Param("id")
 	ctx := c.Request.Context()
 
-	if h.cfg.CDSPublishURL == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "CDS_PUBLISH_URL not configured"})
-		return
+	// Optional body -- {"forceBaseline": true} skips onix-catalog-publish's
+	// diff-against-prior-state and always writes a fresh baseline for this
+	// catalog (manual compaction). Every existing caller sends no body at
+	// all, so a missing/empty body is not an error, just forceBaseline=false.
+	var publishReq struct {
+		ForceBaseline bool `json:"forceBaseline"`
 	}
+	_ = c.ShouldBindJSON(&publishReq)
 
 	if owned, err := h.catalogOwnedByProvider(ctx, catalogID, auth.ProviderIDFromContext(c)); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -651,6 +802,39 @@ func (h *Handler) HandlePublishCatalog(c *gin.Context) {
 	} else if !owned {
 		c.JSON(http.StatusNotFound, gin.H{"error": "catalog not found"})
 		return
+	}
+
+	res := h.publishCatalogToCDS(ctx, catalogID, publishReq.ForceBaseline)
+	c.JSON(res.status, res.body)
+}
+
+// publishResult is the outcome of an attempt to publish a catalog to CDS.
+// Used directly as HandlePublishCatalog's HTTP response, and folded into
+// HandleSetCatalogActive's own response (as published/publishError) when a
+// pause/resume toggle auto-republishes -- a network-side publish failure
+// there must never fail the toggle itself, just be reported alongside it.
+type publishResult struct {
+	status int
+	body   gin.H
+}
+
+func (r publishResult) ok() bool { return r.status >= 200 && r.status < 300 }
+
+// errMessage returns r.body's "error" field, or "" if there is none.
+func (r publishResult) errMessage() string {
+	msg, _ := r.body["error"].(string)
+	return msg
+}
+
+// publishCatalogToCDS builds catalogID's current state from the DB,
+// forwards it to onix-catalog-publish, and stamps network_published_at on
+// success. Ownership must already be checked by the caller -- this is just
+// the publishing mechanics, shared by HandlePublishCatalog (the explicit
+// Publish/Manual Compaction buttons) and HandleSetCatalogActive
+// (auto-republish after a pause/resume toggle).
+func (h *Handler) publishCatalogToCDS(ctx context.Context, catalogID string, forceBaseline bool) publishResult {
+	if h.cfg.CDSPublishURL == "" {
+		return publishResult{http.StatusBadRequest, gin.H{"error": "CDS_PUBLISH_URL not configured"}}
 	}
 
 	// Read catalog.
@@ -676,8 +860,7 @@ func (h *Handler) HandlePublishCatalog(c *gin.Context) {
 	).Scan(&cat.DescriptorName, &cat.DescriptorShortDesc, &cat.DescriptorLongDesc,
 		&cat.ProviderID, &cat.ProviderName, &cat.CatalogType, &cat.ValidityStart, &cat.ValidityEnd, &cat.IsActive)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "catalog not found"})
-		return
+		return publishResult{http.StatusNotFound, gin.H{"error": "catalog not found"}}
 	}
 
 	// Build catalog.Catalog from DB rows.
@@ -712,8 +895,7 @@ func (h *Handler) HandlePublishCatalog(c *gin.Context) {
 		WHERE r.catalog_id = $1 AND r.bpp_id = $2 AND r.deleted_at IS NULL`,
 		catalogID, h.cfg.BppID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+		return publishResult{http.StatusInternalServerError, gin.H{"error": err.Error()}}
 	}
 	defer resRows.Close()
 
@@ -750,8 +932,7 @@ func (h *Handler) HandlePublishCatalog(c *gin.Context) {
 		WHERE o.catalog_id = $1 AND o.bpp_id = $2 AND o.deleted_at IS NULL`,
 		catalogID, h.cfg.BppID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+		return publishResult{http.StatusInternalServerError, gin.H{"error": err.Error()}}
 	}
 	defer offerRows.Close()
 
@@ -759,6 +940,9 @@ func (h *Handler) HandlePublishCatalog(c *gin.Context) {
 		offer catalog.Offer
 	}
 	offerMap := map[string]*rawOffer{}
+	// The offers' attributes as stored, for a fee stored the earlier way
+	// (policies.commission) that FillFee carries over to the considerations.
+	origAttrs := map[string]json.RawMessage{}
 	offerOrder := []string{}
 
 	for offerRows.Next() {
@@ -770,6 +954,7 @@ func (h *Handler) HandlePublishCatalog(c *gin.Context) {
 			&rids, &o.OfferAttributes, &vs, &ve, &provName, &provID); err != nil {
 			continue
 		}
+		origAttrs[o.ID] = o.OfferAttributes
 		o.OfferAttributes = offerterms.FillAttributes(o.OfferAttributes, offerterms.FromConfig(h.cfg))
 		o.ResourceIDs = rids
 		if provID != "" {
@@ -808,7 +993,7 @@ func (h *Handler) HandlePublishCatalog(c *gin.Context) {
 				ro.offer.Considerations = append(ro.offer.Considerations, catalog.Consideration{
 					ID:                      considID,
 					Status:                  catalog.Status{Code: statusCode, Name: statusName},
-					ConsiderationAttributes: offerterms.FillConsideration(attrs, offerterms.FromConfig(h.cfg)),
+					ConsiderationAttributes: offerterms.FillFee(attrs, origAttrs[offerID], offerterms.FromConfig(h.cfg)),
 				})
 			}
 		}
@@ -824,8 +1009,7 @@ func (h *Handler) HandlePublishCatalog(c *gin.Context) {
 	// reject here with a clear message instead of forwarding an empty
 	// catalog and relaying the CDS's own cryptic schema-validation error.
 	if len(becknCat.Resources) == 0 && len(becknCat.Offers) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "catalog has no products or offers to publish"})
-		return
+		return publishResult{http.StatusBadRequest, gin.H{"error": "catalog has no products or offers to publish"}}
 	}
 
 	// Forward to CDS using the same CDSCatalog stripping logic.
@@ -848,6 +1032,7 @@ func (h *Handler) HandlePublishCatalog(c *gin.Context) {
 			Catalogs:          []catalog.OnixCatalog{catalog.ToOnixCatalog(becknCat, h.cfg.BppID, h.cfg.PublishedBppURI())},
 			PublishDirectives: []catalog.OnixPublishDirective{catalog.ToOnixPublishDirective(becknCat, h.cfg.BppID)},
 		},
+		ForceBaseline: forceBaseline,
 	}
 
 	body, _ := json.Marshal(becknReq)
@@ -888,16 +1073,14 @@ func (h *Handler) HandlePublishCatalog(c *gin.Context) {
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, h.cfg.CDSPublishURL, bytes.NewReader(body))
 	if err != nil {
 		callErr = fmt.Errorf("build CDS request: %w", err)
-		c.JSON(http.StatusBadGateway, gin.H{"error": callErr.Error()})
-		return
+		return publishResult{http.StatusBadGateway, gin.H{"error": callErr.Error()}}
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	if h.cfg.BppPrivateKey != "" {
 		authHeader, authErr := catalog.BuildAuthHeader(body, h.cfg.BppKeyID, h.cfg.BppPrivateKey)
 		if authErr != nil {
 			callErr = fmt.Errorf("build auth header: %w", authErr)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": callErr.Error()})
-			return
+			return publishResult{http.StatusInternalServerError, gin.H{"error": callErr.Error()}}
 		}
 		httpReq.Header.Set("Authorization", authHeader)
 	}
@@ -906,16 +1089,14 @@ func (h *Handler) HandlePublishCatalog(c *gin.Context) {
 	resp, err := httpClient.Do(httpReq)
 	if err != nil {
 		callErr = fmt.Errorf("CDS call failed: %w", err)
-		c.JSON(http.StatusBadGateway, gin.H{"error": callErr.Error()})
-		return
+		return publishResult{http.StatusBadGateway, gin.H{"error": callErr.Error()}}
 	}
 	defer resp.Body.Close() //nolint:errcheck
 	respBody, _ = io.ReadAll(resp.Body)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		callErr = fmt.Errorf("CDS returned %d: %s", resp.StatusCode, string(respBody))
-		c.JSON(http.StatusBadGateway, gin.H{"error": callErr.Error()})
-		return
+		return publishResult{http.StatusBadGateway, gin.H{"error": callErr.Error()}}
 	}
 
 	// Stamp the successful publish time.
@@ -923,7 +1104,7 @@ func (h *Handler) HandlePublishCatalog(c *gin.Context) {
 		`UPDATE catalogs SET network_published_at = NOW() WHERE id = $1 AND bpp_id = $2`,
 		catalogID, h.cfg.BppID)
 
-	c.JSON(http.StatusOK, gin.H{"status": "ACK", "message": "Catalog published to CDS"})
+	return publishResult{http.StatusOK, gin.H{"status": "ACK", "message": "Catalog published to CDS"}}
 }
 
 // ---------------------------------------------------------------------------
@@ -938,6 +1119,24 @@ func (h *Handler) HandlePublishCatalog(c *gin.Context) {
 // deleted_at so a retired id stays blocked forever).
 // ---------------------------------------------------------------------------
 
+// HandleDeleteCatalog retires (if it was ever published) and soft-deletes a
+// catalog.
+//
+//	@Summary		Retire and delete a catalog
+//	@ID			deleteCatalog
+//	@Description	If the catalog was ever published (network_published_at set), first sends a catalog/publish request to CDS_PUBLISH_URL carrying retire: [<bppId>/<catalogId>] so discovery stops serving it (logged as a catalog_retire message). Then soft-deletes the catalog. A retired catalog id can never be reused.
+//	@Tags			catalogs
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id	path	string	true	"Catalog id, without the <bppId>/ prefix"
+//	@Success		200	{object}	StatusDeletedResponse	"Deleted"
+//	@Failure		400	{object}	auth.ErrorResponse	"The catalog was published but CDS_PUBLISH_URL is not configured, so it can't be retired"
+//	@Failure		401	{object}	auth.ErrorResponse	"Bearer token missing (missing bearer token), or invalid or expired (invalid or expired token)"
+//	@Failure		403	{object}	auth.NoProviderResponse	"Valid token, but no seller profile (users row) for it; call POST /api/v1/auth/bootstrap"
+//	@Failure		404	{object}	auth.ErrorResponse	"Catalog doesn't exist, is deleted, or belongs to another seller (catalog not found)"
+//	@Failure		500	{object}	auth.ErrorResponse	"DB error, or the Beckn signature header couldn't be built"
+//	@Failure		502	{object}	auth.ErrorResponse	"CDS_PUBLISH_URL couldn't be reached or returned a non-2xx reply (e.g. CDS returned 400: ...)"
+//	@Router			/api/v1/catalogs/{id} [delete]
 func (h *Handler) HandleDeleteCatalog(c *gin.Context) {
 	catalogID := c.Param("id")
 	ctx := c.Request.Context()
@@ -1061,6 +1260,136 @@ func (h *Handler) HandleDeleteCatalog(c *gin.Context) {
 }
 
 // ---------------------------------------------------------------------------
+// GET /api/v1/catalog-index  — proxy the published Beckn catalog index
+// GET /api/v1/catalogs/:id/latest-file  — proxy one catalog's latest published file
+//
+// Both read from h.cfg.CatalogFilesURL(), not directly from the browser:
+// locally that's catalog-files, an internal-network-only nginx container
+// with no host port, no CORS headers, and no Content-Encoding: gzip on its
+// .json.gz files -- a browser fetch() can't reach it at all. Proxying here
+// also means the exact same frontend code works unchanged once deployed,
+// where CatalogFilesURL() falls back to the real public domain.
+// ---------------------------------------------------------------------------
+
+// HandleGetCatalogIndex proxies the published Beckn catalog index.
+//
+//	@Summary		Published catalog index (proxy)
+//	@ID			getCatalogIndex
+//	@Description	Proxies <catalog files base URL>/index/becknCatalogs.index.json from the catalog file store (CATALOG_FILES_BASE_URL, else CATALOG_BASE_URL) and returns it unchanged. The index is network-wide, not scoped to the seller.
+//	@Tags			catalogs
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Success		200	{object}	map[string]any	"The catalog index JSON as published"
+//	@Failure		400	{object}	auth.ErrorResponse	"CATALOG_FILES_BASE_URL/CATALOG_BASE_URL not configured"
+//	@Failure		401	{object}	auth.ErrorResponse	"Bearer token missing (missing bearer token), or invalid or expired (invalid or expired token)"
+//	@Failure		403	{object}	auth.NoProviderResponse	"Valid token, but no seller profile (users row) for it; call POST /api/v1/auth/bootstrap"
+//	@Failure		404	{object}	auth.ErrorResponse	"no catalog has been published yet"
+//	@Failure		502	{object}	auth.ErrorResponse	"The file store could not be reached, or returned a non-2xx status (catalog file store returned <status>)"
+//	@Router			/api/v1/catalog-index [get]
+func (h *Handler) HandleGetCatalogIndex(c *gin.Context) {
+	base := h.cfg.CatalogFilesURL()
+	if base == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "CATALOG_FILES_BASE_URL/CATALOG_BASE_URL not configured"})
+		return
+	}
+	body, status, err := fetchCatalogFile(c.Request.Context(), base+"/index/becknCatalogs.index.json", false)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	if status == http.StatusNotFound {
+		c.JSON(http.StatusNotFound, gin.H{"error": "no catalog has been published yet"})
+		return
+	}
+	if status < 200 || status >= 300 {
+		c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("catalog file store returned %d", status)})
+		return
+	}
+	c.Data(http.StatusOK, "application/json", body)
+}
+
+// HandleGetCatalogLatestFile proxies one of the seller's catalogs' latest
+// published file.
+//
+//	@Summary		A catalog's latest published file (proxy)
+//	@ID			getCatalogLatestFile
+//	@Description	Fetches <catalog files base URL>/catalogs/<id>.latest.json.gz from the catalog file store (CATALOG_FILES_BASE_URL, else CATALOG_BASE_URL), gunzips it, and returns the JSON unchanged. Only for a catalog the seller owns.
+//	@Tags			catalogs
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id	path	string	true	"Catalog id, without the <bppId>/ prefix"
+//	@Success		200	{object}	map[string]any	"The catalog's latest published file (JSON)"
+//	@Failure		400	{object}	auth.ErrorResponse	"CATALOG_FILES_BASE_URL/CATALOG_BASE_URL not configured"
+//	@Failure		401	{object}	auth.ErrorResponse	"Bearer token missing (missing bearer token), or invalid or expired (invalid or expired token)"
+//	@Failure		403	{object}	auth.NoProviderResponse	"Valid token, but no seller profile (users row) for it; call POST /api/v1/auth/bootstrap"
+//	@Failure		404	{object}	auth.ErrorResponse	"catalog not found, or this catalog has not been published yet"
+//	@Failure		500	{object}	auth.ErrorResponse	"Database or internal error (raw error text)"
+//	@Failure		502	{object}	auth.ErrorResponse	"The file store could not be reached, the file could not be gunzipped, or the store returned a non-2xx status"
+//	@Router			/api/v1/catalogs/{id}/latest-file [get]
+func (h *Handler) HandleGetCatalogLatestFile(c *gin.Context) {
+	catalogID := c.Param("id")
+	ctx := c.Request.Context()
+
+	if !h.ownedCatalog(c, catalogID) {
+		return
+	}
+
+	base := h.cfg.CatalogFilesURL()
+	if base == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "CATALOG_FILES_BASE_URL/CATALOG_BASE_URL not configured"})
+		return
+	}
+	body, status, err := fetchCatalogFile(ctx, base+"/catalogs/"+catalogID+".latest.json.gz", true)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	if status == http.StatusNotFound {
+		c.JSON(http.StatusNotFound, gin.H{"error": "this catalog has not been published yet"})
+		return
+	}
+	if status < 200 || status >= 300 {
+		c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("catalog file store returned %d", status)})
+		return
+	}
+	c.Data(http.StatusOK, "application/json", body)
+}
+
+// fetchCatalogFile GETs url and, if gunzip is true, decompresses the body
+// (the catalog-publisher plugin's .json.gz files carry no Content-Encoding
+// header, so this is always a manual gunzip, never something net/http's
+// client would do for us). Returns the raw status code uninterpreted so
+// callers can turn a 404 into a friendly "not published yet" message.
+func fetchCatalogFile(ctx context.Context, url string, gunzip bool) ([]byte, int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, 0, fmt.Errorf("build request: %w", err)
+	}
+	httpClient := httpclient.New(15 * time.Second)
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, 0, fmt.Errorf("fetch failed: %w", err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, resp.StatusCode, nil
+	}
+
+	if !gunzip {
+		body, err := io.ReadAll(resp.Body)
+		return body, resp.StatusCode, err
+	}
+	gz, err := gzip.NewReader(resp.Body)
+	if err != nil {
+		return nil, 0, fmt.Errorf("gunzip: %w", err)
+	}
+	defer gz.Close() //nolint:errcheck
+	body, err := io.ReadAll(gz)
+	return body, resp.StatusCode, err
+}
+
+// ---------------------------------------------------------------------------
 // GET /api/v1/inventory/items  — resources grouped with catalog + provider info + optional filters
 // ---------------------------------------------------------------------------
 
@@ -1070,12 +1399,28 @@ func (h *Handler) HandleDeleteCatalog(c *gin.Context) {
 // catalog_id belonging to a different provider just yields zero rows
 // (the provider_id condition below still applies), not another seller's
 // data.
+//
+//	@Summary		Inventory items with catalog and provider info
+//	@ID			listInventoryItems
+//	@Description	Paginated list of the seller's resources, each with its catalog, provider and published availability status. Also returns product counts per availability status across all matching rows, not just the current page.
+//	@Tags			inventory
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			catalog_id	query	string	false	"Narrow to one catalog; another provider's catalog just returns no rows"
+//	@Param			search	query	string	false	"Case-insensitive substring match on resource name or id"
+//	@Param			page	query	int	false	"1-based page number; values that are not numbers or below 1 become 1"	default(1) minimum(1)
+//	@Param			limit	query	int	false	"Page size; values that are not numbers or outside 1..100 fall back to 20"	default(20) minimum(1) maximum(100)
+//	@Success		200	{object}	InventoryItemsResponse	"Page of items"
+//	@Failure		401	{object}	auth.ErrorResponse	"Bearer token missing (missing bearer token), or invalid or expired (invalid or expired token)"
+//	@Failure		403	{object}	auth.NoProviderResponse	"Valid token, but no seller profile (users row) for it; call POST /api/v1/auth/bootstrap"
+//	@Failure		500	{object}	auth.ErrorResponse	"Database or internal error (raw error text)"
+//	@Router			/api/v1/inventory/items [get]
 func (h *Handler) HandleInventoryItems(c *gin.Context) {
-	page, limit   := parsePagination(c)
+	page, limit := parsePagination(c)
 	catalogFilter := c.DefaultQuery("catalog_id", "")
 	providerFilter := auth.ProviderIDFromContext(c)
-	search         := c.DefaultQuery("search", "")
-	ctx            := c.Request.Context()
+	search := c.DefaultQuery("search", "")
+	ctx := c.Request.Context()
 
 	countSQL := `
 		SELECT COUNT(*)
@@ -1177,6 +1522,21 @@ func (h *Handler) HandleInventoryItems(c *gin.Context) {
 // GET /api/v1/catalogs/:id/resources  — list resources for a specific catalog (for offer picker)
 // ---------------------------------------------------------------------------
 
+// HandleGetCatalogResources lists a catalog's resource ids and names (for the
+// offer picker).
+//
+//	@Summary		Resource ids and names of a catalog
+//	@ID			listCatalogResources
+//	@Description	Lightweight list of a catalog's resources, sorted by name, for the offer picker. Filtered by the seller's provider_id; a catalog that doesn't exist or isn't the seller's returns an empty list, not a 404.
+//	@Tags			catalogs
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id	path	string	true	"Catalog id, without the <bppId>/ prefix"
+//	@Success		200	{object}	IDNameListResponse	"Resources"
+//	@Failure		401	{object}	auth.ErrorResponse	"Bearer token missing (missing bearer token), or invalid or expired (invalid or expired token)"
+//	@Failure		403	{object}	auth.NoProviderResponse	"Valid token, but no seller profile (users row) for it; call POST /api/v1/auth/bootstrap"
+//	@Failure		500	{object}	auth.ErrorResponse	"Database or internal error (raw error text)"
+//	@Router			/api/v1/catalogs/{id}/resources [get]
 func (h *Handler) HandleGetCatalogResources(c *gin.Context) {
 	catalogID := c.Param("id")
 	ctx := c.Request.Context()
@@ -1208,6 +1568,24 @@ func (h *Handler) HandleGetCatalogResources(c *gin.Context) {
 // POST /api/v1/catalogs/:id/offers  — add a standalone offer to an existing catalog
 // ---------------------------------------------------------------------------
 
+// HandleAddOffer adds a standalone offer to one of the seller's catalogs.
+//
+//	@Summary		Add a standalone offer
+//	@ID			addCatalogOffer
+//	@Description	Inserts one offer and its considerations into the catalog in one transaction. Missing terms (and the consideration fee) are filled with this BPP's defaults. If provider.id is non-empty, the offer is linked to the seller's own provider (and its name updated). Nothing is published until POST /api/v1/catalogs/{id}/publish.
+//	@Tags			catalogs
+//	@Accept			json
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id	path	string	true	"Catalog id, without the <bppId>/ prefix"
+//	@Param			body	body	catalog.Offer	true	"Offer with its considerations"
+//	@Success		200	{object}	StatusOKResponse	"Added"
+//	@Failure		400	{object}	auth.ErrorResponse	"Invalid JSON, or id is empty (offer id is required)"
+//	@Failure		401	{object}	auth.ErrorResponse	"Bearer token missing (missing bearer token), or invalid or expired (invalid or expired token)"
+//	@Failure		403	{object}	auth.NoProviderResponse	"Valid token, but no seller profile (users row) for it; call POST /api/v1/auth/bootstrap"
+//	@Failure		404	{object}	auth.ErrorResponse	"Catalog doesn't exist, is deleted, or belongs to another seller (catalog not found)"
+//	@Failure		500	{object}	auth.ErrorResponse	"Database or internal error (raw error text)"
+//	@Router			/api/v1/catalogs/{id}/offers [post]
 func (h *Handler) HandleAddOffer(c *gin.Context) {
 	catalogID := c.Param("id")
 	var req catalog.Offer
@@ -1257,6 +1635,7 @@ func (h *Handler) HandleAddOffer(c *gin.Context) {
 	}
 
 	d := offerterms.FromConfig(h.cfg)
+	origAttrs := req.OfferAttributes
 	req.OfferAttributes = offerterms.FillAttributes(req.OfferAttributes, d)
 	oAttrsCtx, oAttrsType := extractContextType(req.OfferAttributes)
 	var validityStart, validityEnd pgtype.Timestamptz
@@ -1285,7 +1664,7 @@ func (h *Handler) HandleAddOffer(c *gin.Context) {
 	}
 
 	for _, consid := range req.Considerations {
-		consid.ConsiderationAttributes = offerterms.FillConsideration(consid.ConsiderationAttributes, d)
+		consid.ConsiderationAttributes = offerterms.FillFee(consid.ConsiderationAttributes, origAttrs, d)
 		cAttrsCtx, cAttrsType := extractContextType(consid.ConsiderationAttributes)
 		if err := qt.InsertOfferConsideration(ctx, dbsqlc.InsertOfferConsiderationParams{
 			OfferID:                        req.ID,

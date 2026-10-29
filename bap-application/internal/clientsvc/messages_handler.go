@@ -32,6 +32,19 @@ type messageLogRow struct {
 // every message of their orders (transactions.buyer_subject). Other buyers'
 // messages -- which carry their names, phones and addresses -- never appear.
 // GET /api/v1/messages?limit=50&action=discover
+//
+//	@Summary		The buyer's Beckn message log
+//	@ID				listMessages
+//	@Description	The logged-in buyer's Beckn messages from beckn_message_log, newest first: their discover searches and every message of their orders. The bearer token is optional for the /api/v1 group, but this route needs a buyer identity: with no token it answers 401.
+//	@Tags			messages
+//	@Produce		json
+//	@Param			limit query int false "Max rows, 1-200. Out-of-range or non-numeric values fall back to 50." default(50) minimum(1) maximum(200)
+//	@Param			action query string false "Only messages with this Beckn action (exact match). Empty means all." Enums(discover, on_discover, select, on_select, init, on_init, confirm, on_confirm, status, on_status, track, on_track, update, on_update, cancel, on_cancel, rate, on_rate, support, on_support, reconcile, on_reconcile)
+//	@Success		200 {object} MessageListResponse "Messages."
+//	@Failure		401 {object} ErrorResponse "No buyer identity (no token: log in to see your messages), or an invalid/expired token."
+//	@Failure		500 {object} ErrorResponse "Transaction or snapshot not found, database error, or the adapter call failed / returned non-200 (the error text says which)."
+//	@Security		BearerAuth
+//	@Router			/api/v1/messages [get]
 func (h *ClientHandler) HandleListMessages(c *gin.Context) {
 	buyerSubject, ok := auth.SubjectFromContext(c)
 	if !ok {

@@ -25,6 +25,19 @@ func NewOnInitHandler(pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.Log
 	}
 }
 
+// Handle answers POST /api/webhook/on_init with an immediate ACK and processes the callback asynchronously.
+//
+//	@Summary		Receive on_init (draft contract)
+//	@ID				webhookOnInit
+//	@Description	The BPP's answer to init, carrying the contract with its BPP-assigned id. Asynchronously sets the transaction status to INIT_RECEIVED, stores the on_init contract snapshot and logs the message. The adapter has already verified the Beckn signature; no auth.
+//	@Tags			beckn webhooks
+//	@Accept			json
+//	@Produce		json
+//	@Param			request body server.BecknContractRequest true "Beckn on_init request"
+//	@Success		200 {object} server.BecknAckResponse "Synchronous ACK; the message is processed asynchronously afterwards. The context is echoed with action set to on_init."
+//	@Failure		400 {object} server.BecknAckResponse "NACK: the body is not valid JSON or does not match the expected types. Context fields are empty strings except action."
+//	@Security
+//	@Router			/api/webhook/on_init [post]
 func (h *OnInitHandler) Handle(c *gin.Context) {
 	var req OnInitRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

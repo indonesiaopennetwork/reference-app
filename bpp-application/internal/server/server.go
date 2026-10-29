@@ -78,6 +78,16 @@ func RegisterRoutes(svc *service.Service, cfg *config.Config, verifier *auth.Ver
 	registerBecknCatalogRoutes(svc, webhook)
 }
 
+// handleHealth is the liveness probe for load balancers and Kubernetes.
+//
+//	@Summary		Health check
+//	@ID			getHealth
+//	@Description	Liveness probe for load balancers and Kubernetes. Always returns the alya success envelope with data {"status": "ok"}.
+//	@Tags			health
+//	@Produce		json
+//	@Success		200	{object}	HealthResponse	"Service is up"
+//	@Security
+//	@Router			/health [get]
 func handleHealth(c *gin.Context, _ *service.Service) {
 	c.JSON(http.StatusOK, wscutils.NewSuccessResponse(gin.H{"status": "ok"}))
 }
@@ -117,6 +127,18 @@ func registerFulfillmentRoutes(svc *service.Service, g *gin.RouterGroup, pool *p
 	svc.RegisterRouteWithGroup(g, http.MethodPost, "/track", handleTrack)
 }
 
+// handleTrack answers POST /api/webhook/track. Not implemented yet.
+//
+//	@Summary		Beckn track (STUB)
+//	@ID			becknTrack
+//	@Description	STUB, not implemented: always returns the alya success envelope with data null, not a Beckn ACK. Nothing is stored and no on_track is sent.
+//	@Tags			beckn webhooks
+//	@Accept			json
+//	@Produce		json
+//	@Param			body	body	BecknWebhookRequest	true	"Beckn message forwarded by onix-bpp (ignored)"
+//	@Success		200	{object}	WscSuccessResponse	"alya success envelope with no data"
+//	@Security
+//	@Router			/api/webhook/track [post]
 func handleTrack(c *gin.Context, svc *service.Service) {
 	c.JSON(http.StatusOK, wscutils.NewSuccessResponse(nil))
 }
@@ -190,7 +212,9 @@ func registerDashboardRoutes(v1 *gin.RouterGroup, pool *pgxpool.Pool, cfg *confi
 	dash.GET("/providers", h.HandleListProviders)
 	dash.GET("/catalogs", h.HandleListCatalogs)
 	dash.POST("/catalogs", h.HandleCreateCatalog)
+	dash.GET("/catalog-index", h.HandleGetCatalogIndex)
 	dash.GET("/catalogs/:id", h.HandleGetCatalog)
+	dash.GET("/catalogs/:id/latest-file", h.HandleGetCatalogLatestFile)
 	dash.DELETE("/catalogs/:id", h.HandleDeleteCatalog)
 	dash.PATCH("/catalogs/:id/active", h.HandleSetCatalogActive)
 	dash.GET("/catalogs/:id/resources", h.HandleGetCatalogResources)
@@ -223,7 +247,9 @@ func registerAuthRoutes(v1 *gin.RouterGroup, pool *pgxpool.Pool, cfg *config.Con
 	h := authsvc.NewHandler(pool, cfg, verifier)
 	authGroup := v1.Group("/auth")
 	authGroup.Use(corsMiddleware(cfg.LandingPageOrigin))
-	authGroup.OPTIONS("/bootstrap", func(c *gin.Context) {}) // preflight; corsMiddleware itself replies + aborts
+	authGroup.OPTIONS("/bootstrap", func(c *gin.Context) {
+		// Preflight: corsMiddleware has already replied 204 and aborted.
+	})
 	authGroup.Use(auth.RequireToken(verifier))
 	authGroup.POST("/bootstrap", h.HandleBootstrap)
 }
@@ -249,6 +275,19 @@ func registerBecknCatalogRoutes(svc *service.Service, g *gin.RouterGroup) {
 	svc.RegisterRouteWithGroup(cat, http.MethodPost, "/on_publish", handleOnPublish)
 }
 
+// handleOnPublish answers POST /api/webhook/catalog/on_publish, the CDS's
+// catalog indexing result. Not implemented yet.
+//
+//	@Summary		Catalog indexing result (STUB)
+//	@ID			becknCatalogOnPublish
+//	@Description	STUB, meant for the CDS to report whether a published catalog was indexed. It does nothing yet: always returns the alya success envelope with data null and stores nothing.
+//	@Tags			beckn webhooks
+//	@Accept			json
+//	@Produce		json
+//	@Param			body	body	BecknWebhookRequest	true	"Indexing result from the CDS (ignored)"
+//	@Success		200	{object}	WscSuccessResponse	"alya success envelope with no data"
+//	@Security
+//	@Router			/api/webhook/catalog/on_publish [post]
 func handleOnPublish(c *gin.Context, svc *service.Service) {
 	// TODO: parse indexing result, update catalog status in DB, notify provider
 	c.JSON(http.StatusOK, wscutils.NewSuccessResponse(nil))

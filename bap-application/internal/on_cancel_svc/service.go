@@ -88,7 +88,9 @@ func extractContractID(raw json.RawMessage) *string {
 	if len(raw) == 0 {
 		return nil
 	}
-	var c struct{ ID string `json:"id"` }
+	var c struct {
+		ID string `json:"id"`
+	}
 	if err := json.Unmarshal(raw, &c); err != nil || c.ID == "" {
 		return nil
 	}

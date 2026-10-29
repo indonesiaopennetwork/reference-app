@@ -149,13 +149,13 @@ export default function Tour({ steps, open, onClose, onStep, state }) {
       )}
       {hole ? (
         <>
-          <div className="absolute inset-x-0 top-0 pointer-events-auto" style={{ height: Math.max(0, hole.top) }} onClick={block} />
-          <div className="absolute inset-x-0 bottom-0 pointer-events-auto" style={{ top: hole.bottom }} onClick={block} />
-          <div className="absolute left-0 pointer-events-auto" style={{ top: hole.top, height: hole.bottom - hole.top, width: Math.max(0, hole.left) }} onClick={block} />
-          <div className="absolute right-0 pointer-events-auto" style={{ top: hole.top, height: hole.bottom - hole.top, left: hole.right }} onClick={block} />
+          <div className="absolute inset-x-0 top-0 pointer-events-auto" style={{ height: Math.max(0, hole.top) }} onClick={block} role="presentation" />
+          <div className="absolute inset-x-0 bottom-0 pointer-events-auto" style={{ top: hole.bottom }} onClick={block} role="presentation" />
+          <div className="absolute left-0 pointer-events-auto" style={{ top: hole.top, height: hole.bottom - hole.top, width: Math.max(0, hole.left) }} onClick={block} role="presentation" />
+          <div className="absolute right-0 pointer-events-auto" style={{ top: hole.top, height: hole.bottom - hole.top, left: hole.right }} onClick={block} role="presentation" />
         </>
       ) : (
-        <div className="absolute inset-0 pointer-events-auto" onClick={block} />
+        <div className="absolute inset-0 pointer-events-auto" onClick={block} role="presentation" />
       )}
 
       <div ref={cardRef} className="absolute rounded-2xl border border-white/10 shadow-2xl p-5 transition-all duration-200 pointer-events-auto"
@@ -170,8 +170,8 @@ export default function Tour({ steps, open, onClose, onStep, state }) {
         <div className="text-sm text-slate-300 leading-relaxed space-y-2">{step.body}</div>
 
         <div className="mt-4 flex items-center gap-1.5">
-          {steps.map((_, i) => (
-            <span key={i} className={`h-1.5 rounded-full transition-all ${i === index ? 'w-5 bg-cyan-400' : i < index ? 'w-1.5 bg-cyan-400/40' : 'w-1.5 bg-white/20'}`} />
+          {steps.map((s, i) => (
+            <span key={s.id || s.title} className={`h-1.5 rounded-full transition-all ${i === index ? 'w-5 bg-cyan-400' : i < index ? 'w-1.5 bg-cyan-400/40' : 'w-1.5 bg-white/20'}`} />
           ))}
           <div className="ml-auto flex items-center gap-2">
             {skipTo > 0 && (

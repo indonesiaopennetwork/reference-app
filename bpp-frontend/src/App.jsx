@@ -1,19 +1,20 @@
 import { useState, useEffect, useCallback, useMemo, Fragment } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  LayoutDashboard, ShoppingBag, Package, Radio, MessageSquare,
+  LayoutDashboard, ShoppingBag, Package, MessageSquare,
   ChevronRight, TrendingUp, Clock, CheckCircle2, AlertCircle,
   RefreshCw, X, ChevronLeft, ChevronRight as ChevronRightIcon,
-  Upload, Plus, Trash2, Eye, ArrowUpRight, Filter, Search,
-  Activity, Zap, Store, Calendar, Tag, BarChart2, Inbox,
+  Upload, Plus, Trash2, Eye, Search,
+  Store, Tag,
   ArrowRight, Circle, Star, Ticket, Ban, Wand2,
-  BookOpen, FolderOpen, Send, ArrowLeft, ExternalLink,
+  BookOpen, Send, ArrowLeft, ExternalLink,
   ChevronDown, Copy, Check, Scale, Pencil, Compass, Lock,
-  PauseCircle, PlayCircle,
+  PauseCircle, PlayCircle, Layers, FileText,
 } from 'lucide-react'
 import { captureTokenFromUrl, getToken, getIdToken, clearToken, redirectToLogin, basePath } from './auth.js'
 import Tour from './Tour.jsx'
 import { useReconSelection, inDateRange } from './reconSelection.js'
+import { BatchSettlements, AnswerSummary, CollectionChip } from './ReconDetails.jsx'
 import UserProfileMenu from './UserProfileMenu.jsx'
 import { CrcSelect, CrcAttributes, crcByCode, crcResourceAttributes, crcFormValues, CRC_FIELD, CustomAttributes, customAttributes, customFormRows, CUSTOM_ATTRIBUTES_FIELD } from './CrcFields.jsx'
 import { CRC_AUTOFILL } from './crcSamples.js'
@@ -62,7 +63,7 @@ function useApi(path, deps = [], { live = false } = {}) {
     catch (e) { setError(e.message) }
     finally { setLoading(false) }
   }, [path, ...deps]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { load() }, [load])
+  useEffect(() => { load().catch(e => console.error(e)) }, [load])
 
   // Live pages refresh quietly (no spinner; a failed refresh keeps what is
   // shown) every LIVE_EVERY while the tab is visible, and when it comes back.
@@ -170,6 +171,53 @@ function ErrorBox({ message, onRetry }) {
 function SectionTitle({ children }) {
   return (
     <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-3">{children}</p>
+  )
+}
+
+// JsonViewerModal: a simple overlay showing pretty-printed JSON, with a
+// copy-to-clipboard button. `content` is the raw object to display;
+// `loading`/`error` let the caller drive the fetch state from outside.
+function JsonViewerModal({ title, subtitle, content, loading, error, onClose }) {
+  const { t } = useI18n()
+  const [copied, setCopied] = useState(false)
+  const pretty = content ? JSON.stringify(content, null, 2) : ''
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(pretty)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch { /* ignore -- clipboard may be unavailable */ }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true">
+      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+      <div className="relative w-full max-w-3xl max-h-[85vh] flex flex-col rounded-2xl border border-white/[0.08] bg-slate-900 shadow-2xl">
+        <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-white/[0.06]">
+          <div className="min-w-0">
+            <p className="text-sm font-bold text-white">{title}</p>
+            {subtitle && <p className="text-[11px] font-mono text-slate-500 mt-0.5 truncate">{subtitle}</p>}
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {content && (
+              <button onClick={handleCopy}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold border border-white/[0.08] text-slate-300 hover:text-white hover:border-white/20 transition-colors">
+                {copied ? <Check size={12} /> : <Copy size={12} />} {copied ? t('Copied!') : t('Copy')}
+              </button>
+            )}
+            <button onClick={onClose} className="p-1.5 rounded-lg text-slate-400 hover:text-white transition-colors">
+              <X size={16} />
+            </button>
+          </div>
+        </div>
+        <div className="flex-1 overflow-auto p-5">
+          {loading ? <LoadingSpinner label={t('Loading…')} /> : error ? <ErrorBox message={error} /> : (
+            <pre className="text-[11px] leading-relaxed text-slate-300 font-mono whitespace-pre-wrap break-all">{pretty}</pre>
+          )}
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -317,6 +365,28 @@ const TOUR_DONE_KEY = 'bpp.tourDone'
 
 function Sidebar({ active, onNav, open, onClose, onTour }) {
   const { t } = useI18n()
+  const ownProvider = useOwnProvider()
+  const bapBaseUrl = window.__env__?.BAP_URL || import.meta.env.VITE_BAP_URL || '#'
+  const bapUrl = (() => {
+    if (bapBaseUrl === '#') return '#'
+    const params = new URLSearchParams()
+    const tok = getToken()
+    const idTok = getIdToken()
+    if (tok) params.set('token', tok)
+    if (idTok) params.set('id_token', idTok)
+    if (ownProvider?.id) params.set('providerId', ownProvider.id)
+    const qs = params.toString()
+    // `<base>/?...`, like landing-page: in the cloud BAP_URL is .../tsp/remiges/cn,
+    // and ion-landing-page's 301 from /cn to /cn/ drops the query (and the token).
+    return `${bapBaseUrl.replace(/\/+$/, '')}/${qs ? `?${qs}` : ''}`
+  })()
+  // Escape closes the mobile drawer, like a click on its backdrop.
+  useEffect(() => {
+    if (!open || !onClose) return
+    const onKey = e => { if (e.key === 'Escape') onClose() }
+    globalThis.addEventListener('keydown', onKey)
+    return () => globalThis.removeEventListener('keydown', onKey)
+  }, [open, onClose])
   const navContent = (
     <>
       {/* Logo */}
@@ -370,7 +440,7 @@ function Sidebar({ active, onNav, open, onClose, onTour }) {
           <Compass size={13} className="shrink-0" /> <span className="truncate">{t('Take the tour')}</span>
         </button>
         <a
-          href={`${window.__env__?.BAP_URL || import.meta.env.VITE_BAP_URL || "#"}?token=${encodeURIComponent(getToken() || '')}&id_token=${encodeURIComponent(getIdToken() || '')}`}
+          href={bapUrl}
           target="_blank"
           rel="noopener noreferrer"
           className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-emerald-400 transition-all bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 hover:border-emerald-500/40"
@@ -394,7 +464,7 @@ function Sidebar({ active, onNav, open, onClose, onTour }) {
       {/* Mobile drawer */}
       {open && (
         <>
-          <div className="fixed inset-0 z-40 bg-black/60 lg:hidden" onClick={onClose} />
+          <div role="presentation" className="fixed inset-0 z-40 bg-black/60 lg:hidden" onClick={onClose} />
           <aside className="fixed inset-y-0 left-0 z-50 flex flex-col w-72 border-r border-white/[0.06] lg:hidden"
             style={{ background: '#0a0e1a' }}>
             {navContent}
@@ -663,7 +733,7 @@ function OrderDetailDrawer({ order, onClose }) {
         method: 'PUT',
         body: JSON.stringify({ status })
       })
-      reload()
+      reload().catch(e => console.error(e))
     } catch (e) {
       alert(t('Failed to update status: {error}', { error: e.message }))
     } finally {
@@ -735,7 +805,7 @@ function OrderDetailDrawer({ order, onClose }) {
                               <div key={rp.id} className="text-xs flex items-start justify-between gap-3">
                                 <span className="text-slate-400 font-mono">{rp.id} · {(rp.commitmentIds || []).join(', ')}</span>
                                 <span className={`${color} text-right`}>
-                                  {t(code.replace(/_/g, ' '))}{rp.status?.shortDesc ? ` — ${rp.status.shortDesc}` : ''}
+                                  {t(code.replaceAll('_', ' '))}{rp.status?.shortDesc ? ` — ${rp.status.shortDesc}` : ''}
                                 </span>
                               </div>
                             )
@@ -811,7 +881,7 @@ function OrderDetailDrawer({ order, onClose }) {
                           const price = attrs?.price || attrs?.totalAmount
                           const currency = attrs?.currency || 'IDR'
                           return (
-                            <Card key={i} className="p-4">
+                            <Card key={c.id ?? i} className="p-4">
                               <div className="flex items-center justify-between mb-2">
                                 <span className="text-xs font-semibold text-slate-300">{c.status_code}</span>
                                 {price && (
@@ -1409,15 +1479,43 @@ const SETTLEMENT_WINDOWS = [
   ['P7D', '7 days'], ['P14D', '14 days'], ['P30D', '30 days'],
 ]
 
-// The commission (finder fee) the seller pays the buyer app, as the offer
-// consideration's commission (IONTradeConsideration): PERCENT of the item
+// The offer form's buyer finder fee (one per offer; the form keeps it as
+// commissions[0]).
+const NEW_FEE = () => ({ type: 'PERCENT', value: '', applies_to: 'ITEM_TOTAL' })
+
+// The buyer finder fee the seller pays the buyer app, on the offer's
+// consideration (IONTradeConsideration buyerFinderFee): PERCENT of the item
 // value without tax (ITEM_TOTAL) or with tax (ORDER_TOTAL), or a fixed AMOUNT
-// per unit sold.
-function buildCommission(o) {
-  const value = Number(o.commission_value) || 0
-  return o.commission_type === 'AMOUNT'
-    ? { type: 'AMOUNT', value }
-    : { type: 'PERCENT', value, appliesTo: o.commission_applies_to || 'ITEM_TOTAL' }
+// per unit sold. null without a value.
+function buildBuyerFinderFee(o) {
+  const c = (o.commissions || [])[0]
+  if (!c || c.value === '' || c.value == null) return null
+  const fee = { feeType: c.type === 'AMOUNT' ? 'AMOUNT' : 'PERCENT', feeValue: Number(c.value) || 0 }
+  if (fee.feeType === 'PERCENT') fee.appliesTo = c.applies_to || 'ITEM_TOTAL'
+  return fee
+}
+
+// The seller's delivery charge per order, on the offer's consideration
+// (IONTradeConsideration deliveryFee). The BPP charges the highest one among
+// the offers ordered, once, as a DELIVERY_CHARGE line. null without a value.
+function buildDeliveryFee(o) {
+  if (o.delivery_fee === '' || o.delivery_fee == null) return null
+  return { amount: Number(o.delivery_fee) || 0 }
+}
+
+// The delivery fee field of an offer form.
+function DeliveryFeeField({ offer, onChange, labelCls, inputCls }) {
+  const { t } = useI18n()
+  return (
+    <div className="p-3 rounded-lg bg-slate-800/50 border border-white/[0.06] space-y-2">
+      <p className="text-xs font-semibold text-slate-300">🚚 {t('Delivery fee')}</p>
+      <div><label className={labelCls}>{t('Per order ({currency})', { currency: offer.currency || 'IDR' })}</label>
+        <input className={inputCls} type="number" min="0" step="1" value={offer.delivery_fee ?? ''}
+          onChange={e => onChange('delivery_fee', e.target.value)} placeholder={t('Empty: no delivery fee')} />
+      </div>
+      <p className="text-[10px] text-slate-600">{t('Charged once per order for your own delivery; with several offers in one order, the highest fee applies. 0 is free delivery.')}</p>
+    </div>
+  )
 }
 
 // The offer's payout term, policies.settlement.
@@ -1425,40 +1523,52 @@ function buildSettlementPolicy(o) {
   return { settlementBasis: o.settlement_basis || 'AFTER_DELIVERY', settlementWindow: o.settlement_window || 'P1D' }
 }
 
-// Commission and payout term fields of an offer form, with what the
-// commission comes to per unit at the offer's price.
+// Buyer finder fee and payout term of an offer form, with what the fee comes
+// to per unit at the offer's price.
 function SettlementTermsFields({ offer, onChange, labelCls, inputCls }) {
   const { t } = useI18n()
-  const percent = offer.commission_type !== 'AMOUNT'
+  const commissions = offer.commissions || []
   const price = Number(offer.price) || 0
-  const base = percent && offer.commission_applies_to === 'ORDER_TOTAL' && offer.price ? buildPriceBreakup(offer).totalAmount : price
-  const perUnit = percent ? base * (Number(offer.commission_value) || 0) / 100 : Number(offer.commission_value) || 0
+  const withTax = offer.price ? buildPriceBreakup(offer).totalAmount : 0
+  const perUnit = commissions.slice(0, 1).reduce((sum, c) => {
+    const v = Number(c.value) || 0
+    if (c.type === 'AMOUNT') return sum + v
+    return sum + (c.applies_to === 'ORDER_TOTAL' ? withTax : price) * v / 100
+  }, 0)
+  const setFee = (k, v) => onChange('commissions', [{ ...(commissions[0] || NEW_FEE()), [k]: v }])
   const windows = SETTLEMENT_WINDOWS.some(([v]) => v === offer.settlement_window) || !offer.settlement_window
     ? SETTLEMENT_WINDOWS : [...SETTLEMENT_WINDOWS, [offer.settlement_window, offer.settlement_window]]
   return (
-    <div className="col-span-full p-3 rounded-lg bg-slate-800/50 border border-white/[0.06] space-y-2" data-tour="offer-settlement">
+    <div className="p-3 rounded-lg bg-slate-800/50 border border-white/[0.06] space-y-2" data-tour="offer-settlement">
       <p className="text-xs font-semibold text-slate-300">💸 {t('Settlement terms')}</p>
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <div><label className={labelCls}>{t('Commission to buyer app')}</label>
-          <select className={inputCls} value={offer.commission_type} onChange={e => onChange('commission_type', e.target.value)}>
-            <option value="PERCENT" className="bg-slate-900">{t('Percent')}</option>
-            <option value="AMOUNT" className="bg-slate-900">{t('Fixed amount per unit')}</option>
-          </select>
-        </div>
-        <div><label className={labelCls}>{percent ? t('Commission (%)') : t('Commission ({currency})', { currency: offer.currency || 'IDR' })}</label>
-          <input className={inputCls} type="number" min="0" max={percent ? 100 : undefined} step="0.01" required
-            value={offer.commission_value} onChange={e => onChange('commission_value', e.target.value)} placeholder={percent ? '3' : '1000'} />
-        </div>
-        {percent && (
-          <div><label className={labelCls}>{t('Commission on')}</label>
-            <select className={inputCls} value={offer.commission_applies_to} onChange={e => onChange('commission_applies_to', e.target.value)}>
-              <option value="ITEM_TOTAL" className="bg-slate-900">{t('Item price (without tax)')}</option>
-              <option value="ORDER_TOTAL" className="bg-slate-900">{t('Price with tax')}</option>
-            </select>
+      <p className="text-[11px] text-slate-500">{t('Buyer finder fee (paid to the buyer app)')}</p>
+      {(() => {
+        const c = commissions[0] || NEW_FEE()
+        const percent = c.type !== 'AMOUNT'
+        return (
+          <div className="grid grid-cols-1 sm:grid-cols-[1fr_0.8fr_1.2fr] gap-2 items-end">
+            <div><label className={labelCls}>{t('Type')}</label>
+              <select className={inputCls} value={c.type} onChange={e => setFee('type', e.target.value)}>
+                <option value="PERCENT" className="bg-slate-900">{t('Percent')}</option>
+                <option value="AMOUNT" className="bg-slate-900">{t('Fixed amount per unit')}</option>
+              </select>
+            </div>
+            <div><label className={labelCls}>{percent ? t('Value (%)') : t('Value ({currency})', { currency: offer.currency || 'IDR' })}</label>
+              <input className={inputCls} type="number" min="0" max={percent ? 100 : undefined} step="0.01" required
+                value={c.value} onChange={e => setFee('value', e.target.value)} placeholder={percent ? '3' : '1000'} />
+            </div>
+            {percent ? (
+              <div><label className={labelCls}>{t('Fee on')}</label>
+                <select className={inputCls} value={c.applies_to} onChange={e => setFee('applies_to', e.target.value)}>
+                  <option value="ITEM_TOTAL" className="bg-slate-900">{t('Item price (without tax)')}</option>
+                  <option value="ORDER_TOTAL" className="bg-slate-900">{t('Price with tax')}</option>
+                </select>
+              </div>
+            ) : <div />}
           </div>
-        )}
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        )
+      })()}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
         <div><label className={labelCls}>{t('Payout starts')}</label>
           <select className={inputCls} value={offer.settlement_basis} onChange={e => onChange('settlement_basis', e.target.value)}>
             {SETTLEMENT_BASES.map(([v, l]) => <option key={v} value={v} className="bg-slate-900">{t(l)}</option>)}
@@ -1471,7 +1581,7 @@ function SettlementTermsFields({ offer, onChange, labelCls, inputCls }) {
         </div>
       </div>
       <p className="text-[10px] text-slate-600">
-        {price > 0 ? t('Commission ≈ {currency} {amount} per unit at this price, deducted from your payout.', { currency: offer.currency || 'IDR', amount: Math.round(perUnit * 100) / 100 }) + ' ' : ''}
+        {price > 0 ? t('Buyer finder fee ≈ {currency} {amount} per unit at this price, deducted from your payout.', { currency: offer.currency || 'IDR', amount: Math.round(perUnit * 100) / 100 }) + ' ' : ''}
         {t('The payout is due this long after the event; with several offers in one order, the latest due date applies.')}
       </p>
     </div>
@@ -1515,7 +1625,7 @@ const RETURN_METHODS = ['SELLER_PICKUP', 'BUYER_SHIP', 'DROP_OFF']
 const FEE_TYPES = ['PERCENTAGE', 'FIXED']
 
 const EMPTY_OFFER = () => ({
-  id: '', name: '', short_desc: '', resource_ids: '', price: '', currency: 'IDR',
+  id: '', name: '', short_desc: '', resource_ids: '', price: '', currency: 'IDR', delivery_fee: '',
   // tax (price is pre-tax; see buildPriceBreakup)
   tax_regime: 'PPN', tax_category: 'BKP', tax_rate: '12',
   validity_start: '', validity_end: '',
@@ -1528,22 +1638,28 @@ const EMPTY_OFFER = () => ({
   replace_allowed: true, replace_window: 'P7D', replace_method: 'SELLER_PICKUP', replace_subject_avail: true,
   // settlement terms: the commission paid to the buyer app (on the price
   // consideration) and the payout term (policies.settlement)
-  commission_type: 'PERCENT', commission_value: '3', commission_applies_to: 'ITEM_TOTAL',
+  commissions: [{ name: 'Finder fee', type: 'PERCENT', value: '3', applies_to: 'ITEM_TOTAL' }],
   settlement_basis: 'AFTER_DELIVERY', settlement_window: 'P1D',
   // payment & serviceability
   cod_available: true,
   max_distance: '15', distance_unit: 'KM',
-  timing_days: ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'],
-  timing_start: '09:00', timing_end: '21:00',
 })
 
 const CATALOG_TYPES = ['', 'regular']
-const ALL_DAYS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN']
 
 // ---------------------------------------------------------------------------
 // Auto-fill seed data — pool of real Indonesian snack products.
 // Each entry maps 1:1 to a complete form state (catalog + 1 resource + 1 offer).
 // ---------------------------------------------------------------------------
+// A sample validity period for Auto-fill: from now for a year, in the
+// datetime-local form (local time, YYYY-MM-DDTHH:mm).
+const sampleValidity = () => {
+  const local = d => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
+  const now = new Date(), end = new Date(now)
+  end.setFullYear(end.getFullYear() + 1)
+  return { validity_start: local(now), validity_end: local(end) }
+}
+
 const AUTO_FILL_POOL = [
   {
     catalog_id: 'cat-khong-guan-001', catalog_name: 'Toko Camilan Nusantara', catalog_type: '',
@@ -1563,10 +1679,10 @@ const AUTO_FILL_POOL = [
     }],
     offers: [{
       ...EMPTY_OFFER(),
-      commission_type: 'PERCENT', commission_value: '3', commission_applies_to: 'ITEM_TOTAL', settlement_basis: 'AFTER_DELIVERY', settlement_window: 'P1D',
+      commissions: [{ name: 'Finder fee', type: 'PERCENT', value: '3', applies_to: 'ITEM_TOTAL' }], settlement_basis: 'AFTER_DELIVERY', settlement_window: 'P1D',
       id: 'offer-biscuit-khong-guan-001', name: 'Biskuit Kaleng Khong Guan (Khong Guan Assorted Biscuits Tin)',
       short_desc: 'Aneka biskuit renyah dalam kaleng ikonik', resource_ids: 'res-biscuit-khong-guan-001',
-      price: '185000', currency: 'IDR', validity_start: '2026-04-11', validity_end: '2027-04-11',
+      price: '185000', currency: 'IDR', delivery_fee: '10000', validity_start: '2026-04-11', validity_end: '2027-04-11',
     }],
   },
   {
@@ -1587,10 +1703,10 @@ const AUTO_FILL_POOL = [
     }],
     offers: [{
       ...EMPTY_OFFER(),
-      commission_type: 'PERCENT', commission_value: '4', commission_applies_to: 'ORDER_TOTAL', settlement_basis: 'AFTER_DELIVERY', settlement_window: 'P3D',
+      commissions: [{ name: 'Finder fee', type: 'PERCENT', value: '4', applies_to: 'ORDER_TOTAL' }, { name: 'Platform fee', type: 'PERCENT', value: '1', applies_to: 'ITEM_TOTAL' }], settlement_basis: 'AFTER_DELIVERY', settlement_window: 'P3D',
       id: 'offer-chips-chitato-sapi-003', name: 'Keripik Chitato Rasa Sapi Panggang (Chitato Beef BBQ Potato Chips)',
       short_desc: 'Keripik kentang gurih rasa sapi panggang', resource_ids: 'res-chips-chitato-sapi-003',
-      price: '12000', currency: 'IDR', validity_start: '2026-04-11', validity_end: '2027-04-11',
+      price: '12000', currency: 'IDR', delivery_fee: '8000', validity_start: '2026-04-11', validity_end: '2027-04-11',
       returns_allowed: false, replace_window: 'P3D',
     }],
   },
@@ -1612,10 +1728,10 @@ const AUTO_FILL_POOL = [
     }],
     offers: [{
       ...EMPTY_OFFER(),
-      commission_type: 'AMOUNT', commission_value: '5000', settlement_basis: 'AFTER_RETURN_WINDOW', settlement_window: 'P1D',
+      commissions: [{ name: 'Finder fee', type: 'AMOUNT', value: '5000' }], settlement_basis: 'AFTER_RETURN_WINDOW', settlement_window: 'P1D',
       id: 'offer-cake-lapis-legit-005', name: 'Kue Lapis Legit Premium (Premium Spekkoek Layered Cake)',
       short_desc: 'Kue lapis klasik Belanda-Indonesia', resource_ids: 'res-cake-lapis-legit-005',
-      price: '185000', currency: 'IDR', validity_start: '2026-04-11', validity_end: '2027-04-11',
+      price: '185000', currency: 'IDR', delivery_fee: '0', validity_start: '2026-04-11', validity_end: '2027-04-11',
       returns_allowed: false, replace_allowed: false, max_distance: '10',
     }],
   },
@@ -1637,10 +1753,10 @@ const AUTO_FILL_POOL = [
     }],
     offers: [{
       ...EMPTY_OFFER(),
-      commission_type: 'PERCENT', commission_value: '2.5', commission_applies_to: 'ITEM_TOTAL', settlement_basis: 'ON_CONFIRMATION', settlement_window: 'P7D',
+      commissions: [{ name: 'Finder fee', type: 'PERCENT', value: '2.5', applies_to: 'ITEM_TOTAL' }], settlement_basis: 'ON_CONFIRMATION', settlement_window: 'P7D',
       id: 'offer-biscuit-monde-butter-007', name: 'Biskuit Monde Butter Cookies (Monde Butter Cookies)',
       short_desc: 'Kue kering butter premium dalam kaleng cantik', resource_ids: 'res-biscuit-monde-butter-007',
-      price: '120000', currency: 'IDR', validity_start: '2026-04-11', validity_end: '2027-04-11',
+      price: '120000', currency: 'IDR', delivery_fee: '12000', validity_start: '2026-04-11', validity_end: '2027-04-11',
     }],
   },
   {
@@ -1661,10 +1777,10 @@ const AUTO_FILL_POOL = [
     }],
     offers: [{
       ...EMPTY_OFFER(),
-      commission_type: 'AMOUNT', commission_value: '2000', settlement_basis: 'AFTER_SHIPMENT', settlement_window: 'P3D',
+      commissions: [{ name: 'Finder fee', type: 'AMOUNT', value: '2000' }], settlement_basis: 'AFTER_SHIPMENT', settlement_window: 'P3D',
       id: 'offer-cake-brownies-amanda-009', name: 'Brownies Kukus Amanda Cokelat (Amanda Steamed Chocolate Brownies)',
       short_desc: 'Brownies kukus lembut khas Bandung dengan cokelat premium', resource_ids: 'res-cake-brownies-amanda-009',
-      price: '95000', currency: 'IDR', validity_start: '2026-04-11', validity_end: '2027-04-11',
+      price: '95000', currency: 'IDR', delivery_fee: '15000', validity_start: '2026-04-11', validity_end: '2027-04-11',
       returns_allowed: false, replace_allowed: false, max_distance: '10',
     }],
   },
@@ -1770,12 +1886,20 @@ function resourceToForm(r) {
 function offerToForm(o) {
   const a = o.offerAttributes || {}
   const pol = a.policies || {}, ret = pol.returns || {}, can = pol.cancellation || {}, rep = pol.replacement || {}
-  const svc = a.serviceability || {}, timing = svc.timing?.[0] || {}
+  const svc = a.serviceability || {}
   const ca = o.considerations?.[0]?.considerationAttributes || {}
-  const commission = ca.commission || {}, payout = pol.settlement || {}
+  // The buyer finder fee: on the consideration (buyerFinderFee), or stored
+  // the earlier ways (policies.commission entries, consideration commission).
+  const fee = ca.buyerFinderFee || (Array.isArray(pol.commission) ? pol.commission[0] : ca.commission)
+  const commissions = fee ? [fee] : null
+  const payout = pol.settlement || {}
   const base = (ca.breakup || []).find(b => b.type === 'BASE_PRICE')
   const tax = (ca.breakup || []).find(b => b.type === 'TAX')
-  const local = iso => { if (!iso) return ''; const d = new Date(iso); return isNaN(d) ? '' : new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16) }
+  const local = iso => {
+    if (!iso) return ''
+    const d = new Date(iso)
+    return Number.isNaN(d.getTime()) ? '' : new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
+  }
   const blank = EMPTY_OFFER()
   return {
     ...blank,
@@ -1783,6 +1907,7 @@ function offerToForm(o) {
     resource_ids: (o.resourceIds || []).join(', '),
     price: base ? String(base.amount) : ca.totalAmount != null ? String(ca.totalAmount) : '',
     currency: ca.currency || 'IDR',
+    delivery_fee: ca.deliveryFee?.amount != null ? String(ca.deliveryFee.amount) : '',
     tax_regime: tax?.taxDetail?.taxRegime || (tax ? 'PPN' : 'EXEMPT'),
     tax_category: tax?.taxDetail?.taxCategory || 'BKP',
     tax_rate: tax?.taxDetail?.rate != null ? String(Math.round(tax.taxDetail.rate * 10000) / 100) : blank.tax_rate,
@@ -1793,22 +1918,25 @@ function offerToForm(o) {
     cancel_allowed: !!can.allowed, cancel_window: can.window || blank.cancel_window, cancel_event: can.cutoffEvent || blank.cancel_event,
     replace_allowed: !!rep.allowed, replace_window: rep.window || blank.replace_window, replace_method: rep.method || blank.replace_method,
     replace_subject_avail: rep.subjectToAvailability ?? blank.replace_subject_avail,
-    commission_type: commission.type || blank.commission_type,
-    commission_value: commission.value != null ? String(commission.value) : blank.commission_value,
-    commission_applies_to: commission.appliesTo || blank.commission_applies_to,
+    commissions: commissions
+      // ION names (feeType, feeValue), or the earlier ones (type, value)
+      ? commissions.map(c => {
+        const value = c.feeValue ?? c.value
+        return { type: c.feeType ?? c.type ?? 'PERCENT', value: value != null ? String(value) : '', applies_to: c.appliesTo || 'ITEM_TOTAL' }
+      })
+      : blank.commissions,
     settlement_basis: payout.settlementBasis || blank.settlement_basis,
     settlement_window: payout.settlementWindow || blank.settlement_window,
     cod_available: !!a.paymentConstraints?.codAvailable,
     max_distance: svc.distanceConstraint?.maxDistance != null ? String(svc.distanceConstraint.maxDistance) : '',
     distance_unit: svc.distanceConstraint?.unit || 'KM',
-    timing_days: timing.daysOfWeek || [], timing_start: timing.timeRange?.start || '09:00', timing_end: timing.timeRange?.end || '21:00',
   }
 }
 
 function buildOfferAttrs(o) {
   const hasPolicies = o.returns_allowed || o.cancel_allowed || o.replace_allowed
   const hasPayment = o.cod_available
-  const hasServiceability = o.max_distance || (o.timing_days && o.timing_days.length > 0)
+  const hasServiceability = o.max_distance
 
   // Every offer states its payout term (policies.settlement).
   const attrs = {
@@ -1836,9 +1964,6 @@ function buildOfferAttrs(o) {
     attrs.serviceability = {}
     if (o.max_distance) {
       attrs.serviceability.distanceConstraint = { maxDistance: Number(o.max_distance), unit: o.distance_unit || 'KM' }
-    }
-    if (o.timing_days && o.timing_days.length > 0) {
-      attrs.serviceability.timing = [{ daysOfWeek: o.timing_days, timeRange: { start: o.timing_start || '09:00', end: o.timing_end || '21:00' } }]
     }
   }
   return attrs
@@ -1873,11 +1998,13 @@ function PublishPage({ onNav }) {
 
     setForm({
       ...seed,
+      ...sampleValidity(),
       ...(ownProvider ? { provider_id: ownProvider.id, provider_name: ownProvider.name } : {}),
       catalog_id: uid(seed.catalog_id),
       resources: seed.resources.map(r => ({ ...r, id: uid(r.id) })),
       offers: seed.offers.map(o => ({
         ...o,
+        ...sampleValidity(),
         id: uid(o.id),
         resource_ids: o.resource_ids.split(',').map(rid => uid(rid.trim())).join(', '),
       })),
@@ -1893,11 +2020,6 @@ function PublishPage({ onNav }) {
   const setField = (k, v) => setForm(f => ({ ...f, [k]: v }))
   const setResourceField = (i, k, v) => setForm(f => { const r = [...f.resources]; r[i] = { ...r[i], [k]: v }; return { ...f, resources: r } })
   const setOfferField = (i, k, v) => setForm(f => { const o = [...f.offers]; o[i] = { ...o[i], [k]: v }; return { ...f, offers: o } })
-  const toggleDay = (i, day) => setForm(f => {
-    const o = [...f.offers]; const days = o[i].timing_days
-    o[i] = { ...o[i], timing_days: days.includes(day) ? days.filter(d => d !== day) : [...days, day] }
-    return { ...f, offers: o }
-  })
   const toISO = dt => dt ? new Date(dt).toISOString() : undefined
 
   const handleSubmit = async () => {
@@ -1937,8 +2059,9 @@ function PublishPage({ onNav }) {
                   '@type': 'ion:IONTradeConsideration',
                   currency: o.currency,
                   ...buildPriceBreakup(o),
+                  ...(buildBuyerFinderFee(o) ? { buyerFinderFee: buildBuyerFinderFee(o) } : {}),
+                  ...(buildDeliveryFee(o) ? { deliveryFee: buildDeliveryFee(o) } : {}),
                   paymentMethods: o.cod_available ? ['PREPAID', 'COD', 'DIGITAL_WALLET'] : ['PREPAID', 'DIGITAL_WALLET'],
-                  commission: buildCommission(o),
                 }
               }]
             } : {}),
@@ -2098,7 +2221,7 @@ function PublishPage({ onNav }) {
                   <button onClick={() => setResOpen(s => ({ ...s, [`${i}_phys`]: !s[`${i}_phys`] }))}
                     className="mt-4 w-full flex items-center justify-between text-xs font-semibold text-slate-400 hover:text-slate-200 transition-colors pt-3 border-t border-white/[0.06]">
                     <span>🏷️ {t('Identity & Physical Attributes')}</span>
-                    <ChevronRightIcon size={13} className={`transition-transform ${resOpen[`${i}_phys`] ? 'rotate-90' : ''}`} />
+                    <ChevronRightIcon size={13} className={resOpen[`${i}_phys`] ? 'transition-transform rotate-90' : 'transition-transform'} />
                   </button>
                   {resOpen[`${i}_phys`] && (
                     <div className="mt-3 space-y-4">
@@ -2165,7 +2288,7 @@ function PublishPage({ onNav }) {
                   <button onClick={() => setResOpen(s => ({ ...s, [`${i}_pkg`]: !s[`${i}_pkg`] }))}
                     className="mt-4 w-full flex items-center justify-between text-xs font-semibold text-slate-400 hover:text-slate-200 transition-colors pt-3 border-t border-white/[0.06]">
                     <span>📦 {t('Packaged Goods Declaration')}</span>
-                    <ChevronRightIcon size={13} className={`transition-transform ${resOpen[`${i}_pkg`] ? 'rotate-90' : ''}`} />
+                    <ChevronRightIcon size={13} className={resOpen[`${i}_pkg`] ? 'transition-transform rotate-90' : 'transition-transform'} />
                   </button>
                   {resOpen[`${i}_pkg`] && (
                     <div className="mt-3 space-y-4">
@@ -2253,17 +2376,18 @@ function PublishPage({ onNav }) {
                     <div><label className={labelCls}>{t('Validity End')}</label>
                       <input type="datetime-local" className={inputCls} value={o.validity_end} onChange={e => setOfferField(i, 'validity_end', e.target.value)} />
                     </div>
-                    <SettlementTermsFields offer={o} onChange={(k, v) => setOfferField(i, k, v)} labelCls={labelCls} inputCls={inputCls} />
                   </div>
 
                   {/* Policies — collapsible */}
                   <button onClick={() => setOffOpen(s => ({ ...s, [`${i}_pol`]: !s[`${i}_pol`] }))}
                     className="mt-4 w-full flex items-center justify-between text-xs font-semibold text-slate-400 hover:text-slate-200 transition-colors pt-3 border-t border-white/[0.06]">
-                    <span>📋 {t('Policies (Returns · Cancellation · Replacement)')}</span>
-                    <ChevronRightIcon size={13} className={`transition-transform ${offOpen[`${i}_pol`] ? 'rotate-90' : ''}`} />
+                    <span>📋 {t('Policies (Settlement · Returns · Cancellation · Replacement)')}</span>
+                    <ChevronRightIcon size={13} className={offOpen[`${i}_pol`] ? 'transition-transform rotate-90' : 'transition-transform'} />
                   </button>
                   {offOpen[`${i}_pol`] && (
                     <div className="mt-3 space-y-4">
+                      <SettlementTermsFields offer={o} onChange={(k, v) => setOfferField(i, k, v)} labelCls={labelCls} inputCls={inputCls} />
+                      <DeliveryFeeField offer={o} onChange={(k, v) => setOfferField(i, k, v)} labelCls={labelCls} inputCls={inputCls} />
                       {/* Returns */}
                       <div className="p-3 rounded-lg border border-white/[0.06]" style={{ background: 'rgba(0,184,230,0.04)' }}>
                         <div className="flex items-center justify-between mb-2">
@@ -2354,7 +2478,7 @@ function PublishPage({ onNav }) {
                   <button onClick={() => setOffOpen(s => ({ ...s, [`${i}_svc`]: !s[`${i}_svc`] }))}
                     className="mt-4 w-full flex items-center justify-between text-xs font-semibold text-slate-400 hover:text-slate-200 transition-colors pt-3 border-t border-white/[0.06]">
                     <span>🚚 {t('Payment & Serviceability')}</span>
-                    <ChevronRightIcon size={13} className={`transition-transform ${offOpen[`${i}_svc`] ? 'rotate-90' : ''}`} />
+                    <ChevronRightIcon size={13} className={offOpen[`${i}_svc`] ? 'transition-transform rotate-90' : 'transition-transform'} />
                   </button>
                   {offOpen[`${i}_svc`] && (
                     <div className="mt-3 space-y-4">
@@ -2370,30 +2494,6 @@ function PublishPage({ onNav }) {
                           <select className={inputCls} value={o.distance_unit} onChange={e => setOfferField(i, 'distance_unit', e.target.value)}>
                             {['KM', 'MI'].map(u => <option key={u}>{u}</option>)}
                           </select>
-                        </div>
-                      </div>
-                      <div>
-                        <label className={labelCls}>{t('Delivery Days')}</label>
-                        <div className="flex flex-wrap gap-2 mt-1">
-                          {ALL_DAYS.map(day => (
-                            <button key={day} type="button"
-                              onClick={() => toggleDay(i, day)}
-                              className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition-all ${o.timing_days.includes(day)
-                                ? 'text-white border-cyan-500/40'
-                                : 'text-slate-500 border-white/[0.08] hover:border-white/20'
-                                }`}
-                              style={o.timing_days.includes(day) ? { background: 'rgba(0,184,230,0.15)' } : {}}>
-                              {t(day)}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div><label className={labelCls}>{t('Delivery Window Start')}</label>
-                          <input type="time" className={inputCls} value={o.timing_start} onChange={e => setOfferField(i, 'timing_start', e.target.value)} />
-                        </div>
-                        <div><label className={labelCls}>{t('Delivery Window End')}</label>
-                          <input type="time" className={inputCls} value={o.timing_end} onChange={e => setOfferField(i, 'timing_end', e.target.value)} />
                         </div>
                       </div>
                     </div>
@@ -2465,7 +2565,6 @@ function PublishPage({ onNav }) {
                           {o.cod_available && <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.06] text-slate-400">COD ✓</span>}
                           {o.returns_allowed && <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.06] text-slate-400">{t('Returns {window}', { window: o.returns_window })}</span>}
                           {o.max_distance && <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.06] text-slate-400">📍 {o.max_distance} {o.distance_unit}</span>}
-                          {o.timing_days.length < 7 && <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.06] text-slate-400">{o.timing_days.map(d => t(d)).join(', ')}</span>}
                         </div>
                       </div>
                       {o.price && <span className="shrink-0 text-xs font-bold" style={{ color: '#00b8e6' }}>{o.price} {o.currency}</span>}
@@ -2795,7 +2894,7 @@ function PayloadPanel({ message: m }) {
   }
 
   return (
-    <div className="rounded-xl border border-white/[0.07] bg-slate-950/60 overflow-hidden" onClick={e => e.stopPropagation()}>
+    <div className="rounded-xl border border-white/[0.07] bg-slate-950/60 overflow-hidden" role="presentation" onClick={e => e.stopPropagation()}>
       <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-white/[0.06] flex-wrap">
         <div className="flex gap-1">
           {tabs.map(x => (
@@ -2830,7 +2929,8 @@ function PayloadPanel({ message: m }) {
 
 // ─── Reconciliation ───────────────────────────────────────────────────────────
 // Settlement reconciliation with buyer apps (ION Release 1
-// core/api/v2.0.0/ion-additional.yaml in ion-specs). The buyer's payment is held at the PJP. Per BAP:
+// core/api/v2.0.0/ion-additional.yaml in ion-specs), agreed per settlement.
+// The buyer's payment is held at the PJP. Per BAP:
 // contracts due now (payout basis event + settlementWindow has passed) with
 // the summary /reconcile would carry, and a manual send; contracts still to
 // fall due; and past batches, sent or received from the buyer app.
@@ -2853,15 +2953,13 @@ function tickedSummary(rows) {
   return { contractCount: rows.length, totalOrderAmount: sum('order_amount'), totalRefund: sum('refund'), totalCommission: sum('commission'), totalNetPayable: sum('net_payable') }
 }
 
-// In a disputed batch only the contracts with accord false are in dispute;
-// last_result says which, and the figures that differ.
-const isDisputed = r => r.reconciliation_status === 'DISPUTED' && !r.last_result?.accord
-// Sent before its settlement window: the buyer app answered accord false and
-// the contract waits until it is due (no reconciliation status).
-const sentEarly = r => !r.reconciliation_status && r.last_result?.code === 'SETTLEMENT_WINDOW_NOT_REACHED'
-// Matched, but its batch was PENDING (another order wasn't due): not agreed,
-// sent again with the rest.
-const matchedPending = r => !r.reconciliation_status && r.last_result?.accord === true
+// Agreement is per settlement. A disputed contract (accord false with a
+// mismatch) is sent again once corrected; a pending one (accord false,
+// SETTLEMENT_WINDOW_NOT_REACHED or AWAITING_INFORMATION) keeps no status and
+// is sent again later. last_result says which, why, and the figures that
+// differ.
+const isDisputed = r => r.reconciliation_status === 'DISPUTED'
+const isPending = r => !r.reconciliation_status && r.last_result?.pending
 const diffOf = (r, field) => r.reconciliation_status === 'DISPUTED' && r.last_result?.diffs?.find(d => d.field === field)
 
 function DiffNote({ d }) {
@@ -2892,6 +2990,7 @@ function ReconContractsTable({ rows, now, select }) {
             )}
             <th className="text-left px-4 py-2">{t('Contract')}</th>
             <th className="text-left px-4 py-2">{t('Created')}</th>
+            <th className="text-left px-4 py-2">{t('Order date')}</th>
             <th className="text-left px-4 py-2">{t('Status')}</th>
             <th className="text-left px-4 py-2">{t('Payout clock')}</th>
             <th className="text-right px-4 py-2">{t('Paid')}</th>
@@ -2914,13 +3013,12 @@ function ReconContractsTable({ rows, now, select }) {
               )}
               <td className="px-4 py-2 font-mono text-slate-400 whitespace-nowrap" title={r.contract_id}>{String(r.contract_id).slice(0, 8)}…</td>
               <td className="px-4 py-2 text-slate-400 whitespace-nowrap">{r.created_at ? fmtDate(r.created_at) : '—'}</td>
+              <td className="px-4 py-2 text-slate-400 whitespace-nowrap" title={t('Creation date in Asia/Jakarta time (orderDate)')}>{r.order_date || '—'}</td>
               <td className="px-4 py-2 whitespace-nowrap">
                 <StatusBadge status={r.status} />
-                {isDisputed(r) && <span className="ml-1.5 text-[11px] font-semibold text-rose-300">{t('Disputed')}</span>}
-                {r.reconciliation_status === 'DISPUTED' && !isDisputed(r) && <span className="ml-1.5 text-[11px] text-slate-500">{t('Matched — batch disputed')}</span>}
-                {sentEarly(r) && <span className="ml-1.5 text-[11px] font-semibold text-amber-300" title={r.last_result.reason}>{t('Sent before settlement window')}</span>}
-                {matchedPending(r) && <span className="ml-1.5 text-[11px] text-slate-500">{t('Matched — batch pending')}</span>}
-                {sentEarly(r) && <div className="mt-0.5 text-[10px] text-amber-300/80 whitespace-normal max-w-[18rem]">{r.last_result.reason}</div>}
+                {isDisputed(r) && <span className="ml-1.5 text-[11px] font-semibold text-rose-300" title={r.last_result?.code}>{t('Disputed')}{r.last_result?.field ? ` · ${r.last_result.field}` : ''}</span>}
+                {isPending(r) && <span className="ml-1.5 text-[11px] font-semibold text-amber-300" title={r.last_result.code}>{t('Pending')} · {r.last_result.code === 'AWAITING_INFORMATION' ? t('awaiting information') : t('sent before settlement window')}</span>}
+                {isPending(r) && r.last_result.reason && <div className="mt-0.5 text-[10px] text-amber-300/80 whitespace-normal max-w-[18rem]">{r.last_result.reason}</div>}
                 {isDisputed(r) && !r.last_result?.diffs?.length && r.last_result?.reason && <div className="mt-0.5 text-[10px] text-rose-300/80 whitespace-normal max-w-[18rem]">{r.last_result.reason}</div>}
                 {r.refunded_after_payout > 0 && <span className="ml-1.5 text-[11px] text-slate-500" title={t('Refunded by you after payout — outside reconciliation')}>{t('+{amount} refunded after payout', { amount: rupiah(r.refunded_after_payout) })}</span>}
               </td>
@@ -2929,8 +3027,9 @@ function ReconContractsTable({ rows, now, select }) {
                 {r.basis_at && <> {fmtDate(r.basis_at)}</>}
                 <span className="text-slate-600"> + {r.settlement_window}</span>
                 {r.due_at && <span className={`ml-2 font-semibold ${r.due ? 'text-emerald-400' : 'text-amber-400'}`}>{untilText(r.due_at, now)}</span>}
+                {r.due_date && <div className="text-[10px] text-slate-500">{t('dueDate {date}', { date: r.due_date })}</div>}
               </td>
-              <td className="px-4 py-2 text-right tabular-nums text-slate-300 whitespace-nowrap">{rupiah(r.order_amount)}<DiffNote d={diffOf(r, 'orderAmount')} /></td>
+              <td className="px-4 py-2 text-right tabular-nums text-slate-300 whitespace-nowrap">{rupiah(r.order_amount)}<DiffNote d={diffOf(r, 'orderAmount')} /><div><CollectionChip collections={r.collections} /></div></td>
               <td className="px-4 py-2 text-right tabular-nums text-rose-300 whitespace-nowrap">{r.refund ? `− ${rupiah(r.refund)}` : '—'}<DiffNote d={diffOf(r, 'refundAmount')} /></td>
               <td className="px-4 py-2 text-right tabular-nums text-amber-300 whitespace-nowrap">{r.commission ? `− ${rupiah(r.commission)}` : '—'}<DiffNote d={diffOf(r, 'commission')} /></td>
               <td className="px-4 py-2 text-right tabular-nums font-semibold text-white whitespace-nowrap">{rupiah(r.net_payable)}<DiffNote d={diffOf(r, 'netPayable')} /></td>
@@ -3036,7 +3135,7 @@ function ReconciliationPage() {
       try { msg = JSON.parse(e.message).error || msg } catch { }
       setNotice({ ok: false, text: msg })
     } finally {
-      setSending(null); reload()
+      setSending(null); reload().catch(err => console.error(err))
     }
   }
 
@@ -3109,13 +3208,31 @@ function ReconciliationPage() {
                     className="w-full text-left px-5 py-3 flex flex-wrap items-center gap-3 hover:bg-white/[0.025]">
                     <ChevronDown size={14} className={`text-slate-500 transition-transform ${open ? 'rotate-180 text-cyan-400' : ''}`} />
                     <span className={`text-[10px] font-bold uppercase tracking-widest ${sent ? 'text-cyan-300' : 'text-slate-400'}`}>{sent ? t('Sent') : t('Received')}</span>
-                    <span className="font-mono text-xs text-slate-300 truncate max-w-[22rem]" title={b.id}>{b.id}</span>
+                    <span className="font-mono text-xs text-slate-300 truncate max-w-[22rem]" title={t('Exchange (transactionId); this app calls it {id}', { id: b.id })}>{b.transaction_id || b.id}</span>
                     <StatusBadge status={b.status} />
                     <span className="text-xs text-slate-500">{t('{count} contracts', { count: b.contract_ids?.length || 0 })}</span>
+                    {(() => {
+                      let ans = b.response_payload
+                      try { if (typeof ans === 'string') ans = JSON.parse(ans) } catch { }
+                      const a = ans?.message?.settlementSummary
+                      return a?.agreedCount != null && (
+                        <span className="text-xs">
+                          <span className="text-emerald-300">{t('{count} agreed', { count: a.agreedCount })}</span>
+                          {a.disputedCount > 0 && <span className="text-rose-300">{' · '}{t('{count} disputed', { count: a.disputedCount })}</span>}
+                          {a.pendingCount > 0 && <span className="text-amber-300">{' · '}{t('{count} pending', { count: a.pendingCount })}</span>}
+                        </span>
+                      )
+                    })()}
                     <span className="ml-auto text-xs font-semibold text-emerald-300 tabular-nums">{rupiah(sum?.totalNetPayable)}</span>
                     <span className="text-[11px] text-slate-500 whitespace-nowrap">{fmtDate(b.created_at)}</span>
                   </button>
                   {b.error_message && <p className="px-5 pb-2 -mt-1 text-xs text-red-300 break-words">{b.error_message}</p>}
+                  {open && (
+                    <div className="px-5 pb-3 space-y-3">
+                      <AnswerSummary request={b.request_payload} response={b.response_payload} />
+                      <BatchSettlements request={b.request_payload} response={b.response_payload} sent={sent} />
+                    </div>
+                  )}
                   {open && (
                     <div className="px-5 pb-4 grid grid-cols-1 lg:grid-cols-2 gap-3">
                       {[[sent ? t('/reconcile sent') : t('/reconcile received'), b.request_payload],
@@ -3312,7 +3429,18 @@ function CatalogsPage({ onNav }) {
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
   const [publishing, setPublishing] = useState(null)
+  const [indexViewer, setIndexViewer] = useState(null) // { loading, error, content } | null
   const limit = 20
+
+  const handleViewIndex = async () => {
+    setIndexViewer({ loading: true, error: null, content: null })
+    try {
+      const data = await apiFetch('/catalog-index')
+      setIndexViewer({ loading: false, error: null, content: data })
+    } catch (e) {
+      setIndexViewer({ loading: false, error: e.message, content: null })
+    }
+  }
 
   // provider_id is no longer a query param -- the API always scopes to the
   // logged-in seller's own provider (see internal/dashboardsvc), so there's
@@ -3347,12 +3475,24 @@ function CatalogsPage({ onNav }) {
           <h1 className="text-2xl font-bold text-white tracking-tight">{t('Catalogs')}</h1>
           <p className="text-sm text-slate-500 mt-0.5">{t('Create catalogs, add products, and publish to the network')}</p>
         </div>
-        <button data-tour="create-catalog" onClick={() => onNav('create_catalog')}
-          className="shrink-0 whitespace-nowrap flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white shadow-lg transition-all hover:scale-105 active:scale-95"
-          style={{ background: BRAND }}>
-          <Plus size={15} /> {t('Create Catalog')}
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <button onClick={handleViewIndex}
+            className="whitespace-nowrap flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold border border-white/[0.08] text-slate-300 hover:text-white hover:border-white/20 transition-colors">
+            <FileText size={15} /> {t('View Index File')}
+          </button>
+          <button data-tour="create-catalog" onClick={() => onNav('create_catalog')}
+            className="whitespace-nowrap flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white shadow-lg transition-all hover:scale-105 active:scale-95"
+            style={{ background: BRAND }}>
+            <Plus size={15} /> {t('Create Catalog')}
+          </button>
+        </div>
       </div>
+
+      {indexViewer && (
+        <JsonViewerModal title={t('Catalog Index File')} subtitle="index/becknCatalogs.index.json"
+          loading={indexViewer.loading} error={indexViewer.error} content={indexViewer.content}
+          onClose={() => setIndexViewer(null)} />
+      )}
 
       {/* Filters */}
       <Card>
@@ -3632,6 +3772,8 @@ function CatalogDetailPage({ onNav, catalogId }) {
   const [publishing, setPublishing] = useState(false)
   const [togglingActive, setTogglingActive] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [compacting, setCompacting] = useState(false)
+  const [fileViewer, setFileViewer] = useState(null) // { loading, error, content } | null
 
   const cat = data?.catalog || {}
   const resources = data?.resources || []
@@ -3643,7 +3785,8 @@ function CatalogDetailPage({ onNav, catalogId }) {
   const offersByResourceId = {}
   offers.forEach(o => {
     (o.resourceIds || []).forEach(rid => {
-      (offersByResourceId[rid] ||= []).push(o)
+      offersByResourceId[rid] ||= []
+      offersByResourceId[rid].push(o)
     })
   })
 
@@ -3663,7 +3806,7 @@ function CatalogDetailPage({ onNav, catalogId }) {
     setPublishing(true)
     try {
       await apiFetch(`/catalogs/${catalogId}/publish`, { method: 'POST' })
-      reload()
+      reload().catch(err => console.error(err))
       alert(t('Published successfully!'))
     } catch (e) {
       alert(t('Publish failed: {error}', { error: e.message }))
@@ -3672,19 +3815,42 @@ function CatalogDetailPage({ onNav, catalogId }) {
     }
   }
 
+  const handleForceRepublish = async () => {
+    const name = cat.name || catalogId
+    if (!window.confirm(t('This rewrites "{name}"\'s entire change history as one fresh baseline. Useful if it has accumulated a long chain of small edits. Continue?', { name }))) return
+    setCompacting(true)
+    try {
+      await apiFetch(`/catalogs/${catalogId}/publish`, { method: 'POST', body: JSON.stringify({ forceBaseline: true }) })
+      reload()
+      alert(t('Republished with a fresh baseline!'))
+    } catch (e) {
+      alert(t('Force republish failed: {error}', { error: e.message }))
+    } finally {
+      setCompacting(false)
+    }
+  }
+
   const handleToggleActive = async () => {
     const next = !cat.isActive
-    const msg = next
-      ? t('Resume this catalog? It will be marked active on the next publish.')
-      : t('Pause this catalog? It stays fully intact, but will be excluded from search once you publish this change.')
+    const msg = !cat.isPublished
+      ? (next ? t('Resume this catalog?') : t('Pause this catalog? It stays fully intact, but will be excluded from search once published.'))
+      : (next
+        ? t('Resume this catalog? It will be searchable again immediately.')
+        : t('Pause this catalog? It will be excluded from search immediately.'))
     if (!window.confirm(msg)) return
     setTogglingActive(true)
     try {
-      await apiFetch(`/catalogs/${catalogId}/active`, {
+      const res = await apiFetch(`/catalogs/${catalogId}/active`, {
         method: 'PATCH',
         body: JSON.stringify({ isActive: next }),
       })
-      reload()
+      if (res?.published === false) {
+        alert(t('Catalog {state} locally, but republishing failed: {error} — click Publish to retry.', {
+          state: next ? t('resumed') : t('paused'),
+          error: res.publishError || t('unknown error'),
+        }))
+      }
+      reload().catch(err => console.error(err))
     } catch (e) {
       alert(t('Update failed: {error}', { error: e.message }))
     } finally {
@@ -3696,7 +3862,7 @@ function CatalogDetailPage({ onNav, catalogId }) {
     if (!window.confirm(t('Remove this offer? This cannot be undone.'))) return
     try {
       await apiFetch(`/catalogs/${catalogId}/offers/${oid}`, { method: 'DELETE' })
-      reload()
+      reload().catch(err => console.error(err))
     } catch (e) {
       alert(t('Remove failed: {error}', { error: e.message }))
     }
@@ -3715,6 +3881,16 @@ function CatalogDetailPage({ onNav, catalogId }) {
     } catch (e) {
       alert(t('Delete failed: {error}', { error: e.message }))
       setDeleting(false)
+    }
+  }
+
+  const handleViewCatalogFile = async () => {
+    setFileViewer({ loading: true, error: null, content: null })
+    try {
+      const data = await apiFetch(`/catalogs/${catalogId}/latest-file`)
+      setFileViewer({ loading: false, error: null, content: data })
+    } catch (e) {
+      setFileViewer({ loading: false, error: e.message, content: null })
     }
   }
 
@@ -3777,6 +3953,13 @@ function CatalogDetailPage({ onNav, catalogId }) {
             <Trash2 size={14} />
             {deleting ? t('Deleting…') : t('Delete Catalog')}
           </button>
+          {cat.isPublished && (
+            <button onClick={handleViewCatalogFile}
+              title={t('View this catalog\'s latest published file')}
+              className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold border border-white/[0.08] text-slate-300 hover:text-white hover:border-white/20 transition-colors">
+              <FileText size={14} /> {t('View Catalog File')}
+            </button>
+          )}
           <button onClick={handleToggleActive} disabled={togglingActive}
             className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold border border-slate-500/30 text-slate-400 hover:bg-slate-500/10 transition-colors disabled:opacity-50">
             {cat.isActive ? <PauseCircle size={14} /> : <PlayCircle size={14} />}
@@ -3799,6 +3982,14 @@ function CatalogDetailPage({ onNav, catalogId }) {
             </button>
             {catalogEmpty && (
               <p className="text-[11px] text-amber-500">{t('Add a product or offer before publishing')}</p>
+            )}
+            {cat.isPublished && !catalogEmpty && (
+              <button onClick={handleForceRepublish} disabled={compacting}
+                title={t('Rewrite this catalog\'s change history as one fresh baseline')}
+                className="flex items-center gap-1 text-[11px] text-slate-500 hover:text-slate-300 transition-colors disabled:opacity-50">
+                <Layers size={11} />
+                {compacting ? t('Rewriting…') : t('Manual Compaction')}
+              </button>
             )}
           </div>
         </div>
@@ -3934,26 +4125,31 @@ function CatalogDetailPage({ onNav, catalogId }) {
           </div>
         )}
       </Card>
+
+      {fileViewer && (
+        <JsonViewerModal title={t('Catalog File')} subtitle={`catalogs/${catalogId}.latest.json.gz`}
+          loading={fileViewer.loading} error={fileViewer.error} content={fileViewer.content}
+          onClose={() => setFileViewer(null)} />
+      )}
     </div>
   )
 }
 
 // ─── Add Product Page ─────────────────────────────────────────────────────────
 
-const DAYS_OF_WEEK = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN']
 
 const PRODUCT_AUTOFILL_POOL = [
   {
     res: { id: 'item-keripik-singkong', name: 'Keripik Singkong Balado (Spicy Cassava Chips)', short_desc: 'Crispy cassava chips with balado seasoning', long_desc: 'Keripik singkong renyah dengan bumbu balado khas Minang yang pedas manis. (Crispy cassava chips with authentic Minang sweet and spicy balado seasoning.)', product_highlights: '- Terbuat dari singkong segar pilihan (Made from fresh selected cassava)\n- Bumbu balado asli minang (Authentic Minang balado seasoning)\n- Tanpa pengawet buatan (No artificial preservatives)', specifications: '- Berat Bersih (Net Weight): 150g\n- Kemasan (Packaging): Plastik Ziplock (Ziplock Plastic)\n- Bahan Utama (Main Ingredient): Singkong, Cabai (Cassava, Chili)', media_url: 'https://images.unsplash.com/photo-1621939514649-280e2ee25f60?w=400', brand: 'Chitato', origin_country: 'ID', weight_value: '150', weight_unit: 'G', color: 'Golden', material: 'Cassava' },
-    off: { id: 'offer-keripik-singkong', commission_type: 'PERCENT', commission_value: '5', commission_applies_to: 'ITEM_TOTAL', settlement_basis: 'AFTER_DELIVERY', settlement_window: 'P3D', name: 'Keripik Singkong Balado', price: '25000', currency: 'IDR', cod_available: true, returns_allowed: true, returns_window: 'P7D', returns_method: 'SELLER_PICKUP', returns_fee_type: 'PERCENTAGE', returns_fee_value: '10', cancel_allowed: true, cancel_window: 'PT2H', cancel_event: 'BEFORE_PACKING', replace_allowed: false, max_distance: '20', timing_days: ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'], timing_start: '09:00', timing_end: '21:00', offer_context: 'https://schema.ion.id/release1/schema/extension/trade/TradeOffer/v1/context.jsonld' }
+    off: { id: 'offer-keripik-singkong', delivery_fee: '10000', commissions: [{ name: 'Finder fee', type: 'PERCENT', value: '5', applies_to: 'ITEM_TOTAL' }], settlement_basis: 'AFTER_DELIVERY', settlement_window: 'P3D', name: 'Keripik Singkong Balado', price: '25000', currency: 'IDR', cod_available: true, returns_allowed: true, returns_window: 'P7D', returns_method: 'SELLER_PICKUP', returns_fee_type: 'PERCENTAGE', returns_fee_value: '10', cancel_allowed: true, cancel_window: 'PT2H', cancel_event: 'BEFORE_PACKING', replace_allowed: false, max_distance: '20', offer_context: 'https://schema.ion.id/release1/schema/extension/trade/TradeOffer/v1/context.jsonld' }
   },
   {
     res: { id: 'item-bolu-pisang', name: 'Bolu Pisang Cokelat (Chocolate Banana Cake)', short_desc: 'Soft banana cake with chocolate chips', long_desc: 'Bolu pisang panggang yang lembut dipadukan dengan taburan cokelat lezat di atasnya. (Soft baked banana cake topped with delicious chocolate chips.)', product_highlights: '- Dibuat dengan pisang ambon segar (Made with fresh Ambon bananas)\n- Tekstur lembut dan lumer di mulut (Soft texture that melts in the mouth)\n- Taburan cokelat premium (Premium chocolate chips)', specifications: '- Berat Bersih (Net Weight): 400g\n- Kemasan (Packaging): Kardus Makanan (Food Box)\n- Bahan Utama (Main Ingredient): Tepung, Pisang, Cokelat (Flour, Banana, Chocolate)', media_url: 'https://images.unsplash.com/photo-1578985545062-69928b1d9587?w=400', brand: 'HomeMade', origin_country: 'ID', weight_value: '400', weight_unit: 'G', color: 'Brown', material: 'Flour' },
-    off: { id: 'offer-bolu-pisang', commission_type: 'AMOUNT', commission_value: '1500', settlement_basis: 'ON_CONFIRMATION', settlement_window: 'P1D', name: 'Bolu Pisang Cokelat', price: '45000', currency: 'IDR', cod_available: true, returns_allowed: false, cancel_allowed: true, cancel_window: 'PT1H', cancel_event: 'BEFORE_PACKING', replace_allowed: false, max_distance: '10', timing_days: ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'], timing_start: '08:00', timing_end: '18:00', offer_context: 'https://schema.ion.id/release1/schema/extension/trade/TradeOffer/v1/context.jsonld' }
+    off: { id: 'offer-bolu-pisang', delivery_fee: '15000', commissions: [{ name: 'Finder fee', type: 'AMOUNT', value: '1500' }], settlement_basis: 'ON_CONFIRMATION', settlement_window: 'P1D', name: 'Bolu Pisang Cokelat', price: '45000', currency: 'IDR', cod_available: true, returns_allowed: false, cancel_allowed: true, cancel_window: 'PT1H', cancel_event: 'BEFORE_PACKING', replace_allowed: false, max_distance: '10', offer_context: 'https://schema.ion.id/release1/schema/extension/trade/TradeOffer/v1/context.jsonld' }
   },
   {
     res: { id: 'item-teh-botol', name: 'Teh Botol Sosro (Bottled Jasmine Tea)', short_desc: 'Ready-to-drink jasmine tea', long_desc: 'Minuman teh melati siap saji legendaris Indonesia yang menyegarkan dahaga. (Legendary Indonesian ready-to-drink jasmine tea that is very refreshing.)', product_highlights: '- Terbuat dari daun teh melati asli (Made from real jasmine tea leaves)\n- Proses penyeduhan higienis (Hygienic brewing process)\n- Menyegarkan dahaga (Refreshing thirst quencher)', specifications: '- Isi Bersih (Net Volume): 350ml\n- Kemasan (Packaging): Botol Plastik PET (PET Plastic Bottle)\n- Bahan Utama (Main Ingredient): Air, Ekstrak Teh (Water, Tea Extract)', media_url: 'https://images.unsplash.com/photo-1556679343-c7306c1976bc?w=400', brand: 'Sosro', origin_country: 'ID', weight_value: '350', weight_unit: 'ML', color: 'Amber', material: 'PET Bottle' },
-    off: { id: 'offer-teh-botol', commission_type: 'PERCENT', commission_value: '2', commission_applies_to: 'ORDER_TOTAL', settlement_basis: 'AFTER_DELIVERY', settlement_window: 'P1D', name: 'Teh Botol Sosro', price: '5000', currency: 'IDR', cod_available: true, returns_allowed: false, cancel_allowed: true, cancel_window: 'PT30M', cancel_event: 'BEFORE_PACKING', replace_allowed: false, max_distance: '15', timing_days: ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'], timing_start: '07:00', timing_end: '22:00', offer_context: 'https://schema.ion.id/release1/schema/extension/trade/TradeOffer/v1/context.jsonld' }
+    off: { id: 'offer-teh-botol', delivery_fee: '0', commissions: [{ name: 'Finder fee', type: 'PERCENT', value: '2', applies_to: 'ORDER_TOTAL' }], settlement_basis: 'AFTER_DELIVERY', settlement_window: 'P1D', name: 'Teh Botol Sosro', price: '5000', currency: 'IDR', cod_available: true, returns_allowed: false, cancel_allowed: true, cancel_window: 'PT30M', cancel_event: 'BEFORE_PACKING', replace_allowed: false, max_distance: '15', offer_context: 'https://schema.ion.id/release1/schema/extension/trade/TradeOffer/v1/context.jsonld' }
   },
 ]
 // Next sample per CRC for the Add Product page's Auto-fill (CRC_AUTOFILL).
@@ -4027,7 +4223,6 @@ function OfferForm({ off, oSet, offOpen, setOffOpen, catalogId, lockId, showReso
         <div><label className={labelCls}>{t('Short Description')}</label>
           <input className={inputCls} value={off.short_desc} onChange={e => oSet('short_desc', e.target.value)} placeholder={t('Best seller flask')} />
         </div>
-        <SettlementTermsFields offer={off} onChange={oSet} labelCls={labelCls} inputCls={inputCls} />
       </div>
 
       {/* Policies collapsible */}
@@ -4038,6 +4233,8 @@ function OfferForm({ off, oSet, offOpen, setOffOpen, catalogId, lockId, showReso
       </button>
       {offOpen.pol && (
         <div className="mt-3 space-y-3">
+          <SettlementTermsFields offer={off} onChange={oSet} labelCls={labelCls} inputCls={inputCls} />
+          <DeliveryFeeField offer={off} onChange={oSet} labelCls={labelCls} inputCls={inputCls} />
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {/* Returns */}
             <div className="p-3 rounded-lg bg-slate-800/50 border border-white/[0.06] space-y-2">
@@ -4113,28 +4310,6 @@ function OfferForm({ off, oSet, offOpen, setOffOpen, catalogId, lockId, showReso
               </div>
             </div>
           </div>
-          {/* Timing */}
-          <div className="p-3 rounded-lg bg-slate-800/50 border border-white/[0.06] space-y-3">
-            <p className="text-xs font-semibold text-slate-300">{t('Operating Hours')}</p>
-            <div className="flex flex-wrap gap-1.5">
-              {DAYS_OF_WEEK.map(d => (
-                <button key={d} type="button"
-                  onClick={() => oSet('timing_days', off.timing_days.includes(d) ? off.timing_days.filter(x => x !== d) : [...off.timing_days, d])}
-                  className={`px-2.5 py-1.5 rounded-md text-[11px] font-bold transition-colors ${off.timing_days.includes(d) ? 'text-white' : 'border border-white/[0.10] text-slate-500 hover:text-white'}`}
-                  style={off.timing_days.includes(d) ? { background: BRAND } : {}}>
-                  {t(d)}
-                </button>
-              ))}
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div><label className={labelCls}>{t('Opens')}</label>
-                <input type="time" className={inputCls} value={off.timing_start} onChange={e => oSet('timing_start', e.target.value)} />
-              </div>
-              <div><label className={labelCls}>{t('Closes')}</label>
-                <input type="time" className={inputCls} value={off.timing_end} onChange={e => oSet('timing_end', e.target.value)} />
-              </div>
-            </div>
-          </div>
         </div>
       )}
     </>
@@ -4195,7 +4370,8 @@ function AddProductPage({ onNav, catalogId, editResourceId }) {
     const uid = id => `${id}-${Date.now().toString(36)}`
     const samples = CRC_AUTOFILL[crcCode]
     if (samples?.length) {
-      const seed = samples[(_crcFillIdx[crcCode] = (_crcFillIdx[crcCode] ?? -1) + 1) % samples.length]
+      _crcFillIdx[crcCode] = (_crcFillIdx[crcCode] ?? -1) + 1
+      const seed = samples[_crcFillIdx[crcCode] % samples.length]
       setRes({ ...EMPTY_RESOURCE(), ...seed.res, id: uid(seed.res.id) })
       setCrcValues(structuredClone(seed.crc || {}))
       setCustomRows(structuredClone(seed.custom || []))
@@ -4533,7 +4709,7 @@ function AddOfferPage({ onNav, catalogId, preselectedResourceId, editOfferId }) 
     _productFillIdx++
     const uid = id => `${id}-${Date.now().toString(36)}`
     setOff({
-      ...EMPTY_OFFER(), ...seed.off, id: uid(seed.off.id),
+      ...EMPTY_OFFER(), ...seed.off, ...sampleValidity(), id: uid(seed.off.id),
       resource_ids: preselectedResourceId || ''
     })
     setOffOpen({}); setError(null)
@@ -4564,8 +4740,9 @@ function AddOfferPage({ onNav, catalogId, preselectedResourceId, editOfferId }) 
             '@type': 'ion:IONTradeConsideration',
             currency: off.currency,
             ...buildPriceBreakup(off),
+            ...(buildBuyerFinderFee(off) ? { buyerFinderFee: buildBuyerFinderFee(off) } : {}),
+            ...(buildDeliveryFee(off) ? { deliveryFee: buildDeliveryFee(off) } : {}),
             paymentMethods: off.cod_available ? ['PREPAID', 'COD', 'DIGITAL_WALLET'] : ['PREPAID', 'DIGITAL_WALLET'],
-            commission: buildCommission(off),
           },
         }],
       } : {}),
@@ -4730,8 +4907,8 @@ export default function App() {
         {/* Mobile top bar */}
         <div className="lg:hidden sticky top-0 z-30 flex items-center gap-3 px-4 py-3 border-b border-white/[0.06]"
           style={{ background: '#0a0e1a' }}>
-          <button onClick={() => setSidebarOpen(true)} className="p-2 rounded-lg text-slate-400 hover:text-white transition-colors">
-            <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+          <button onClick={() => setSidebarOpen(true)} aria-label={t('Open menu')} className="p-2 rounded-lg text-slate-400 hover:text-white transition-colors">
+            <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true">
               <path strokeLinecap="round" d="M4 6h16M4 12h16M4 18h16" />
             </svg>
           </button>

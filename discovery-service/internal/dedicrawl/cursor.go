@@ -11,11 +11,26 @@ import (
 // their last-known content in the served snapshot, and so the one-way
 // RETIRED lifecycle transition (§10.1/§10.5) can never be reversed by a
 // later crawl that simply omits the entry.
+//
+// entryVersion and contentVersion are deliberately separate counters, not
+// one value doing both jobs: a Provider Node bumps entry.EntryVersion on
+// EVERY publish call, including ones where nothing in the catalog's
+// actual content changed (e.g. a pure isActive toggle), while
+// baseline.version and each change file's fromVersion/toVersion use a
+// second, content-only counter that only advances on a real content
+// change. entryVersion exists purely so applyEntry can cheaply tell "has
+// anything happened since I last looked" (the early-exit in applyEntry);
+// contentVersion is what actually lines up with entry.Changes for
+// buildChangeChain. Mixing the two here was the cause of a real bug: once
+// a no-op publish ticked entryVersion without a matching change/baseline
+// file, no chain could ever reach it again, permanently stranding the
+// cursor on stale content (see crawl.go's resolveCatalog).
 type cursorEntry struct {
-	entryVersion int
-	isActive     bool
-	retired      bool
-	catalog      beckn.Catalog
+	entryVersion   int
+	contentVersion int
+	isActive       bool
+	retired        bool
+	catalog        beckn.Catalog
 }
 
 // cursorState is this Crawler's in-memory, per-catalogId crawl progress

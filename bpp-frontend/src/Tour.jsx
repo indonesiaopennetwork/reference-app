@@ -149,13 +149,13 @@ export default function Tour({ steps, open, onClose, onStep, state }) {
       )}
       {hole ? (
         <>
-          <div className="absolute inset-x-0 top-0 pointer-events-auto" style={{ height: Math.max(0, hole.top) }} onClick={block} />
-          <div className="absolute inset-x-0 bottom-0 pointer-events-auto" style={{ top: hole.bottom }} onClick={block} />
-          <div className="absolute left-0 pointer-events-auto" style={{ top: hole.top, height: hole.bottom - hole.top, width: Math.max(0, hole.left) }} onClick={block} />
-          <div className="absolute right-0 pointer-events-auto" style={{ top: hole.top, height: hole.bottom - hole.top, left: hole.right }} onClick={block} />
+          <div role="presentation" className="absolute inset-x-0 top-0 pointer-events-auto" style={{ height: Math.max(0, hole.top) }} onClick={block} />
+          <div role="presentation" className="absolute inset-x-0 bottom-0 pointer-events-auto" style={{ top: hole.bottom }} onClick={block} />
+          <div role="presentation" className="absolute left-0 pointer-events-auto" style={{ top: hole.top, height: hole.bottom - hole.top, width: Math.max(0, hole.left) }} onClick={block} />
+          <div role="presentation" className="absolute right-0 pointer-events-auto" style={{ top: hole.top, height: hole.bottom - hole.top, left: hole.right }} onClick={block} />
         </>
       ) : (
-        <div className="absolute inset-0 pointer-events-auto" onClick={block} />
+        <div role="presentation" className="absolute inset-0 pointer-events-auto" onClick={block} />
       )}
 
       <div ref={cardRef} className="absolute rounded-2xl border border-white/10 shadow-2xl p-5 transition-all duration-200 pointer-events-auto"
