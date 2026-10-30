@@ -72,12 +72,12 @@ modules:
         keyManager:
           id: simplekeymanager
           config:
-            networkParticipant: onix-bap-x7m2wmy7nq-et.a.run.app
-            keyId: 76EU91ME6AjAq2emEzHCJ2aNXgZAfRTF2VNRa3o6j6m7KPT7AdKmLc
+            networkParticipant: sample-cn.bpp-backend2.ion-ref-app.ayushmatha.in
+            keyId: sample-cn-ion-ref-app-ayushmatha-in
             signingPrivateKey: REMOVED
-            signingPublicKey: nHKQUR4dfE40eGnxP6phRvWiNzYRQuetJiybTtpndbs=
+            signingPublicKey: nNrqM6oH1Hhvq8c8D9I40Zd3aPNmLqx8+CYiAlTbhoY=
             encrPrivateKey: REMOVED
-            encrPublicKey: nHKQUR4dfE40eGnxP6phRvWiNzYRQuetJiybTtpndbs=
+            encrPublicKey: nNrqM6oH1Hhvq8c8D9I40Zd3aPNmLqx8+CYiAlTbhoY=
         schemaValidator:
           id: schemav2validator
           config:
@@ -146,12 +146,12 @@ modules:
         keyManager:
           id: simplekeymanager
           config:
-            networkParticipant: onix-bap-x7m2wmy7nq-et.a.run.app
-            keyId: 76EU91ME6AjAq2emEzHCJ2aNXgZAfRTF2VNRa3o6j6m7KPT7AdKmLc
+            networkParticipant: sample-cn.bpp-backend2.ion-ref-app.ayushmatha.in
+            keyId: sample-cn-ion-ref-app-ayushmatha-in
             signingPrivateKey: REMOVED
-            signingPublicKey: nHKQUR4dfE40eGnxP6phRvWiNzYRQuetJiybTtpndbs=
+            signingPublicKey: nNrqM6oH1Hhvq8c8D9I40Zd3aPNmLqx8+CYiAlTbhoY=
             encrPrivateKey: REMOVED
-            encrPublicKey: nHKQUR4dfE40eGnxP6phRvWiNzYRQuetJiybTtpndbs=
+            encrPublicKey: nNrqM6oH1Hhvq8c8D9I40Zd3aPNmLqx8+CYiAlTbhoY=
         schemaValidator:
           id: schemav2validator
           config:
