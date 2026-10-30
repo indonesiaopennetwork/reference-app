@@ -66,12 +66,12 @@ modules:
         keyManager:
           id: simplekeymanager
           config:
-            subscriberId: onix-bap-x7m2wmy7nq-et.a.run.app
-            keyId: 76EU91ME6AjAq2emEzHCJ2aNXgZAfRTF2VNRa3o6j6m7KPT7AdKmLc
-            signingPrivateKey: BkYJmBVlFt6LmPea4mYJH2K+6HAjj3TcC6efl2lNKZ0=
-            signingPublicKey: nHKQUR4dfE40eGnxP6phRvWiNzYRQuetJiybTtpndbs=
-            encrPrivateKey: BkYJmBVlFt6LmPea4mYJH2K+6HAjj3TcC6efl2lNKZ0=
-            encrPublicKey: nHKQUR4dfE40eGnxP6phRvWiNzYRQuetJiybTtpndbs=
+            subscriberId: sample-pn.bpp-backend2.ion-ref-app.ayushmatha.in
+            keyId: sample-pn-ion-ref-app-ayushmatha-in
+            signingPrivateKey: r6k9ey8p6hPwAuOwNedp423qDAHV6zMmq75u3Ws6MUE=
+            signingPublicKey: nNrqM6oH1Hhvq8c8D9I40Zd3aPNmLqx8+CYiAlTbhoY=
+            encrPrivateKey: r6k9ey8p6hPwAuOwNedp423qDAHV6zMmq75u3Ws6MUE=
+            encrPublicKey: nNrqM6oH1Hhvq8c8D9I40Zd3aPNmLqx8+CYiAlTbhoY=
         catalogPublisher:
           id: catalogpublisher
           config:

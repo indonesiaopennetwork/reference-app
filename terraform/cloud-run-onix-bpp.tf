@@ -50,6 +50,13 @@ resource "google_cloud_run_v2_service" "onix_bpp" {
         name  = "REDIS_ADDR"
         value = "${google_redis_instance.redis.host}:${google_redis_instance.redis.port}"
       }
+      # The otel-collector sidecar's OTLP receiver is plaintext-only (same
+      # instance, localhost-only traffic) -- without this, the OTel SDK
+      # defaults to TLS and every export fails the handshake.
+      env {
+        name  = "OTEL_EXPORTER_OTLP_INSECURE"
+        value = "true"
+      }
       env {
         name  = "NETWORK_PARTICIPANT"
         value = var.bpp_id
