@@ -41,6 +41,36 @@ async function apiFetch(path, opts = {}) {
   return res;
 }
 
+// Calls onStatus with the transaction's state (the GET /status/:id body)
+// now and on every change, pushed over GET /status/:id/stream (SSE) the
+// moment bap stores the on_* callback. While the stream is down it polls
+// /status/:id every 500ms instead; EventSource keeps retrying the stream on
+// its own and polling stops once it's back. Returns a function that stops
+// watching. No bearer token: EventSource can't send one, and the endpoint
+// doesn't need it (same as /status/:id).
+function watchStatus(txnId, onStatus) {
+  let pollTimer = null;
+  const stopPolling = () => { clearInterval(pollTimer); pollTimer = null; };
+  const startPolling = () => {
+    if (pollTimer) return;
+    pollTimer = setInterval(() => {
+      apiFetch(`/status/${txnId}`).then(r => r.json()).then(onStatus).catch(() => { });
+    }, 500);
+  };
+
+  if (typeof EventSource === 'undefined') {
+    startPolling();
+    return stopPolling;
+  }
+  const es = new EventSource(`${API_BASE}/status/${txnId}/stream`);
+  es.addEventListener('status', e => {
+    try { onStatus(JSON.parse(e.data)); } catch { /* ignore a bad event */ }
+  });
+  es.onopen = stopPolling;
+  es.onerror = startPolling;
+  return () => { es.close(); stopPolling(); };
+}
+
 /* ─────────────────────────── helpers ────────────────────────────────────── */
 
 function parseCatalogs(data) {
@@ -1582,22 +1612,24 @@ function OrderItemsCard({ txnId, order, txnStatus, deliveredAt, onChanged }) {
 }
 
 // OrderItemsCard for a just-confirmed order: loads the latest contract itself
-// and re-fetches until a cancel/update callback lands. onStatus is told only
-// when the order ends up fully CANCELLED -- in-flight states stay in the card.
+// and watches it (watchStatus) until a cancel/update callback lands. onStatus
+// is told only when the order ends up fully CANCELLED -- in-flight states
+// stay in the card.
 function LiveOrderItems({ txnId, onStatus }) {
   const [data, setData] = useState(null);
   const [tick, setTick] = useState(0);
+  const apply = d => {
+    setData(d);
+    if (d.status === 'CANCELLED') onStatus?.(d.status);
+  };
   useEffect(() => {
-    apiFetch(`/status/${txnId}`).then(r => r.json()).then(d => {
-      setData(d);
-      if (d.status === 'CANCELLED') onStatus?.(d.status);
-    }).catch(() => { });
+    apiFetch(`/status/${txnId}`).then(r => r.json()).then(apply).catch(() => { });
   }, [txnId, tick]); // eslint-disable-line react-hooks/exhaustive-deps
+  const inFlight = ['CANCEL_SENT', 'UPDATE_SENT'].includes(data?.status);
   useEffect(() => {
-    if (!data || !['CANCEL_SENT', 'UPDATE_SENT'].includes(data.status)) return;
-    const timer = setTimeout(() => setTick(k => k + 1), 2000);
-    return () => clearTimeout(timer);
-  }, [data]);
+    if (!inFlight) return;
+    return watchStatus(txnId, apply);
+  }, [txnId, inFlight]); // eslint-disable-line react-hooks/exhaustive-deps
   const contract = typeof data?.contract === 'string' ? JSON.parse(data.contract) : data?.contract;
   const order = parseContractDetail(contract?.message?.contract || contract);
   if (!order?.items?.length) return null;
@@ -2470,34 +2502,25 @@ export default function App() {
   const cartCount = cart.reduce((s, i) => s + i.qty, 0);
   const cartTotal = cart.reduce((s, i) => s + i.price * i.qty, 0);
 
-  /* ── Transaction polling ─────────────────────────────────────────────── */
+  /* ── Transaction status (pushed; see watchStatus) ────────────────────── */
   // Depends only on transaction?.id, not the whole transaction object --
-  // setTransaction below builds a new object on every tick (even when
-  // nothing changed), and depending on the full object would re-run this
-  // effect on every single poll, tearing down and restarting the interval
-  // from zero each time. That silently doubled the worst-case wait: a
-  // status landing just after a tick found nothing new had to wait a full
-  // fresh interval again instead of the remainder of the original one.
-  // Since this effect no longer re-runs when the status changes, it must
-  // stop itself explicitly once a terminal status is reached.
+  // setTransaction below builds a new object on every update, and
+  // depending on the full object would close and reopen the stream each
+  // time. Since this effect doesn't re-run when the status changes, it
+  // stops watching explicitly once a terminal status is reached.
   useEffect(() => {
     const terminalStatuses = ['CONFIRMED', 'CANCELLED', 'COMPLETE'];
     if (!transaction || terminalStatuses.includes(transaction.status)) return;
-    const id = setInterval(() => {
-      apiFetch(`/status/${transaction.id}`)
-        .then(r => r.json())
-        .then(d => {
-          setTransaction(p => {
-            // Don't revert CANCEL_SENT back to CONFIRMED — the cancel is still
-            // in-flight. Only advance to CANCELLED or later states.
-            if (p.status === 'CANCEL_SENT' && d.status === 'CONFIRMED') return p;
-            return { ...p, ...d };
-          });
-          if (terminalStatuses.includes(d.status)) clearInterval(id);
-        })
-        .catch(() => { });
-    }, 500);
-    return () => clearInterval(id);
+    const stop = watchStatus(transaction.id, d => {
+      setTransaction(p => {
+        // Don't revert CANCEL_SENT back to CONFIRMED — the cancel is still
+        // in-flight. Only advance to CANCELLED or later states.
+        if (p.status === 'CANCEL_SENT' && d.status === 'CONFIRMED') return p;
+        return { ...p, ...d };
+      });
+      if (terminalStatuses.includes(d.status)) stop();
+    });
+    return stop;
   }, [transaction?.id]);
 
   /* ── Beckn: Select (single product from modal) ───────────────────────── */

@@ -4,7 +4,7 @@ Swagger (OpenAPI 2.0) specs for the two backend services, **generated from the c
 
 | File | Service | Endpoints |
 |---|---|---|
-| [bap.yaml](bap.yaml) | `bap-application` — buyer backend | 30 |
+| [bap.yaml](bap.yaml) | `bap-application` — buyer backend | 31 |
 | [bpp.yaml](bpp.yaml) | `bpp-application` — seller backend | 44 |
 
 Don't edit these files by hand — they are rebuilt from the `// @...` annotations above each handler by `task docs:api` (see [Keeping the specs current](#keeping-the-specs-current)). They describe what the code does today, including some behaviour that may be worth changing (see [Things to know](#things-to-know)). For how the services fit together, see [../architecture.md](../architecture.md).
@@ -48,7 +48,7 @@ Beckn is asynchronous. Every order action works in two halves:
 
 1. **The client call** (e.g. `POST /api/v1/select`) builds a Beckn message, saves the new status (e.g. `SELECT_SENT`), sends it to the seller through `onix-bap`, and returns as soon as the adapter ACKs. **The response contains no seller data** — just a `transaction_id` or the new status.
 2. **The seller's answer** arrives later as a separate request on a webhook (e.g. `POST /api/webhook/on_select`). The BAP ACKs immediately, then in the background updates the status (e.g. `QUOTE_RECEIVED`) and saves the contract as a snapshot.
-3. **The frontend polls** `GET /api/v1/status/{id}` (every 2 s) to see the change.
+3. **The frontend is told** over `GET /api/v1/status/{id}/stream` (server-sent events) the moment the change is saved. It falls back to polling `GET /api/v1/status/{id}` only while that stream is down.
 
 That's why every client action in the spec says "the result arrives later via `/api/webhook/on_…`".
 

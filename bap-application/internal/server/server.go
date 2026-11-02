@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -21,6 +22,7 @@ import (
 	onsupportsvc "github.com/ion/winroom/bap/internal/on_support_svc"
 	onupdatesvc "github.com/ion/winroom/bap/internal/on_update_svc"
 	reconcilesvc "github.com/ion/winroom/bap/internal/reconcile_svc"
+	"github.com/ion/winroom/bap/internal/statusstream"
 )
 
 // handleHealth is the liveness probe: a static OK, without checking the
@@ -40,7 +42,7 @@ func handleHealth(c *gin.Context) {
 
 // RegisterRoutes wires all BAP routes onto the given Gin engine. verifier
 // may be nil (Zitadel unreachable at startup) -- see internal/auth.OptionalAuth.
-func RegisterRoutes(r *gin.Engine, pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.Logger, verifier *auth.Verifier) {
+func RegisterRoutes(ctx context.Context, r *gin.Engine, pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.Logger, verifier *auth.Verifier) {
 	// Health check
 	r.GET("/health", handleHealth)
 
@@ -49,6 +51,11 @@ func RegisterRoutes(r *gin.Engine, pool *pgxpool.Pool, cfg *config.Config, lh *l
 	// internal/discoverwait's package doc. One instance shared by both
 	// sides for the process lifetime.
 	discoverRegistry := discoverwait.NewRegistry()
+
+	// statusHub pushes transaction changes to GET /api/v1/status/:id/stream,
+	// fed by Postgres NOTIFY -- see internal/statusstream's package doc.
+	statusHub := statusstream.NewHub()
+	go statusHub.Listen(ctx, pool, lh)
 
 	// Beckn webhook endpoints — BPP (via ONIX adapter) POSTs on_* callbacks here.
 	webhook := r.Group("/api/webhook")
@@ -100,7 +107,7 @@ func RegisterRoutes(r *gin.Engine, pool *pgxpool.Pool, cfg *config.Config, lh *l
 	v1 := r.Group("/api/v1")
 	v1.Use(auth.OptionalAuth(verifier))
 	{
-		clientH := clientsvc.NewClientHandler(pool, cfg, lh, discoverRegistry)
+		clientH := clientsvc.NewClientHandler(pool, cfg, lh, discoverRegistry, statusHub)
 		v1.GET("/catalog", clientH.HandleCatalog)
 		// Browser-facing contract is always GET; DISCOVER_METHOD (see
 		// config.Config.DiscoverMethod) picks which implementation serves
@@ -111,6 +118,7 @@ func RegisterRoutes(r *gin.Engine, pool *pgxpool.Pool, cfg *config.Config, lh *l
 		v1.POST("/init", clientH.HandleInit)
 		v1.POST("/confirm", clientH.HandleConfirm)
 		v1.GET("/status/:id", clientH.HandleStatus)
+		v1.GET("/status/:id/stream", clientH.HandleStatusStream)
 		v1.POST("/request-status", clientH.HandleRequestStatus)
 		v1.POST("/cancel", clientH.HandleCancel)
 		v1.POST("/cancel-items", clientH.HandleCancelItems)

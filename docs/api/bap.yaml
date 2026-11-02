@@ -1767,6 +1767,45 @@ paths:
       summary: Poll a transaction's local state
       tags:
       - orders
+  /api/v1/status/{id}/stream:
+    get:
+      description: 'Server-sent events (text/event-stream). Sends one "status" event
+        at once with the same JSON as GET /api/v1/status/{id}, then another whenever
+        the stored status or contract changes (pushed from the on_* callback, no polling),
+        and a comment line every 15s while idle. The stream never ends on its own;
+        clients close it, and EventSource reconnects on its own if it drops. Not scoped
+        to the buyer, like GET /api/v1/status/{id}. The bearer token is optional:
+        without one the request is served anonymously; one that fails verification
+        is rejected with 401.'
+      operationId: streamTransactionStatus
+      parameters:
+      - description: Transaction id (UUID) returned by POST /api/v1/select.
+        format: uuid
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: Stream of status events; each event's data is this object.
+          schema:
+            $ref: '#/definitions/clientsvc.ClientStatusResponse'
+        "401":
+          description: A bearer token was sent but failed verification (no token is
+            fine).
+          schema:
+            $ref: '#/definitions/clientsvc.ErrorResponse'
+        "404":
+          description: Unknown or malformed transaction id.
+          schema:
+            $ref: '#/definitions/clientsvc.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Stream a transaction's local state (SSE)
+      tags:
+      - orders
   /api/v1/support:
     post:
       consumes:

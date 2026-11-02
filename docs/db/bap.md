@@ -8,7 +8,7 @@
 | [public.transactions](#publictransactions)             | 9       | One row per Beckn transactionId initiated by this BAP. Status advances as select → init → confirm actions progress.                                            | BASE TABLE |
 | [public.contract_snapshots](#publiccontract_snapshots) | 7       | Stores the full contract JSON received from the BPP at each on_* callback. The BAP uses this to track the evolving contract state through the Beckn lifecycle. | BASE TABLE |
 | [public.beckn_message_log](#publicbeckn_message_log)   | 17      | Immutable audit log of all Beckn protocol messages received or sent by this BAP.                                                                               | BASE TABLE |
-| [public.reconciliations](#publicreconciliations)       | 15      |                                                                                                                                                                | BASE TABLE |
+| [public.reconciliations](#publicreconciliations)       | 16      |                                                                                                                                                                | BASE TABLE |
 | [public.discover_requests](#publicdiscover_requests)   | 3       |                                                                                                                                                                | BASE TABLE |
 
 ## Stored procedures and functions
@@ -56,6 +56,7 @@
 | public.strict_word_similarity_dist_op            | float4     | text, text                                                                | FUNCTION |
 | public.strict_word_similarity_dist_commutator_op | float4     | text, text                                                                | FUNCTION |
 | public.gtrgm_options                             | void       | internal                                                                  | FUNCTION |
+| public.notify_transaction_status                 | trigger    |                                                                           | FUNCTION |
 
 ## Enums
 
@@ -137,6 +138,7 @@ erDiagram
   timestamp_with_time_zone updated_at ""
   text direction ""
   uuid request_message_id ""
+  text transaction_id ""
 }
 "public.discover_requests" {
   uuid transaction_id ""
@@ -240,6 +242,12 @@ One row per Beckn transactionId initiated by this BAP. Status advances as select
 | transactions_pkey              | CREATE UNIQUE INDEX transactions_pkey ON public.transactions USING btree (transaction_id)                                        |
 | idx_transactions_buyer_subject | CREATE INDEX idx_transactions_buyer_subject ON public.transactions USING btree (buyer_subject) WHERE (buyer_subject IS NOT NULL) |
 
+### Triggers
+
+| Name                       | Definition                                                                                                                                        |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| transactions_notify_status | CREATE TRIGGER transactions_notify_status AFTER INSERT OR UPDATE ON public.transactions FOR EACH ROW EXECUTE FUNCTION notify_transaction_status() |
+
 ### Relations
 
 ```mermaid
@@ -310,6 +318,12 @@ Stores the full contract JSON received from the BPP at each on_* callback. The B
 | Name                    | Definition                                                                                |
 | ----------------------- | ----------------------------------------------------------------------------------------- |
 | contract_snapshots_pkey | CREATE UNIQUE INDEX contract_snapshots_pkey ON public.contract_snapshots USING btree (id) |
+
+### Triggers
+
+| Name                             | Definition                                                                                                                                          |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| contract_snapshots_notify_status | CREATE TRIGGER contract_snapshots_notify_status AFTER INSERT ON public.contract_snapshots FOR EACH ROW EXECUTE FUNCTION notify_transaction_status() |
 
 ### Relations
 
@@ -431,6 +445,7 @@ erDiagram
 | updated_at         | timestamp with time zone | now()           | false    |          |         |         |
 | direction          | text                     | 'INBOUND'::text | false    |          |         |         |
 | request_message_id | uuid                     |                 | true     |          |         |         |
+| transaction_id     | text                     |                 | true     |          |         |         |
 
 ### Constraints
 
@@ -440,9 +455,11 @@ erDiagram
 
 ### Indexes
 
-| Name                 | Definition                                                                          |
-| -------------------- | ----------------------------------------------------------------------------------- |
-| reconciliations_pkey | CREATE UNIQUE INDEX reconciliations_pkey ON public.reconciliations USING btree (id) |
+| Name                                | Definition                                                                                                     |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| reconciliations_pkey                | CREATE UNIQUE INDEX reconciliations_pkey ON public.reconciliations USING btree (id)                            |
+| idx_reconciliations_transaction     | CREATE INDEX idx_reconciliations_transaction ON public.reconciliations USING btree (direction, transaction_id) |
+| idx_reconciliations_request_message | CREATE INDEX idx_reconciliations_request_message ON public.reconciliations USING btree (request_message_id)    |
 
 ### Relations
 
@@ -465,6 +482,7 @@ erDiagram
   timestamp_with_time_zone updated_at ""
   text direction ""
   uuid request_message_id ""
+  text transaction_id ""
 }
 ```
 

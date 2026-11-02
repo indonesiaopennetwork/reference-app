@@ -45,6 +45,25 @@ def sign_beckn_header(body: bytes, key_id: str, private_key_b64: str) -> str:
     )
 
 
+def skip_reason(data, cat):
+    """Why a catalog file must be left out of on_discover, or None.
+
+    Paused (isActive false) and retired catalogs are left out, as
+    discovery-service does. So is a catalog onix-bap's schema check would
+    reject (an offer consideration without considerationAttributes.currency,
+    e.g. an old test catalog): onix-bap validates the whole on_discover, so
+    one bad catalog would fail every search."""
+    if cat.get("isActive") is False:
+        return "paused (isActive false)"
+    if data.get("retiredAt") or cat.get("retiredAt"):
+        return "retired"
+    for offer in cat.get("offers", []):
+        for cons in offer.get("considerations", []):
+            if "currency" not in (cons.get("considerationAttributes") or {}):
+                return f"offer {offer.get('id')} has a consideration without currency"
+    return None
+
+
 def load_catalogs(text_search):
     """Loads every published catalog and narrows it to text_search, mirroring
     discovery-service's own textSearch matching (see its internal/service/match.go)
@@ -55,10 +74,17 @@ def load_catalogs(text_search):
         try:
             with gzip.open(f, 'rt') as gz:
                 data = json.load(gz)
-                if 'catalog' in data:
-                    catalogs.append(data['catalog'])
         except Exception as e:
             print(f"Error reading {f}: {e}")
+            continue
+        cat = data.get('catalog')
+        if not cat:
+            continue
+        reason = skip_reason(data, cat)
+        if reason:
+            print(f"Skipping {os.path.basename(f)}: {reason}")
+            continue
+        catalogs.append(cat)
 
     if not text_search:
         return catalogs

@@ -1,9 +1,11 @@
 package clientsvc
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -12,19 +14,22 @@ import (
 	"github.com/ion/winroom/bap/internal/auth"
 	"github.com/ion/winroom/bap/internal/config"
 	"github.com/ion/winroom/bap/internal/discoverwait"
+	"github.com/ion/winroom/bap/internal/statusstream"
 )
 
 type ClientHandler struct {
 	svc            *ClientService
 	lh             *logharbour.Logger
 	discoverMethod string
+	statusHub      *statusstream.Hub
 }
 
-func NewClientHandler(pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.Logger, discoverRegistry *discoverwait.Registry) *ClientHandler {
+func NewClientHandler(pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.Logger, discoverRegistry *discoverwait.Registry, statusHub *statusstream.Hub) *ClientHandler {
 	return &ClientHandler{
 		svc:            NewClientService(pool, cfg, lh, discoverRegistry),
 		lh:             lh,
 		discoverMethod: cfg.DiscoverMethod,
+		statusHub:      statusHub,
 	}
 }
 
@@ -159,6 +164,81 @@ func (h *ClientHandler) HandleStatus(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, resp)
+}
+
+// statusStreamHeartbeat is how often HandleStatusStream writes a comment
+// line on an idle stream, so proxies (bap-frontend's nginx, Cloud Run)
+// don't close it for inactivity.
+const statusStreamHeartbeat = 15 * time.Second
+
+// HandleStatusStream is HandleStatus as a server-sent event stream: the
+// current state right away, then the new state each time the transaction
+// changes (statusstream.Hub signals it; see that package). The stream stays
+// open until the client closes it; bap-frontend closes it once the order
+// reaches a terminal status.
+//
+//	@Summary		Stream a transaction's local state (SSE)
+//	@ID				streamTransactionStatus
+//	@Description	Server-sent events (text/event-stream). Sends one "status" event at once with the same JSON as GET /api/v1/status/{id}, then another whenever the stored status or contract changes (pushed from the on_* callback, no polling), and a comment line every 15s while idle. The stream never ends on its own; clients close it, and EventSource reconnects on its own if it drops. Not scoped to the buyer, like GET /api/v1/status/{id}. The bearer token is optional: without one the request is served anonymously; one that fails verification is rejected with 401.
+//	@Tags			orders
+//	@Produce		text/event-stream
+//	@Param			id path string true "Transaction id (UUID) returned by POST /api/v1/select." format(uuid)
+//	@Success		200 {object} ClientStatusResponse "Stream of status events; each event's data is this object."
+//	@Failure		401 {object} ErrorResponse "A bearer token was sent but failed verification (no token is fine)."
+//	@Failure		404 {object} ErrorResponse "Unknown or malformed transaction id."
+//	@Security		BearerAuth
+//	@Router			/api/v1/status/{id}/stream [get]
+func (h *ClientHandler) HandleStatusStream(c *gin.Context) {
+	txnID := c.Param("id")
+	ctx := c.Request.Context()
+
+	// Subscribe before the first read so a change in between isn't lost.
+	changed, unsubscribe := h.statusHub.Subscribe(txnID)
+	defer unsubscribe()
+
+	resp, err := h.svc.GetStatus(ctx, txnID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "transaction not found"})
+		return
+	}
+
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	// Tells nginx (bap-frontend, ion-landing-page) not to buffer the stream.
+	c.Header("X-Accel-Buffering", "no")
+	c.Status(http.StatusOK)
+
+	var last []byte
+	send := func(resp *ClientStatusResponse) {
+		data, err := json.Marshal(resp)
+		if err != nil || bytes.Equal(data, last) {
+			return
+		}
+		last = data
+		c.SSEvent("status", string(data))
+		c.Writer.Flush()
+	}
+	send(resp)
+
+	heartbeat := time.NewTicker(statusStreamHeartbeat)
+	defer heartbeat.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-changed:
+			resp, err := h.svc.GetStatus(ctx, txnID)
+			if err != nil {
+				continue
+			}
+			send(resp)
+		case <-heartbeat.C:
+			if _, err := c.Writer.WriteString(": ping\n\n"); err != nil {
+				return
+			}
+			c.Writer.Flush()
+		}
+	}
 }
 
 // HandleDiscover triggers a Discover request. The browser-facing contract

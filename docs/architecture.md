@@ -224,7 +224,7 @@ Each frontend is a static React build served by nginx. The UI calls relative URL
 
 The one exception is `landing-page`, which calls `bpp`'s `POST /api/v1/auth/bootstrap` **directly and cross-origin** (`BPP_API_URL`); `bpp` allows exactly that origin with CORS (`LANDING_PAGE_ORIGIN`).
 
-Neither frontend uses websockets. They **poll**: every 2 s while an order action is in flight, every 5 s for live lists (orders, message log, reconciliation).
+Order status is **pushed** to `bap-frontend`: while an order action is in flight it keeps `GET /api/v1/status/:id/stream` open (server-sent events). The `on_*` callback's write to `transactions` / `contract_snapshots` fires a Postgres `NOTIFY bap_transaction_status` (migration 017), and `bap`'s listener (`internal/statusstream`) sends the new state down every stream open for that transaction, on any `bap` instance. If the stream drops, the frontend polls `GET /api/v1/status/:id` every 500 ms until it reconnects. Live lists (orders, message log, reconciliation) still poll every 5 s; neither frontend uses websockets.
 
 ### 5.2 Backend ↔ its onix adapter (Beckn messages)
 
@@ -408,7 +408,7 @@ sequenceDiagram
 
 ### 7.4 Placing an order: select → init → confirm
 
-Every order action has the same shape: the buyer's request gets a quick ACK, and the seller's answer comes back later as an `on_*` callback. The frontend polls `GET /api/v1/status/:id` every 2 s to see the result.
+Every order action has the same shape: the buyer's request gets a quick ACK, and the seller's answer comes back later as an `on_*` callback. The frontend gets the result pushed over `GET /api/v1/status/:id/stream` (SSE) the moment `bap` stores the callback (see 5.1).
 
 ```mermaid
 sequenceDiagram
@@ -433,9 +433,7 @@ sequenceDiagram
     OP->>OB: POST /bap/receiver/on_select (signed)
     OB->>BAP: POST /api/webhook/on_select
     BAP->>BAP: QUOTE_RECEIVED + contract snapshot
-    loop every 2 s
-        FE->>BAP: GET /api/v1/status/:id
-    end
+    BAP-->>FE: SSE status event (GET /api/v1/status/:id/stream, open since select)
 
     FE->>BAP: POST /api/v1/init (billing details)
     BAP->>OP: init via onix-bap (same path as above)

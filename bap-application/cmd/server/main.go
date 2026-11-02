@@ -94,7 +94,7 @@ func main() {
 	r := gin.New()
 	r.Use(gin.Recovery())
 
-	server.RegisterRoutes(r, pool, cfg, lh, verifier)
+	server.RegisterRoutes(ctx, r, pool, cfg, lh, verifier)
 
 	addr := fmt.Sprintf(":%s", cfg.AppPort)
 	lh.WithModule("main").Log("server listening on " + addr)
