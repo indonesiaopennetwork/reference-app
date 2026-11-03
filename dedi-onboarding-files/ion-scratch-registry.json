@@ -5,7 +5,7 @@
   "proof": {
     "verification_method": "key-1",
     "canonicalization": "JCS",
-    "jws": "eyJhbGciOiJFZERTQSIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il19..QL0LpUILrqKpK5JqfRenBVp-IcQOZflxhthDlWk4Eu5zWHo-Rx_n6nvsypqmb_9r_sth0s-0cYqCQpVq_a6mCg"
+    "jws": "eyJhbGciOiJFZERTQSIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il19..e1KUZrAVsO-okSAPqv04dIrXObLJseHWM8Bv0nAJOg5MLBlL2tjS2l7Z6qaT0ua59s1CMCpNcyZ3mw07OpKqDQ"
   },
   "publisher": {
     "domain": "bpp-backend2.ion-ref-app.ayushmatha.in",
@@ -36,6 +36,19 @@
         ]
       },
       "record_name": "sample-pn-ion-ref-app-ayushmatha-in"
+    },
+    {
+      "details": {
+        "countries": [
+          "IDN"
+        ],
+        "encr_public_key": "nNrqM6oH1Hhvq8c8D9I40Zd3aPNmLqx8+CYiAlTbhoY=",
+        "signing_public_key": "nNrqM6oH1Hhvq8c8D9I40Zd3aPNmLqx8+CYiAlTbhoY=",
+        "subscriber_id": "sample-cn.bpp-backend2.ion-ref-app.ayushmatha.in",
+        "type": "BAP",
+        "url": "https://bpp-backend2.ion-ref-app.ayushmatha.in/bap/receiver/"
+      },
+      "record_name": "sample-cn-ion-ref-app-ayushmatha-in"
     }
   ],
   "registry": {

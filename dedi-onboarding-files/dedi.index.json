@@ -3,7 +3,7 @@
   "domain": "bpp-backend2.ion-ref-app.ayushmatha.in",
   "files": [
     {
-      "digest": "sha-256:5fb2a662a6c4dda9047eac94b790404a4a505f686d729c23ea62d05922fab26a",
+      "digest": "sha-256:fe49b918ef0e94959d4ea44c5a89a760a8c60b65f886f2e3b505ff6d0ae46e72",
       "registry": "ion-scratch-registry",
       "schema": "https://raw.githubusercontent.com/LF-Decentralized-Trust-labs/decentralized-directory-protocol/main/schemas/beckn_subscriber.json",
       "url": "https://bpp-backend2.ion-ref-app.ayushmatha.in/dedi/ion-scratch-registry.json"
@@ -22,7 +22,7 @@
   "proof": {
     "verification_method": "key-1",
     "canonicalization": "JCS",
-    "jws": "eyJhbGciOiJFZERTQSIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il19..zmKnC2lcw9jaTav-6FtGN6Xy2wq-sJ8LENb5yxX5CS_BbdKArdUq6xmrqCpSf655-YR6Le_NWYwiknEMjX0iBg"
+    "jws": "eyJhbGciOiJFZERTQSIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il19..20Kex-_d54DRaCeKJ6qRpiXXeLCCcyyUnrE3ThVCpFv_jiXeKsVJAznSaZ8NuZ6sRmQ0djD6DUud0YVLRF7_BA"
   },
   "type": "dedi-manifest",
   "updated_at": "2026-08-21T15:17:01.000322347Z"
