@@ -1,0 +1,29 @@
+{
+  "dedi_version": "0.1",
+  "domain": "bpp.ion.remiges.tech",
+  "files": [
+    {
+      "digest": "sha-256:b74fca59640b5b2147cbb71e6afc95a336b1bca04f09597a9b840d35c4b9b319",
+      "registry": "ion-reference-app-registry",
+      "schema": "https://raw.githubusercontent.com/LF-Decentralized-Trust-labs/decentralized-directory-protocol/main/schemas/beckn_subscriber.json",
+      "url": "https://bpp.ion.remiges.tech/dedi/ion-reference-app-registry.json"
+    }
+  ],
+  "keys": [
+    {
+      "crv": "Ed25519",
+      "kid": "key-1",
+      "kty": "OKP",
+      "x": "nNrqM6oH1Hhvq8c8D9I40Zd3aPNmLqx8-CYiAlTbhoY"
+    }
+  ],
+  "name": "ION Reference App",
+  "next_update": "2028-08-18T04:20:00Z",
+  "proof": {
+    "verification_method": "key-1",
+    "canonicalization": "JCS",
+    "jws": "eyJhbGciOiJFZERTQSIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il19..PjAoz3hX3yHt1B0esFOGw17GJcwd4gSL4OouK-0peLUsijg-wFSkhw21N6kGVo3Pdnc-pF-rMH8wE9zBOf1UAA"
+  },
+  "type": "dedi-manifest",
+  "updated_at": "2026-11-04T05:36:35.065656290Z"
+}

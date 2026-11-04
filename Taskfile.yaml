@@ -2,12 +2,12 @@ version: '3'
 
 # Loaded automatically if present; DEDI_PUBLIC_KEY / DEDI_PRIVATE_KEY are expected
 # to already be set there (or exported another way) before running `task sign`.
-dotenv: ['dedi-onboarding-files/.env.local']
+dotenv: ['dedi-onboarding-files/remiges-identity-files/.env.local']
 
 vars:
-  SIGNER: './dedi-onboarding-files/dedi-file-signer'
-  REGISTRY_FILE: 'dedi-onboarding-files/ion-scratch-registry.json'
-  INDEX_FILE: 'dedi-onboarding-files/dedi.index.json'
+  SIGNER: './dedi-onboarding-files/remiges-identity-files/dedi-file-signer'
+  REGISTRY_FILE: 'dedi-onboarding-files/remiges-identity-files/ion-reference-app-registry.json'
+  INDEX_FILE: 'dedi-onboarding-files/remiges-identity-files/dedi.index.json'
   NEXT_UPDATE_TTL_SECONDS: 31536000
 
 tasks:
@@ -51,7 +51,7 @@ tasks:
         sh: cd terraform && terraform output -raw dedi_static_bucket
     cmds:
       - gsutil cp "{{.INDEX_FILE}}" "gs://{{.DEDI_BUCKET}}/.well-known/dedi.index.json"
-      - gsutil cp "{{.REGISTRY_FILE}}" "gs://{{.DEDI_BUCKET}}/dedi/ion-scratch-registry.json"
+      - gsutil cp "{{.REGISTRY_FILE}}" "gs://{{.DEDI_BUCKET}}/dedi/ion-reference-app-registry.json"
 
   deploy-ion-landing-page-files:
     desc: >-
