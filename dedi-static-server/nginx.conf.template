@@ -35,6 +35,10 @@ server {
     location / {
         try_files $uri =404;
         add_header Cache-Control "no-cache";
+        # add_header does not inherit into a location block that defines its
+        # own add_header -- must repeat the server-level CORS header here too,
+        # or it's silently dropped for every file served from this location.
+        add_header Access-Control-Allow-Origin "*" always;
     }
 }
 
