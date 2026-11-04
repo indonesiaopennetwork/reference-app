@@ -174,12 +174,14 @@ function SectionTitle({ children }) {
   )
 }
 
-// JsonViewerModal: a simple overlay showing pretty-printed JSON, with a
-// copy-to-clipboard button. `content` is the raw object to display;
-// `loading`/`error` let the caller drive the fetch state from outside.
+// JsonViewerModal: an overlay showing JSON as a collapsible tree, with
+// expand/collapse-all and copy-to-clipboard buttons. `content` is the raw
+// object to display; `loading`/`error` let the caller drive the fetch state
+// from outside.
 function JsonViewerModal({ title, subtitle, content, loading, error, onClose }) {
   const { t } = useI18n()
   const [copied, setCopied] = useState(false)
+  const [collapsed, setCollapsed] = useState(false)
   const pretty = content ? JSON.stringify(content, null, 2) : ''
 
   const handleCopy = async () => {
@@ -201,6 +203,12 @@ function JsonViewerModal({ title, subtitle, content, loading, error, onClose }) 
           </div>
           <div className="flex items-center gap-2 shrink-0">
             {content && (
+              <button onClick={() => setCollapsed(c => !c)}
+                className="px-2.5 py-1.5 rounded-lg text-xs font-semibold border border-white/[0.08] text-slate-300 hover:text-white hover:border-white/20 transition-colors">
+                {collapsed ? t('Expand all') : t('Collapse all')}
+              </button>
+            )}
+            {content && (
               <button onClick={handleCopy}
                 className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold border border-white/[0.08] text-slate-300 hover:text-white hover:border-white/20 transition-colors">
                 {copied ? <Check size={12} /> : <Copy size={12} />} {copied ? t('Copied!') : t('Copy')}
@@ -213,7 +221,12 @@ function JsonViewerModal({ title, subtitle, content, loading, error, onClose }) 
         </div>
         <div className="flex-1 overflow-auto p-5">
           {loading ? <LoadingSpinner label={t('Loading…')} /> : error ? <ErrorBox message={error} /> : (
-            <pre className="text-[11px] leading-relaxed text-slate-300 font-mono whitespace-pre-wrap break-all">{pretty}</pre>
+            content && (
+              <div className="pl-3 text-[11px] leading-relaxed font-mono text-slate-300 whitespace-pre">
+                {/* key remounts the tree so expand/collapse all resets every node */}
+                <JsonNode key={collapsed ? 'collapsed' : 'expanded'} value={content} depth={0} last collapsed={collapsed} />
+              </div>
+            )
           )}
         </div>
       </div>
@@ -1663,7 +1676,6 @@ const sampleValidity = () => {
 const AUTO_FILL_POOL = [
   {
     catalog_id: 'cat-khong-guan-001', catalog_name: 'Toko Camilan Nusantara', catalog_type: '',
-    provider_id: 'provider-toko-nusantara-001', provider_name: 'Toko Camilan Nusantara',
     validity_start: '2026-04-11', validity_end: '2027-04-11',
     resources: [{
       ...EMPTY_RESOURCE(),
@@ -1687,7 +1699,6 @@ const AUTO_FILL_POOL = [
   },
   {
     catalog_id: 'cat-chitato-001', catalog_name: 'Toko Camilan Nusantara', catalog_type: '',
-    provider_id: 'provider-toko-nusantara-001', provider_name: 'Toko Camilan Nusantara',
     validity_start: '2026-04-11', validity_end: '2027-04-11',
     resources: [{
       ...EMPTY_RESOURCE(),
@@ -1712,7 +1723,6 @@ const AUTO_FILL_POOL = [
   },
   {
     catalog_id: 'cat-lapis-legit-001', catalog_name: 'Toko Camilan Nusantara', catalog_type: '',
-    provider_id: 'provider-toko-nusantara-001', provider_name: 'Toko Camilan Nusantara',
     validity_start: '2026-04-11', validity_end: '2027-04-11',
     resources: [{
       ...EMPTY_RESOURCE(),
@@ -1737,7 +1747,6 @@ const AUTO_FILL_POOL = [
   },
   {
     catalog_id: 'cat-monde-butter-001', catalog_name: 'Toko Camilan Nusantara', catalog_type: '',
-    provider_id: 'provider-toko-nusantara-001', provider_name: 'Toko Camilan Nusantara',
     validity_start: '2026-04-11', validity_end: '2027-04-11',
     resources: [{
       ...EMPTY_RESOURCE(),
@@ -1761,7 +1770,6 @@ const AUTO_FILL_POOL = [
   },
   {
     catalog_id: 'cat-brownies-amanda-001', catalog_name: 'Toko Camilan Nusantara', catalog_type: '',
-    provider_id: 'provider-toko-nusantara-001', provider_name: 'Toko Camilan Nusantara',
     validity_start: '2026-04-11', validity_end: '2027-04-11',
     resources: [{
       ...EMPTY_RESOURCE(),
@@ -1999,7 +2007,7 @@ function PublishPage({ onNav }) {
     setForm({
       ...seed,
       ...sampleValidity(),
-      ...(ownProvider ? { provider_id: ownProvider.id, provider_name: ownProvider.name } : {}),
+      provider_id: ownProvider?.id || '', provider_name: ownProvider?.name || '',
       catalog_id: uid(seed.catalog_id),
       resources: seed.resources.map(r => ({ ...r, id: uid(r.id) })),
       offers: seed.offers.map(o => ({
@@ -2816,10 +2824,11 @@ function DirectionLabel({ direction }) {
 }
 
 // Collapsible JSON tree: click the ▸/▾ toggle (or the collapsed summary) on
-// any object or array to fold it. Everything starts expanded.
-function JsonNode({ name, value, depth, last }) {
+// any object or array to fold it. Everything starts expanded, unless
+// `collapsed` is set: then only the root is open.
+function JsonNode({ name, value, depth, last, collapsed }) {
   const { t } = useI18n()
-  const [open, setOpen] = useState(true)
+  const [open, setOpen] = useState(!(collapsed && depth > 0))
   const isArr = Array.isArray(value)
   const isObj = value !== null && typeof value === 'object'
   const comma = last ? '' : ','
@@ -2864,7 +2873,7 @@ function JsonNode({ name, value, depth, last }) {
     <div style={indent}>
       <div>{toggler}{label}<span className="text-slate-400">{openCh}</span></div>
       {entries.map(([k, v], i) => (
-        <JsonNode key={k} name={isArr ? undefined : k} value={v} depth={depth + 1} last={i === entries.length - 1} />
+        <JsonNode key={k} name={isArr ? undefined : k} value={v} depth={depth + 1} last={i === entries.length - 1} collapsed={collapsed} />
       ))}
       <div><span className="text-slate-400">{closeCh}</span><span className="text-slate-500">{comma}</span></div>
     </div>
@@ -3602,19 +3611,15 @@ function CatalogsPage({ onNav }) {
 const CATALOG_AUTOFILL_POOL = [
   {
     id: 'cat-outdoor-gear', name: 'Outdoor Gear Store', short_desc: 'Camping, hiking & adventure equipment',
-    provider_id: 'provider-venky-bazaar', provider_name: 'Venky Bazaar'
   },
   {
     id: 'cat-indonesian-snacks', name: 'Toko Camilan Nusantara', short_desc: 'Authentic Indonesian biscuits, chips & sweets',
-    provider_id: 'provider-toko-nusantara', provider_name: 'Toko Nusantara'
   },
   {
     id: 'cat-electronics', name: 'Tech Essentials Hub', short_desc: 'Gadgets, accessories and consumer electronics',
-    provider_id: 'provider-techmart', provider_name: 'TechMart'
   },
   {
     id: 'cat-apparel', name: 'FashionForward Apparel', short_desc: 'Trendy clothing for men and women',
-    provider_id: 'provider-fashionco', provider_name: 'FashionCo'
   },
 ]
 let _catalogFillIdx = 0
@@ -3649,7 +3654,7 @@ function CreateCatalogPage({ onNav }) {
     setForm(f => ({
       crc: f.crc,
       ...seed,
-      ...(ownProvider ? { provider_id: ownProvider.id, provider_name: ownProvider.name } : {}),
+      provider_id: ownProvider?.id || '', provider_name: ownProvider?.name || '',
       id: `${seed.id}-${suffix}`, validity_start: start, validity_end: end,
     }))
   }

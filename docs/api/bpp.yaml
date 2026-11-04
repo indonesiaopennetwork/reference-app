@@ -464,8 +464,9 @@ definitions:
         type: string
       provider:
         description: |-
-          The seller's own provider is always used: id must be present but is
-          ignored; descriptor.name becomes the provider's display name.
+          The seller's own provider is always used: id and descriptor.name must
+          be present but are ignored. The provider's display name is the
+          business name given at registration (POST /api/v1/auth/bootstrap).
         properties:
           descriptor:
             properties:
@@ -1876,11 +1877,11 @@ paths:
     post:
       consumes:
       - application/json
-      description: Upserts the catalog's metadata (not its products or offers). Also
-        upserts the seller's own provider with display name provider.descriptor.name
-        (provider.id is ignored). If the seller doesn't own the catalog id and that
-        id exists in any state, including deleted (retired), the call fails with 409.
-        A non-empty crc replaces the catalog's CRC.
+      description: Upserts the catalog's metadata (not its products or offers) under
+        the seller's own provider; provider.id and provider.descriptor.name are ignored
+        and the provider's name is not changed. If the seller doesn't own the catalog
+        id and that id exists in any state, including deleted (retired), the call
+        fails with 409. A non-empty crc replaces the catalog's CRC.
       operationId: createCatalog
       parameters:
       - description: Catalog metadata
