@@ -1676,7 +1676,6 @@ const sampleValidity = () => {
 const AUTO_FILL_POOL = [
   {
     catalog_id: 'cat-khong-guan-001', catalog_name: 'Toko Camilan Nusantara', catalog_type: '',
-    provider_id: 'provider-toko-nusantara-001', provider_name: 'Toko Camilan Nusantara',
     validity_start: '2026-04-11', validity_end: '2027-04-11',
     resources: [{
       ...EMPTY_RESOURCE(),
@@ -1700,7 +1699,6 @@ const AUTO_FILL_POOL = [
   },
   {
     catalog_id: 'cat-chitato-001', catalog_name: 'Toko Camilan Nusantara', catalog_type: '',
-    provider_id: 'provider-toko-nusantara-001', provider_name: 'Toko Camilan Nusantara',
     validity_start: '2026-04-11', validity_end: '2027-04-11',
     resources: [{
       ...EMPTY_RESOURCE(),
@@ -1725,7 +1723,6 @@ const AUTO_FILL_POOL = [
   },
   {
     catalog_id: 'cat-lapis-legit-001', catalog_name: 'Toko Camilan Nusantara', catalog_type: '',
-    provider_id: 'provider-toko-nusantara-001', provider_name: 'Toko Camilan Nusantara',
     validity_start: '2026-04-11', validity_end: '2027-04-11',
     resources: [{
       ...EMPTY_RESOURCE(),
@@ -1750,7 +1747,6 @@ const AUTO_FILL_POOL = [
   },
   {
     catalog_id: 'cat-monde-butter-001', catalog_name: 'Toko Camilan Nusantara', catalog_type: '',
-    provider_id: 'provider-toko-nusantara-001', provider_name: 'Toko Camilan Nusantara',
     validity_start: '2026-04-11', validity_end: '2027-04-11',
     resources: [{
       ...EMPTY_RESOURCE(),
@@ -1774,7 +1770,6 @@ const AUTO_FILL_POOL = [
   },
   {
     catalog_id: 'cat-brownies-amanda-001', catalog_name: 'Toko Camilan Nusantara', catalog_type: '',
-    provider_id: 'provider-toko-nusantara-001', provider_name: 'Toko Camilan Nusantara',
     validity_start: '2026-04-11', validity_end: '2027-04-11',
     resources: [{
       ...EMPTY_RESOURCE(),
@@ -2012,7 +2007,7 @@ function PublishPage({ onNav }) {
     setForm({
       ...seed,
       ...sampleValidity(),
-      ...(ownProvider ? { provider_id: ownProvider.id, provider_name: ownProvider.name } : {}),
+      provider_id: ownProvider?.id || '', provider_name: ownProvider?.name || '',
       catalog_id: uid(seed.catalog_id),
       resources: seed.resources.map(r => ({ ...r, id: uid(r.id) })),
       offers: seed.offers.map(o => ({
@@ -3616,19 +3611,15 @@ function CatalogsPage({ onNav }) {
 const CATALOG_AUTOFILL_POOL = [
   {
     id: 'cat-outdoor-gear', name: 'Outdoor Gear Store', short_desc: 'Camping, hiking & adventure equipment',
-    provider_id: 'provider-venky-bazaar', provider_name: 'Venky Bazaar'
   },
   {
     id: 'cat-indonesian-snacks', name: 'Toko Camilan Nusantara', short_desc: 'Authentic Indonesian biscuits, chips & sweets',
-    provider_id: 'provider-toko-nusantara', provider_name: 'Toko Nusantara'
   },
   {
     id: 'cat-electronics', name: 'Tech Essentials Hub', short_desc: 'Gadgets, accessories and consumer electronics',
-    provider_id: 'provider-techmart', provider_name: 'TechMart'
   },
   {
     id: 'cat-apparel', name: 'FashionForward Apparel', short_desc: 'Trendy clothing for men and women',
-    provider_id: 'provider-fashionco', provider_name: 'FashionCo'
   },
 ]
 let _catalogFillIdx = 0
@@ -3663,7 +3654,7 @@ function CreateCatalogPage({ onNav }) {
     setForm(f => ({
       crc: f.crc,
       ...seed,
-      ...(ownProvider ? { provider_id: ownProvider.id, provider_name: ownProvider.name } : {}),
+      provider_id: ownProvider?.id || '', provider_name: ownProvider?.name || '',
       id: `${seed.id}-${suffix}`, validity_start: start, validity_end: end,
     }))
   }

@@ -237,8 +237,9 @@ type CreateCatalogRequest struct {
 		ShortDesc string `json:"shortDesc"`
 		LongDesc  string `json:"longDesc"`
 	} `json:"descriptor" binding:"required"`
-	// The seller's own provider is always used: id must be present but is
-	// ignored; descriptor.name becomes the provider's display name.
+	// The seller's own provider is always used: id and descriptor.name must
+	// be present but are ignored. The provider's display name is the
+	// business name given at registration (POST /api/v1/auth/bootstrap).
 	Provider struct {
 		ID         string `json:"id"         binding:"required"`
 		Descriptor struct {
@@ -260,7 +261,7 @@ type CreateCatalogRequest struct {
 //
 //	@Summary		Create or update catalog metadata
 //	@ID			createCatalog
-//	@Description	Upserts the catalog's metadata (not its products or offers). Also upserts the seller's own provider with display name provider.descriptor.name (provider.id is ignored). If the seller doesn't own the catalog id and that id exists in any state, including deleted (retired), the call fails with 409. A non-empty crc replaces the catalog's CRC.
+//	@Description	Upserts the catalog's metadata (not its products or offers) under the seller's own provider; provider.id and provider.descriptor.name are ignored and the provider's name is not changed. If the seller doesn't own the catalog id and that id exists in any state, including deleted (retired), the call fails with 409. A non-empty crc replaces the catalog's CRC.
 //	@Tags			catalogs
 //	@Accept			json
 //	@Produce		json
@@ -311,20 +312,10 @@ func (h *Handler) HandleCreateCatalog(c *gin.Context) {
 		}
 	}
 
-	// Upsert provider -- always the caller's own, regardless of whatever
-	// provider info was submitted (a seller already has exactly one
-	// provider, created at registration; this just lets them update its
-	// display name via this form).
-	if err := q.UpsertProvider(ctx, dbsqlc.UpsertProviderParams{
-		ID:                   providerID,
-		BppID:                h.cfg.BppID,
-		DescriptorName:       req.Provider.Descriptor.Name,
-		DescriptorDocs:       json.RawMessage(`[]`),
-		DescriptorMediaFiles: json.RawMessage(`[]`),
-	}); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "upsert provider: " + err.Error()})
-		return
-	}
+	// No provider upsert: the caller's provider already exists (created at
+	// registration, and the users row references it), and its name is the
+	// business name given there -- the submitted provider info is ignored so
+	// a form value can never rename it.
 
 	// Upsert catalog.
 	if err := q.UpsertCatalog(ctx, dbsqlc.UpsertCatalogParams{
@@ -693,19 +684,11 @@ func (h *Handler) HandleAddProduct(c *gin.Context) {
 func (h *Handler) insertOffer(ctx context.Context, q *dbsqlc.Queries, catalogID, providerID string, offer *catalog.Offer) error {
 	bppID := h.cfg.BppID
 
-	// Upsert offer provider if provided -- forced to the caller's own
-	// provider regardless of what ID was submitted. UpsertProvider is an
-	// upsert keyed only on (id, bpp_id); trusting a client-supplied ID here
-	// would let any seller silently rename another seller's provider.
+	// Link the offer's provider if one was provided -- always the caller's
+	// own, regardless of what was submitted. The provider row already
+	// exists (created at registration) and is not renamed here.
 	var offerProviderID *string
 	if offer.Provider != nil {
-		if err := q.UpsertProvider(ctx, dbsqlc.UpsertProviderParams{
-			ID:             providerID,
-			BppID:          bppID,
-			DescriptorName: offer.Provider.Descriptor.Name,
-		}); err != nil {
-			return fmt.Errorf("upsert offer provider: %w", err)
-		}
 		offerProviderID = strPtr(providerID)
 	}
 
@@ -1617,20 +1600,10 @@ func (h *Handler) HandleAddOffer(c *gin.Context) {
 
 	qt := dbsqlc.New(tx)
 
-	// Forced to the caller's own provider regardless of what ID was
-	// submitted -- see the identical note in HandleAddProduct.
+	// Always the caller's own provider regardless of what was submitted --
+	// see the identical note in insertOffer. Not renamed here.
 	var offerProviderID *string
 	if req.Provider != nil && req.Provider.ID != "" {
-		if err := qt.UpsertProvider(ctx, dbsqlc.UpsertProviderParams{
-			ID:                   providerID,
-			BppID:                h.cfg.BppID,
-			DescriptorName:       req.Provider.Descriptor.Name,
-			DescriptorDocs:       json.RawMessage(`[]`),
-			DescriptorMediaFiles: json.RawMessage(`[]`),
-		}); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "upsert provider: " + err.Error()})
-			return
-		}
 		offerProviderID = strPtr(providerID)
 	}
 
