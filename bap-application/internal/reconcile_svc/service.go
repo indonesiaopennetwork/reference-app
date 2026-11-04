@@ -793,7 +793,42 @@ func (s *Service) replyContext(in Context) Context {
 }
 
 // post sends through the onix BAP caller; a non-2xx or NACK is an error.
+//
+// Retries once, after a short delay, specifically when the BPP's reply looks
+// like a known beckn-onix race: the BPP's own outbound pipeline (addRoute,
+// sign, storePayload, ...) can still be mid-flight -- its storePayload step
+// hasn't finished writing the "I sent this, expect a reply" record to Redis
+// yet -- when our callback (e.g. on_reconcile) arrives and gets validated
+// against that not-yet-written record, so the BPP NACKs a perfectly real,
+// correctly-correlated reply with "no outbound signature on record". A
+// measured instance of this took 1.6s for the BPP's own send to fully
+// complete, so 2s is comfortable margin for a single retry to land after
+// that write has happened. Any other failure (including a second attempt's)
+// is returned as-is.
 func (s *Service) post(ctx context.Context, action string, body []byte) ([]byte, error) {
+	respBody, err := s.postOnce(ctx, action, body)
+	if err != nil && isUnsolicitedCallbackRace(err) {
+		select {
+		case <-time.After(2 * time.Second):
+		case <-ctx.Done():
+			return respBody, err
+		}
+		respBody, err = s.postOnce(ctx, action, body)
+	}
+	return respBody, err
+}
+
+// isUnsolicitedCallbackRace reports whether err is beckn-onix's
+// AUT_SIGNATURE_INVALID "no outbound signature on record ... callback may be
+// unsolicited or entry expired" failure -- see post's doc comment.
+func isUnsolicitedCallbackRace(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "AUT_SIGNATURE_INVALID") && strings.Contains(msg, "no outbound signature on record")
+}
+
+// postOnce makes a single attempt to send through the onix BAP caller; a
+// non-2xx or NACK is an error.
+func (s *Service) postOnce(ctx context.Context, action string, body []byte) ([]byte, error) {
 	base := strings.TrimRight(s.cfg.BapCallerURL, "/")
 	if base == "" {
 		return nil, errors.New("BAP_CALLER_URL is not set")
