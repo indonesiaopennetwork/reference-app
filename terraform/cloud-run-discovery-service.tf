@@ -67,8 +67,13 @@ resource "google_cloud_run_v2_service" "discovery_service" {
         }
       }
       env {
-        name  = "CATALOG_INDEX_URLS"
-        value = "https://${var.bpp_domain}/index/becknCatalogs.index.json"
+        # Our own bpp's index first, then any other Provider Nodes' indexes
+        # (var.extra_catalog_index_urls), comma-separated.
+        name = "CATALOG_INDEX_URLS"
+        value = join(",", concat(
+          ["https://${var.bpp_domain}/index/becknCatalogs.index.json"],
+          var.extra_catalog_index_urls,
+        ))
       }
       env {
         name  = "SUBSCRIBER_ID"

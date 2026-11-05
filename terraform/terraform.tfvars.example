@@ -95,3 +95,9 @@ region     = "asia-southeast1"
 # commission_type                      = "PERCENT"        # or AMOUNT (per unit)
 # commission_value                     = 3
 # commission_applies_to                = "ITEM_TOTAL"     # or ORDER_TOTAL
+
+# extra_catalog_index_urls is optional -- other sellers' catalog indexes for
+# discovery-service to crawl alongside this deployment's own bpp index.
+# extra_catalog_index_urls = [
+#   "https://ion-integration.services.indociti.com/beckn/index/becknCatalogs.index.json",
+# ]

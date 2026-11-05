@@ -207,6 +207,12 @@ variable "discovery_service_subscriber_uri" {
   default     = ""
 }
 
+variable "extra_catalog_index_urls" {
+  description = "Other Provider Nodes' catalog index URLs for discovery-service to crawl, in addition to this deployment's own bpp index. Each must be a public https URL serving a becknCatalogs.index.json."
+  type        = list(string)
+  default     = []
+}
+
 # --- bpp / DeDi static-file custom domain ---
 # The domain must already be verified in Search Console under the account
 # that owns this project before google_cloud_run_domain_mapping will apply
