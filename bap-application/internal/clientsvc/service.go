@@ -1498,48 +1498,6 @@ func (s *ClientService) Rate(ctx context.Context, req *ClientRateRequest) error 
 	return s.sendToBPP(ctx, s.cfg.BapCallerURL, "rate", txnID, msgID, s.cfg.NetworkID, becknReq)
 }
 
-// Support sends a Beckn support request.
-func (s *ClientService) Support(ctx context.Context, req *ClientSupportRequest) error {
-	txnID, _ := uuid.Parse(req.TransactionID)
-	msgID := uuid.New()
-	q := dbsqlc.New(s.pool)
-
-	txn, err := q.GetTransaction(ctx, txnID)
-	if err != nil {
-		return fmt.Errorf("transaction %s not found: %w", req.TransactionID, err)
-	}
-	bppID, bppURI := s.resolveBPP(txn)
-
-	orderID := req.OrderID
-	if orderID == "" {
-		orderID = req.TransactionID
-	}
-	msgJSON, _ := json.Marshal(map[string]interface{}{
-		"support": map[string]interface{}{
-			"orderId": orderID,
-			"descriptor": map[string]string{
-				"shortDesc": req.Description,
-			},
-		},
-	})
-	becknReq := BecknRequest{
-		Context: s.newContext("support", req.TransactionID, msgID.String(), bppID, bppURI),
-		Message: json.RawMessage(msgJSON),
-	}
-	err = q.UpsertTransaction(ctx, dbsqlc.UpsertTransactionParams{
-		TransactionID: txnID,
-		BapID:         s.cfg.BapID,
-		NetworkID:     &s.cfg.NetworkID,
-		BppID:         &bppID,
-		BppUri:        &bppURI,
-		Status:        dbsqlc.TransactionStatusSUPPORTSENT,
-	})
-	if err != nil {
-		return err
-	}
-	return s.sendToBPP(ctx, s.cfg.BapCallerURL, "support", txnID, msgID, s.cfg.NetworkID, becknReq)
-}
-
 // resolveBPP returns the BPP ID and URI for a transaction, falling back to server config.
 func (s *ClientService) resolveBPP(txn dbsqlc.GetTransactionRow) (bppID, bppURI string) {
 	bppID = s.cfg.BppID

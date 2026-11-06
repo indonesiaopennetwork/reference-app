@@ -147,9 +147,3 @@ type ClientRateRequest struct {
 	RatingInputs  []RatingInput `json:"ratingInputs" binding:"required"`
 }
 
-// ClientSupportRequest — frontend raises a support request.
-type ClientSupportRequest struct {
-	TransactionID string `json:"transaction_id" binding:"required" format:"uuid"`
-	OrderID       string `json:"orderId,omitempty"`
-	Description   string `json:"description,omitempty"`
-}

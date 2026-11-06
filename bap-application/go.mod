@@ -9,6 +9,7 @@ require (
 	github.com/jackc/pgx/v5 v5.9.1
 	github.com/joho/godotenv v1.5.1
 	github.com/remiges-tech/logharbour v0.25.0
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.1
 	golang.org/x/crypto v0.43.0
 )
 

@@ -11,6 +11,7 @@ import (
 	"github.com/ion/winroom/bap/internal/clientsvc"
 	"github.com/ion/winroom/bap/internal/config"
 	"github.com/ion/winroom/bap/internal/discoverwait"
+	"github.com/ion/winroom/bap/internal/grievancesvc"
 	oncancelsvc "github.com/ion/winroom/bap/internal/on_cancel_svc"
 	onconfirmsvc "github.com/ion/winroom/bap/internal/on_confirm_svc"
 	ondiscoversvc "github.com/ion/winroom/bap/internal/on_discover_svc"
@@ -18,7 +19,6 @@ import (
 	onratesvc "github.com/ion/winroom/bap/internal/on_rate_svc"
 	onselectsvc "github.com/ion/winroom/bap/internal/on_select_svc"
 	onstatussvc "github.com/ion/winroom/bap/internal/on_status_svc"
-	onsupportsvc "github.com/ion/winroom/bap/internal/on_support_svc"
 	onupdatesvc "github.com/ion/winroom/bap/internal/on_update_svc"
 	reconcilesvc "github.com/ion/winroom/bap/internal/reconcile_svc"
 )
@@ -50,6 +50,8 @@ func RegisterRoutes(r *gin.Engine, pool *pgxpool.Pool, cfg *config.Config, lh *l
 	// sides for the process lifetime.
 	discoverRegistry := discoverwait.NewRegistry()
 
+	grievanceH := grievancesvc.NewHandler(pool, cfg, lh)
+
 	// Beckn webhook endpoints — BPP (via ONIX adapter) POSTs on_* callbacks here.
 	webhook := r.Group("/api/webhook")
 	{
@@ -77,8 +79,9 @@ func RegisterRoutes(r *gin.Engine, pool *pgxpool.Pool, cfg *config.Config, lh *l
 		onRateH := onratesvc.NewHandler(pool, cfg, lh)
 		webhook.POST("/on_rate", onRateH.Handle)
 
-		onSupportH := onsupportsvc.NewHandler(pool, cfg, lh)
-		webhook.POST("/on_support", onSupportH.Handle)
+		// on_support carries the seller's grievance events (ION Grievance
+		// v1) -- see internal/grievancesvc.
+		webhook.POST("/on_support", grievanceH.HandleOnSupport)
 
 		// /reconcile — a BPP's settlement batch (ion-specs
 		// core/api/v2.0.0/ion-additional.yaml), answered with /on_reconcile; and
@@ -117,9 +120,13 @@ func RegisterRoutes(r *gin.Engine, pool *pgxpool.Pool, cfg *config.Config, lh *l
 		v1.POST("/return-items", clientH.HandleReturnItems)
 		v1.POST("/update", clientH.HandleUpdate)
 		v1.POST("/rate", clientH.HandleRate)
-		v1.POST("/support", clientH.HandleSupport)
 		v1.GET("/orders", clientH.HandleListOrders)
 		v1.GET("/orders/:id", clientH.HandleGetOrder)
 		v1.GET("/messages", clientH.HandleListMessages)
+
+		// Order-level grievances (replaces the old POST /support). The
+		// goodwill refund is an operator action, open like the
+		// reconciliation routes above.
+		grievanceH.Register(v1, r.Group("/api/v1/admin"))
 	}
 }

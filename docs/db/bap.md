@@ -2,14 +2,18 @@
 
 ## Tables
 
-| Name                                                      | Columns | Comment                                                                                                                                                        | Type       |
-| --------------------------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
-| [public.bap_identities](#publicbap_identities)         | 6       | Registered BAP subscribers. Seeded at startup from BAP_ID / BAP_URI env vars.                                                                                  | BASE TABLE |
-| [public.transactions](#publictransactions)             | 9       | One row per Beckn transactionId initiated by this BAP. Status advances as select → init → confirm actions progress.                                            | BASE TABLE |
-| [public.contract_snapshots](#publiccontract_snapshots) | 7       | Stores the full contract JSON received from the BPP at each on_* callback. The BAP uses this to track the evolving contract state through the Beckn lifecycle. | BASE TABLE |
-| [public.beckn_message_log](#publicbeckn_message_log)   | 17      | Immutable audit log of all Beckn protocol messages received or sent by this BAP.                                                                               | BASE TABLE |
-| [public.reconciliations](#publicreconciliations)       | 15      |                                                                                                                                                                | BASE TABLE |
-| [public.discover_requests](#publicdiscover_requests)   | 3       |                                                                                                                                                                | BASE TABLE |
+| Name                                                            | Columns | Comment                                                                                                                                                        | Type       |
+| --------------------------------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| [public.bap_identities](#publicbap_identities)               | 6       | Registered BAP subscribers. Seeded at startup from BAP_ID / BAP_URI env vars.                                                                                  | BASE TABLE |
+| [public.transactions](#publictransactions)                   | 9       | One row per Beckn transactionId initiated by this BAP. Status advances as select → init → confirm actions progress.                                            | BASE TABLE |
+| [public.contract_snapshots](#publiccontract_snapshots)       | 7       | Stores the full contract JSON received from the BPP at each on_* callback. The BAP uses this to track the evolving contract state through the Beckn lifecycle. | BASE TABLE |
+| [public.beckn_message_log](#publicbeckn_message_log)         | 17      | Immutable audit log of all Beckn protocol messages received or sent by this BAP.                                                                               | BASE TABLE |
+| [public.reconciliations](#publicreconciliations)             | 16      |                                                                                                                                                                | BASE TABLE |
+| [public.discover_requests](#publicdiscover_requests)         | 3       |                                                                                                                                                                | BASE TABLE |
+| [public.grievances](#publicgrievances)                       | 27      | Order-level grievances (ION Grievance v1, /support and /on_support): current state, rebuilt from grievance_events.                                             | BASE TABLE |
+| [public.grievance_events](#publicgrievance_events)           | 12      | Every grievance event (IONGrievance) received or sent; the record grievances, grievance_resolutions and grievance_executions are rebuilt from.                 | BASE TABLE |
+| [public.grievance_resolutions](#publicgrievance_resolutions) | 10      | Resolution versions proposed for a grievance, each with the decision on it.                                                                                    | BASE TABLE |
+| [public.grievance_executions](#publicgrievance_executions)   | 7       | Executed resolution actions, with their execution references.                                                                                                  | BASE TABLE |
 
 ## Stored procedures and functions
 
@@ -73,6 +77,9 @@ erDiagram
 
 "public.transactions" }o--|| "public.bap_identities" : "FOREIGN KEY (bap_id) REFERENCES bap_identities(bap_id)"
 "public.contract_snapshots" }o--|| "public.transactions" : "FOREIGN KEY (transaction_id) REFERENCES transactions(transaction_id)"
+"public.grievance_events" }o--|| "public.grievances" : "FOREIGN KEY (grievance_id) REFERENCES grievances(grievance_id) ON DELETE CASCADE"
+"public.grievance_resolutions" }o--|| "public.grievances" : "FOREIGN KEY (grievance_id) REFERENCES grievances(grievance_id) ON DELETE CASCADE"
+"public.grievance_executions" }o--|| "public.grievances" : "FOREIGN KEY (grievance_id) REFERENCES grievances(grievance_id) ON DELETE CASCADE"
 
 "public.bap_identities" {
   text bap_id ""
@@ -137,11 +144,76 @@ erDiagram
   timestamp_with_time_zone updated_at ""
   text direction ""
   uuid request_message_id ""
+  text transaction_id ""
 }
 "public.discover_requests" {
   uuid transaction_id ""
   text buyer_subject ""
   timestamp_with_time_zone created_at ""
+}
+"public.grievances" {
+  text grievance_id ""
+  uuid transaction_id ""
+  text order_id ""
+  text bap_id ""
+  text bap_uri ""
+  text bpp_id ""
+  text bpp_uri ""
+  text network_id ""
+  text originating_np_id ""
+  text originating_side ""
+  text category ""
+  text description ""
+  jsonb affected ""
+  jsonb related_references ""
+  text policy_ref ""
+  text case_status ""
+  text last_event_type ""
+  timestamp_with_time_zone last_event_at ""
+  timestamp_with_time_zone opened_at ""
+  timestamp_with_time_zone acknowledged_at ""
+  timestamp_with_time_zone resolved_at ""
+  timestamp_with_time_zone closed_at ""
+  jsonb channels ""
+  timestamp_with_time_zone seen_at ""
+  text buyer_subject ""
+  timestamp_with_time_zone created_at ""
+  timestamp_with_time_zone updated_at ""
+}
+"public.grievance_events" {
+  uuid id ""
+  bigint seq ""
+  text grievance_id FK ""
+  uuid message_id ""
+  text action ""
+  text direction ""
+  text event_type ""
+  text delivery ""
+  jsonb attributes ""
+  text error ""
+  timestamp_with_time_zone occurred_at ""
+  timestamp_with_time_zone created_at ""
+}
+"public.grievance_resolutions" {
+  text grievance_id FK ""
+  text proposal_id ""
+  integer version ""
+  text proposed_by_np_id ""
+  text authorization_type ""
+  jsonb resolution ""
+  text decision_result ""
+  text decided_by_np_id ""
+  timestamp_with_time_zone decided_at ""
+  text decision_reason ""
+}
+"public.grievance_executions" {
+  text grievance_id FK ""
+  text proposal_id ""
+  integer version ""
+  text action_id ""
+  text executed_by_np_id ""
+  text execution_reference ""
+  timestamp_with_time_zone completed_at ""
 }
 ```
 
@@ -431,6 +503,7 @@ erDiagram
 | updated_at         | timestamp with time zone | now()           | false    |          |         |         |
 | direction          | text                     | 'INBOUND'::text | false    |          |         |         |
 | request_message_id | uuid                     |                 | true     |          |         |         |
+| transaction_id     | text                     |                 | true     |          |         |         |
 
 ### Constraints
 
@@ -440,9 +513,11 @@ erDiagram
 
 ### Indexes
 
-| Name                 | Definition                                                                          |
-| -------------------- | ----------------------------------------------------------------------------------- |
-| reconciliations_pkey | CREATE UNIQUE INDEX reconciliations_pkey ON public.reconciliations USING btree (id) |
+| Name                                | Definition                                                                                                     |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| reconciliations_pkey                | CREATE UNIQUE INDEX reconciliations_pkey ON public.reconciliations USING btree (id)                            |
+| idx_reconciliations_transaction     | CREATE INDEX idx_reconciliations_transaction ON public.reconciliations USING btree (direction, transaction_id) |
+| idx_reconciliations_request_message | CREATE INDEX idx_reconciliations_request_message ON public.reconciliations USING btree (request_message_id)    |
 
 ### Relations
 
@@ -465,6 +540,7 @@ erDiagram
   timestamp_with_time_zone updated_at ""
   text direction ""
   uuid request_message_id ""
+  text transaction_id ""
 }
 ```
 
@@ -502,6 +578,395 @@ erDiagram
   uuid transaction_id ""
   text buyer_subject ""
   timestamp_with_time_zone created_at ""
+}
+```
+
+---
+
+## public.grievances
+
+### Description
+
+Order-level grievances (ION Grievance v1, /support and /on_support): current state, rebuilt from grievance_events.
+
+### Columns
+
+| Name               | Type                     | Default     | Nullable | Children                                                                                                                                                                            | Parents | Comment |
+| ------------------ | ------------------------ | ----------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------- |
+| grievance_id       | text                     |             | false    | [public.grievance_events](#publicgrievance_events) [public.grievance_resolutions](#publicgrievance_resolutions) [public.grievance_executions](#publicgrievance_executions) |         |         |
+| transaction_id     | uuid                     |             | false    |                                                                                                                                                                                     |         |         |
+| order_id           | text                     |             | false    |                                                                                                                                                                                     |         |         |
+| bap_id             | text                     |             | false    |                                                                                                                                                                                     |         |         |
+| bap_uri            | text                     |             | false    |                                                                                                                                                                                     |         |         |
+| bpp_id             | text                     |             | false    |                                                                                                                                                                                     |         |         |
+| bpp_uri            | text                     |             | false    |                                                                                                                                                                                     |         |         |
+| network_id         | text                     |             | true     |                                                                                                                                                                                     |         |         |
+| originating_np_id  | text                     |             | false    |                                                                                                                                                                                     |         |         |
+| originating_side   | text                     |             | false    |                                                                                                                                                                                     |         |         |
+| category           | text                     |             | false    |                                                                                                                                                                                     |         |         |
+| description        | text                     |             | false    |                                                                                                                                                                                     |         |         |
+| affected           | jsonb                    | '[]'::jsonb | false    |                                                                                                                                                                                     |         |         |
+| related_references | jsonb                    | '[]'::jsonb | false    |                                                                                                                                                                                     |         |         |
+| policy_ref         | text                     |             | false    |                                                                                                                                                                                     |         |         |
+| case_status        | text                     |             | false    |                                                                                                                                                                                     |         |         |
+| last_event_type    | text                     |             | false    |                                                                                                                                                                                     |         |         |
+| last_event_at      | timestamp with time zone |             | false    |                                                                                                                                                                                     |         |         |
+| opened_at          | timestamp with time zone |             | false    |                                                                                                                                                                                     |         |         |
+| acknowledged_at    | timestamp with time zone |             | true     |                                                                                                                                                                                     |         |         |
+| resolved_at        | timestamp with time zone |             | true     |                                                                                                                                                                                     |         |         |
+| closed_at          | timestamp with time zone |             | true     |                                                                                                                                                                                     |         |         |
+| channels           | jsonb                    |             | true     |                                                                                                                                                                                     |         |         |
+| seen_at            | timestamp with time zone |             | true     |                                                                                                                                                                                     |         |         |
+| buyer_subject      | text                     |             | true     |                                                                                                                                                                                     |         |         |
+| created_at         | timestamp with time zone | now()       | false    |                                                                                                                                                                                     |         |         |
+| updated_at         | timestamp with time zone | now()       | false    |                                                                                                                                                                                     |         |         |
+
+### Constraints
+
+| Name            | Type        | Definition                 |
+| --------------- | ----------- | -------------------------- |
+| grievances_pkey | PRIMARY KEY | PRIMARY KEY (grievance_id) |
+
+### Indexes
+
+| Name                       | Definition                                                                                             |
+| -------------------------- | ------------------------------------------------------------------------------------------------------ |
+| grievances_pkey            | CREATE UNIQUE INDEX grievances_pkey ON public.grievances USING btree (grievance_id)                    |
+| idx_grievances_transaction | CREATE INDEX idx_grievances_transaction ON public.grievances USING btree (transaction_id)              |
+| idx_grievances_buyer       | CREATE INDEX idx_grievances_buyer ON public.grievances USING btree (buyer_subject, last_event_at DESC) |
+
+### Relations
+
+```mermaid
+erDiagram
+
+"public.grievance_events" }o--|| "public.grievances" : "FOREIGN KEY (grievance_id) REFERENCES grievances(grievance_id) ON DELETE CASCADE"
+"public.grievance_resolutions" }o--|| "public.grievances" : "FOREIGN KEY (grievance_id) REFERENCES grievances(grievance_id) ON DELETE CASCADE"
+"public.grievance_executions" }o--|| "public.grievances" : "FOREIGN KEY (grievance_id) REFERENCES grievances(grievance_id) ON DELETE CASCADE"
+
+"public.grievances" {
+  text grievance_id ""
+  uuid transaction_id ""
+  text order_id ""
+  text bap_id ""
+  text bap_uri ""
+  text bpp_id ""
+  text bpp_uri ""
+  text network_id ""
+  text originating_np_id ""
+  text originating_side ""
+  text category ""
+  text description ""
+  jsonb affected ""
+  jsonb related_references ""
+  text policy_ref ""
+  text case_status ""
+  text last_event_type ""
+  timestamp_with_time_zone last_event_at ""
+  timestamp_with_time_zone opened_at ""
+  timestamp_with_time_zone acknowledged_at ""
+  timestamp_with_time_zone resolved_at ""
+  timestamp_with_time_zone closed_at ""
+  jsonb channels ""
+  timestamp_with_time_zone seen_at ""
+  text buyer_subject ""
+  timestamp_with_time_zone created_at ""
+  timestamp_with_time_zone updated_at ""
+}
+"public.grievance_events" {
+  uuid id ""
+  bigint seq ""
+  text grievance_id FK ""
+  uuid message_id ""
+  text action ""
+  text direction ""
+  text event_type ""
+  text delivery ""
+  jsonb attributes ""
+  text error ""
+  timestamp_with_time_zone occurred_at ""
+  timestamp_with_time_zone created_at ""
+}
+"public.grievance_resolutions" {
+  text grievance_id FK ""
+  text proposal_id ""
+  integer version ""
+  text proposed_by_np_id ""
+  text authorization_type ""
+  jsonb resolution ""
+  text decision_result ""
+  text decided_by_np_id ""
+  timestamp_with_time_zone decided_at ""
+  text decision_reason ""
+}
+"public.grievance_executions" {
+  text grievance_id FK ""
+  text proposal_id ""
+  integer version ""
+  text action_id ""
+  text executed_by_np_id ""
+  text execution_reference ""
+  timestamp_with_time_zone completed_at ""
+}
+```
+
+---
+
+## public.grievance_events
+
+### Description
+
+Every grievance event (IONGrievance) received or sent; the record grievances, grievance_resolutions and grievance_executions are rebuilt from.
+
+### Columns
+
+| Name         | Type                     | Default | Nullable | Children | Parents                                   | Comment |
+| ------------ | ------------------------ | ------- | -------- | -------- | ----------------------------------------- | ------- |
+| id           | uuid                     |         | false    |          |                                           |         |
+| seq          | bigint                   |         | false    |          |                                           |         |
+| grievance_id | text                     |         | false    |          | [public.grievances](#publicgrievances) |         |
+| message_id   | uuid                     |         | false    |          |                                           |         |
+| action       | text                     |         | false    |          |                                           |         |
+| direction    | text                     |         | false    |          |                                           |         |
+| event_type   | text                     |         | false    |          |                                           |         |
+| delivery     | text                     |         | false    |          |                                           |         |
+| attributes   | jsonb                    |         | false    |          |                                           |         |
+| error        | text                     |         | true     |          |                                           |         |
+| occurred_at  | timestamp with time zone |         | false    |          |                                           |         |
+| created_at   | timestamp with time zone | now()   | false    |          |                                           |         |
+
+### Constraints
+
+| Name                               | Type        | Definition                                                                                   |
+| ---------------------------------- | ----------- | -------------------------------------------------------------------------------------------- |
+| grievance_events_action_check      | CHECK       | CHECK ((action = ANY (ARRAY['support'::text, 'on_support'::text])))                          |
+| grievance_events_delivery_check    | CHECK       | CHECK ((delivery = ANY (ARRAY['SENDING'::text, 'ACK'::text, 'NACK'::text, 'FAILED'::text]))) |
+| grievance_events_direction_check   | CHECK       | CHECK ((direction = ANY (ARRAY['INBOUND'::text, 'OUTBOUND'::text])))                         |
+| grievance_events_grievance_id_fkey | FOREIGN KEY | FOREIGN KEY (grievance_id) REFERENCES grievances(grievance_id) ON DELETE CASCADE             |
+| grievance_events_pkey              | PRIMARY KEY | PRIMARY KEY (id)                                                                             |
+
+### Indexes
+
+| Name                           | Definition                                                                                             |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| grievance_events_pkey          | CREATE UNIQUE INDEX grievance_events_pkey ON public.grievance_events USING btree (id)                  |
+| idx_grievance_events_grievance | CREATE INDEX idx_grievance_events_grievance ON public.grievance_events USING btree (grievance_id, seq) |
+
+### Relations
+
+```mermaid
+erDiagram
+
+"public.grievance_events" }o--|| "public.grievances" : "FOREIGN KEY (grievance_id) REFERENCES grievances(grievance_id) ON DELETE CASCADE"
+
+"public.grievance_events" {
+  uuid id ""
+  bigint seq ""
+  text grievance_id FK ""
+  uuid message_id ""
+  text action ""
+  text direction ""
+  text event_type ""
+  text delivery ""
+  jsonb attributes ""
+  text error ""
+  timestamp_with_time_zone occurred_at ""
+  timestamp_with_time_zone created_at ""
+}
+"public.grievances" {
+  text grievance_id ""
+  uuid transaction_id ""
+  text order_id ""
+  text bap_id ""
+  text bap_uri ""
+  text bpp_id ""
+  text bpp_uri ""
+  text network_id ""
+  text originating_np_id ""
+  text originating_side ""
+  text category ""
+  text description ""
+  jsonb affected ""
+  jsonb related_references ""
+  text policy_ref ""
+  text case_status ""
+  text last_event_type ""
+  timestamp_with_time_zone last_event_at ""
+  timestamp_with_time_zone opened_at ""
+  timestamp_with_time_zone acknowledged_at ""
+  timestamp_with_time_zone resolved_at ""
+  timestamp_with_time_zone closed_at ""
+  jsonb channels ""
+  timestamp_with_time_zone seen_at ""
+  text buyer_subject ""
+  timestamp_with_time_zone created_at ""
+  timestamp_with_time_zone updated_at ""
+}
+```
+
+---
+
+## public.grievance_resolutions
+
+### Description
+
+Resolution versions proposed for a grievance, each with the decision on it.
+
+### Columns
+
+| Name               | Type                     | Default | Nullable | Children | Parents                                   | Comment |
+| ------------------ | ------------------------ | ------- | -------- | -------- | ----------------------------------------- | ------- |
+| grievance_id       | text                     |         | false    |          | [public.grievances](#publicgrievances) |         |
+| proposal_id        | text                     |         | false    |          |                                           |         |
+| version            | integer                  |         | false    |          |                                           |         |
+| proposed_by_np_id  | text                     |         | false    |          |                                           |         |
+| authorization_type | text                     |         | false    |          |                                           |         |
+| resolution         | jsonb                    |         | false    |          |                                           |         |
+| decision_result    | text                     |         | true     |          |                                           |         |
+| decided_by_np_id   | text                     |         | true     |          |                                           |         |
+| decided_at         | timestamp with time zone |         | true     |          |                                           |         |
+| decision_reason    | text                     |         | true     |          |                                           |         |
+
+### Constraints
+
+| Name                                    | Type        | Definition                                                                       |
+| --------------------------------------- | ----------- | -------------------------------------------------------------------------------- |
+| grievance_resolutions_grievance_id_fkey | FOREIGN KEY | FOREIGN KEY (grievance_id) REFERENCES grievances(grievance_id) ON DELETE CASCADE |
+| grievance_resolutions_pkey              | PRIMARY KEY | PRIMARY KEY (grievance_id, proposal_id, version)                                 |
+
+### Indexes
+
+| Name                       | Definition                                                                                                                      |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| grievance_resolutions_pkey | CREATE UNIQUE INDEX grievance_resolutions_pkey ON public.grievance_resolutions USING btree (grievance_id, proposal_id, version) |
+
+### Relations
+
+```mermaid
+erDiagram
+
+"public.grievance_resolutions" }o--|| "public.grievances" : "FOREIGN KEY (grievance_id) REFERENCES grievances(grievance_id) ON DELETE CASCADE"
+
+"public.grievance_resolutions" {
+  text grievance_id FK ""
+  text proposal_id ""
+  integer version ""
+  text proposed_by_np_id ""
+  text authorization_type ""
+  jsonb resolution ""
+  text decision_result ""
+  text decided_by_np_id ""
+  timestamp_with_time_zone decided_at ""
+  text decision_reason ""
+}
+"public.grievances" {
+  text grievance_id ""
+  uuid transaction_id ""
+  text order_id ""
+  text bap_id ""
+  text bap_uri ""
+  text bpp_id ""
+  text bpp_uri ""
+  text network_id ""
+  text originating_np_id ""
+  text originating_side ""
+  text category ""
+  text description ""
+  jsonb affected ""
+  jsonb related_references ""
+  text policy_ref ""
+  text case_status ""
+  text last_event_type ""
+  timestamp_with_time_zone last_event_at ""
+  timestamp_with_time_zone opened_at ""
+  timestamp_with_time_zone acknowledged_at ""
+  timestamp_with_time_zone resolved_at ""
+  timestamp_with_time_zone closed_at ""
+  jsonb channels ""
+  timestamp_with_time_zone seen_at ""
+  text buyer_subject ""
+  timestamp_with_time_zone created_at ""
+  timestamp_with_time_zone updated_at ""
+}
+```
+
+---
+
+## public.grievance_executions
+
+### Description
+
+Executed resolution actions, with their execution references.
+
+### Columns
+
+| Name                | Type                     | Default | Nullable | Children | Parents                                   | Comment |
+| ------------------- | ------------------------ | ------- | -------- | -------- | ----------------------------------------- | ------- |
+| grievance_id        | text                     |         | false    |          | [public.grievances](#publicgrievances) |         |
+| proposal_id         | text                     |         | false    |          |                                           |         |
+| version             | integer                  |         | false    |          |                                           |         |
+| action_id           | text                     |         | false    |          |                                           |         |
+| executed_by_np_id   | text                     |         | false    |          |                                           |         |
+| execution_reference | text                     |         | true     |          |                                           |         |
+| completed_at        | timestamp with time zone |         | false    |          |                                           |         |
+
+### Constraints
+
+| Name                                   | Type        | Definition                                                                       |
+| -------------------------------------- | ----------- | -------------------------------------------------------------------------------- |
+| grievance_executions_grievance_id_fkey | FOREIGN KEY | FOREIGN KEY (grievance_id) REFERENCES grievances(grievance_id) ON DELETE CASCADE |
+| grievance_executions_pkey              | PRIMARY KEY | PRIMARY KEY (grievance_id, proposal_id, version, action_id)                      |
+
+### Indexes
+
+| Name                      | Definition                                                                                                                               |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| grievance_executions_pkey | CREATE UNIQUE INDEX grievance_executions_pkey ON public.grievance_executions USING btree (grievance_id, proposal_id, version, action_id) |
+
+### Relations
+
+```mermaid
+erDiagram
+
+"public.grievance_executions" }o--|| "public.grievances" : "FOREIGN KEY (grievance_id) REFERENCES grievances(grievance_id) ON DELETE CASCADE"
+
+"public.grievance_executions" {
+  text grievance_id FK ""
+  text proposal_id ""
+  integer version ""
+  text action_id ""
+  text executed_by_np_id ""
+  text execution_reference ""
+  timestamp_with_time_zone completed_at ""
+}
+"public.grievances" {
+  text grievance_id ""
+  uuid transaction_id ""
+  text order_id ""
+  text bap_id ""
+  text bap_uri ""
+  text bpp_id ""
+  text bpp_uri ""
+  text network_id ""
+  text originating_np_id ""
+  text originating_side ""
+  text category ""
+  text description ""
+  jsonb affected ""
+  jsonb related_references ""
+  text policy_ref ""
+  text case_status ""
+  text last_event_type ""
+  timestamp_with_time_zone last_event_at ""
+  timestamp_with_time_zone opened_at ""
+  timestamp_with_time_zone acknowledged_at ""
+  timestamp_with_time_zone resolved_at ""
+  timestamp_with_time_zone closed_at ""
+  jsonb channels ""
+  timestamp_with_time_zone seen_at ""
+  text buyer_subject ""
+  timestamp_with_time_zone created_at ""
+  timestamp_with_time_zone updated_at ""
 }
 ```
 

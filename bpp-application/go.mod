@@ -10,7 +10,9 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/remiges-tech/alya v0.35.0
 	github.com/remiges-tech/logharbour v0.25.0
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.1
 	golang.org/x/crypto v0.43.0
+	golang.org/x/oauth2 v0.36.0
 )
 
 require (
@@ -76,7 +78,6 @@ require (
 	go.uber.org/zap v1.21.0 // indirect
 	golang.org/x/arch v0.3.0 // indirect
 	golang.org/x/net v0.45.0 // indirect
-	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.17.0 // indirect
 	golang.org/x/sys v0.37.0 // indirect
 	golang.org/x/text v0.30.0 // indirect

@@ -1,0 +1,16 @@
+# TEMPORARY, local only -- do not commit. Lets onix validate grievance
+# /support and /on_support before Beckn releases Support.supportAttributes
+# (PR #204) and ION publishes the Grievance pack on schema.ion.id:
+# - beckn.yaml: local ion-specs copy patched with Support.supportAttributes
+# - IONGrievance: the pack's attributes.yaml (extendedSchema_localSchemaPath
+#   looks schemas up as <@type>/<version>/attributes.yaml)
+x-grievance-schemas: &grievance-schemas
+  - ./config:/app/config
+  - /home/samarth/Desktop/ion/ion-specs/releases/release1/schema/vendored/beckn/api/v2.0.0/beckn.yaml:/app/schemas/beckn.yaml:ro
+  - /home/samarth/Desktop/ion/ion-specs/releases/release1/schema/common/Grievance/v1/attributes.yaml:/app/local-schemas/IONGrievance/v1/attributes.yaml:ro
+
+services:
+  onix-bap:
+    volumes: *grievance-schemas
+  onix-bpp:
+    volumes: *grievance-schemas

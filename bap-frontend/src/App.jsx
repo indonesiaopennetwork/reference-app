@@ -9,37 +9,14 @@ import {
   User, Phone, Home, ChevronLeft, Banknote,
   Ban, MessageSquare, RefreshCw, ThumbsUp,
   History, Wand2, ExternalLink, ChevronDown,
-  Compass, AlertCircle, Copy,
+  Compass, AlertCircle, Copy, LifeBuoy,
 } from 'lucide-react';
 import Tour from './Tour.jsx';
 import { useI18n, rich, LanguageToggle, tNow, localeNow } from './i18n.jsx';
 import { captureTokenFromUrl, getToken, getIdToken, getProviderId, clearToken, redirectToLogin, basePath } from './auth.js';
 import UserProfileMenu from './UserProfileMenu.jsx';
-
-// BPP target, network ID, and BAP identity are all server-side config (BAP .env).
-// The frontend only needs the API base path.
-const API_BASE = `${basePath}api/v1`;
-
-// Attaches the buyer's bearer token (if any) to every API call. Auth is a
-// frontend-only gate here (see App()'s authReady check) -- the backend
-// doesn't hard-reject a missing/invalid token, so a 401 should never
-// happen in normal use, but we still recover the same way bpp-frontend
-// does if it ever does.
-async function apiFetch(path, opts = {}) {
-  const token = getToken();
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...opts,
-    headers: {
-      ...opts.headers,
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-  });
-  if (res.status === 401) {
-    clearToken();
-    redirectToLogin();
-  }
-  return res;
-}
+import { apiFetch, fmtIDR, useGrievances } from './api.js';
+import { ReportProblem, OrderGrievances, GrievanceList, GrievanceDetail } from './Grievances.jsx';
 
 /* ─────────────────────────── helpers ────────────────────────────────────── */
 
@@ -645,13 +622,11 @@ function StarRating({ value, onChange }) {
   );
 }
 
-function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoading, onInit, onConfirm, onDone, onStatusChange, onRate, onSupport, onRequestStatus, onRemoveItems }) {
+function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoading, onInit, onConfirm, onDone, onStatusChange, onRate, onOpenGrievance, onRequestStatus, onRemoveItems }) {
   const { t } = useI18n();
   const [ratingValue, setRatingValue] = useState(0);
   const [ratingFeedback, setRatingFeedback] = useState('');
   const [showRatingForm, setShowRatingForm] = useState(false);
-  const [showSupportForm, setShowSupportForm] = useState(false);
-  const [supportDesc, setSupportDesc] = useState('');
   const status = transaction?.status;
 
   // Parse BPP-confirmed quote from on_select
@@ -958,14 +933,13 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
               </button>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <button onClick={() => { setShowRatingForm(v => !v); setShowSupportForm(false); }}
+                <button onClick={() => setShowRatingForm(v => !v)}
                   className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-semibold bg-amber-500/10 text-amber-300 border border-amber-500/20 hover:bg-amber-500/20 transition-all">
                   <Star className="w-3.5 h-3.5" /> {t('Rate Order')}
                 </button>
-                <button onClick={() => { setShowSupportForm(v => !v); setShowRatingForm(false); }}
-                  className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-semibold bg-purple-500/10 text-purple-300 border border-purple-500/20 hover:bg-purple-500/20 transition-all">
-                  <MessageSquare className="w-3.5 h-3.5" /> {t('Get Support')}
-                </button>
+                {/* Its cancel buttons are right above (the order page also
+                    steers item problems to a return or cancellation). */}
+                <ReportProblem txnId={transaction.id} onViewGrievance={onOpenGrievance} />
               </div>
             </div>
 
@@ -997,27 +971,6 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
               )}
             </AnimatePresence>
 
-            {/* Inline support form */}
-            <AnimatePresence>
-              {showSupportForm && (
-                <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
-                  className="rounded-xl border border-purple-500/20 bg-purple-500/5 px-4 py-3 space-y-3">
-                  <p className="text-xs font-semibold text-purple-300">{t('Describe your issue')}</p>
-                  <textarea
-                    value={supportDesc} onChange={e => setSupportDesc(e.target.value)}
-                    placeholder={t('What do you need help with?')}
-                    rows={3}
-                    className="w-full bg-slate-900 border border-white/10 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 outline-none resize-none"
-                  />
-                  <button
-                    disabled={!supportDesc.trim() || isLoading}
-                    onClick={() => { onSupport(supportDesc); setSupportDesc(''); setShowSupportForm(false); }}
-                    className="w-full py-2 rounded-lg text-xs font-bold bg-purple-600 hover:bg-purple-500 text-white disabled:opacity-50 flex items-center justify-center gap-2 transition-all">
-                    {isLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <><MessageSquare className="w-3.5 h-3.5" /> {t('Submit Request')}</>}
-                  </button>
-                </motion.div>
-              )}
-            </AnimatePresence>
 
             <button onClick={onDone} data-tour="continue"
               className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-600/30">
@@ -1149,11 +1102,6 @@ function fmtOrderDate(iso) {
 
 /* ── helpers to parse contract data ─────────────────────────────────────── */
 
-const fmtIDR = (amount, cur) => {
-  if (amount == null) return '—';
-  try { return new Intl.NumberFormat('id-ID', { style: 'currency', currency: cur || 'IDR', maximumFractionDigits: 0 }).format(amount); }
-  catch { return `${cur || 'IDR'} ${amount}`; }
-};
 
 // ION cancellation reasons a buyer can give (TradeOffer
 // policies.cancellation.allowedReasons; BUYER_FRAUD_SUSPECTED is seller-side).
@@ -1380,6 +1328,16 @@ const ACTION_LABELS = {
   reconcile: { icon: '🏦', label: 'Seller Settlement', color: 'text-emerald-400' },
 };
 
+// Scrolls to an order's items card (its return / cancel buttons) and focuses
+// it -- where "Problem with this order?" sends a buyer when a normal return or
+// cancellation is the faster way.
+function focusOrderItems(txnId) {
+  const el = document.getElementById(`order-items-${txnId}`);
+  if (!el) return;
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  el.focus({ preventScroll: true });
+}
+
 // Items of a confirmed order with per-item cancellation: pick a quantity and
 // cancel it, or cancel the whole order. Cancelling everything still active
 // goes out as Beckn cancel, anything less as a partial-cancellation update --
@@ -1440,7 +1398,7 @@ function OrderItemsCard({ txnId, order, txnStatus, deliveredAt, onChanged }) {
   };
 
   return (
-    <div className="rounded-xl border border-white/[0.07] overflow-hidden" style={{ background: 'rgba(255,255,255,0.02)' }}>
+    <div id={`order-items-${txnId}`} tabIndex={-1} className="rounded-xl border border-white/[0.07] overflow-hidden outline-none focus:ring-2 focus:ring-purple-400/60" style={{ background: 'rgba(255,255,255,0.02)' }}>
       <div className="px-4 py-2.5 border-b border-white/[0.06] flex items-center gap-2">
         <ShoppingCart className="w-3.5 h-3.5 text-slate-500" />
         <p className="text-[11px] font-bold uppercase tracking-widest text-slate-500">{t('Items Ordered')}</p>
@@ -1604,7 +1562,7 @@ function LiveOrderItems({ txnId, onStatus }) {
   return <OrderItemsCard txnId={txnId} order={order} txnStatus={data.status} onChanged={() => setTick(k => k + 1)} />;
 }
 
-function OrderDetailPanel({ txnId, onBack }) {
+function OrderDetailPanel({ txnId, onBack, onOpenGrievance }) {
   const { t } = useI18n();
   const [detail, setDetail] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -1687,6 +1645,20 @@ function OrderDetailPanel({ txnId, onBack }) {
       || (sn.contract?.performance || []).some(p => p.status?.code === 'Delivered'))
     .map(sn => sn.created_at).sort()[0] || null;
 
+  // "Problem with this order?" on a placed order; it first offers the normal
+  // return / cancellation when that is still open (the faster way).
+  const placed = PLACED.includes(detail.status) || detail.status === 'UPDATE_SENT';
+  const activeItems = (bestContract?.items || []).filter(it => !it.cancelled);
+  const fulfillment = bestContract?.fulfillmentStatus;
+  const delivered = stageRank(fulfillment) >= 3;
+  const steer = {
+    canCancel: !delivered && detail.status === 'CONFIRMED' && activeItems.some(it => !cancelBlockedReason(it.cancelPolicy, fulfillment)),
+    canReturn: delivered && ['CONFIRMED', 'COMPLETE'].includes(detail.status)
+      && activeItems.some(it => !returnEligibility(it.returnPolicy, fulfillment, deliveredAt).blocked),
+    onReturn: () => focusOrderItems(txnId),
+    onCancel: () => focusOrderItems(txnId),
+  };
+
   return (
     <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
 
@@ -1747,6 +1719,9 @@ function OrderDetailPanel({ txnId, onBack }) {
         <OrderItemsCard txnId={txnId} order={bestContract} txnStatus={detail.status} deliveredAt={deliveredAt}
           onChanged={() => setReloadKey(k => k + 1)} />
       )}
+
+      {/* Problems with the order: its reports and a new one */}
+      {placed && <OrderGrievances txnId={txnId} steer={steer} onOpen={onOpenGrievance} />}
 
       {/* Price / Breakup */}
       {bestContract?.price !== null && bestContract?.price !== undefined && (
@@ -2097,14 +2072,18 @@ function MessageLogPanel() {
   );
 }
 
-function OrderHistoryDrawer({ open, onClose }) {
+// grievances is the buyer's report list (useGrievances), for the My help
+// badge and the "Action needed" marker on orders.
+function OrderHistoryDrawer({ open, onClose, initialTab = 'orders', initialGrievance = null, grievances }) {
   const { t, locale } = useI18n();
+  const [grievanceId, setGrievanceId] = useState(null);
+  const needsActionTxns = new Set(grievances.items.filter(g => g.needsAction).map(g => g.transactionId));
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(false);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [selectedId, setSelectedId] = useState(null);
-  const [tab, setTab] = useState('orders'); // orders | messages
+  const [tab, setTab] = useState('orders'); // orders | help | messages
   const limit = 10;
 
   const load = useCallback(async (p = 1, silent = false) => {
@@ -2123,11 +2102,11 @@ function OrderHistoryDrawer({ open, onClose }) {
     }
   }, []);
   // Live while the order list is showing (the detail panel refreshes itself).
-  useLive(() => load(page, true), open && tab === 'orders' && !selectedId);
+  useLive(() => load(page, true), open && tab === 'orders' && !selectedId && !grievanceId);
 
   useEffect(() => {
-    if (open) { void load(1); setSelectedId(null); setTab('orders'); } // load logs its own errors
-  }, [open, load]);
+    if (open) { void load(1); setSelectedId(null); setTab(initialTab); setGrievanceId(initialGrievance); } // load logs its own errors
+  }, [open, load, initialTab, initialGrievance]);
 
   const totalPages = Math.ceil(total / limit);
   const statusStyle = (s) => STATUS_COLORS[s] || { bg: 'bg-slate-700/40', text: 'text-slate-400', border: 'border-slate-600/30' };
@@ -2146,16 +2125,19 @@ function OrderHistoryDrawer({ open, onClose }) {
             {/* Header */}
             <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.07] shrink-0">
               <div className="flex items-center gap-2">
-                {selectedId ? (
-                  <button onClick={() => setSelectedId(null)} className="text-slate-400 hover:text-white transition-colors mr-1">
+                {selectedId || grievanceId ? (
+                  <button onClick={() => (grievanceId ? setGrievanceId(null) : setSelectedId(null))} aria-label={t('Back')}
+                    className="text-slate-400 hover:text-white transition-colors mr-1">
                     <ChevronLeft className="w-5 h-5" />
                   </button>
                 ) : null}
-                <History className="w-5 h-5 text-cyan-400" />
+                {grievanceId || (!selectedId && tab === 'help')
+                  ? <LifeBuoy className="w-5 h-5 text-purple-300" />
+                  : <History className="w-5 h-5 text-cyan-400" />}
                 <h2 className="text-lg font-bold text-white">
-                  {selectedId ? t('Order Detail') : tab === 'messages' ? t('Message Log') : t('Order History')}
+                  {grievanceId ? t('Report detail') : selectedId ? t('Order Detail') : tab === 'messages' ? t('Message Log') : tab === 'help' ? t('My help') : t('Order History')}
                 </h2>
-                {!selectedId && tab === 'orders' && total > 0 && (
+                {!selectedId && !grievanceId && tab === 'orders' && total > 0 && (
                   <span className="bg-cyan-500/20 text-cyan-400 text-xs font-bold px-2 py-0.5 rounded-full">{total}</span>
                 )}
               </div>
@@ -2165,13 +2147,17 @@ function OrderHistoryDrawer({ open, onClose }) {
             </div>
 
             {/* Orders | Message Log */}
-            {!selectedId && (
-              <div className="shrink-0 flex gap-1 px-4 pt-3" role="tablist">
-                {[['orders', t('Orders'), History], ['messages', t('Message Log'), MessageSquare]].map(([id, label, Icon]) => (
+            {!selectedId && !grievanceId && (
+              <div className="shrink-0 flex flex-wrap gap-1 px-4 pt-3" role="tablist">
+                {[['orders', t('Orders'), History], ['help', t('My help'), LifeBuoy], ['messages', t('Message Log'), MessageSquare]].map(([id, label, TabIcon]) => (
                   <button key={id} role="tab" aria-selected={tab === id} onClick={() => setTab(id)} data-tour={`tab-${id}`}
                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${tab === id ? 'text-white' : 'text-slate-400 hover:text-slate-200 bg-white/[0.04]'}`}
                     style={tab === id ? { background: 'linear-gradient(135deg,#00b8e6,#1e2fa0)' } : {}}>
-                    <Icon className="w-3.5 h-3.5" /> {label}
+                    <TabIcon className="w-3.5 h-3.5" /> {label}
+                    {id === 'help' && grievances.needsAction > 0 && (
+                      <span className="ml-0.5 min-w-4 h-4 px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center"
+                        aria-label={t('{n} need your action', { n: grievances.needsAction })}>{grievances.needsAction}</span>
+                    )}
                   </button>
                 ))}
               </div>
@@ -2179,7 +2165,17 @@ function OrderHistoryDrawer({ open, onClose }) {
 
             {/* Detail panel */}
             <AnimatePresence mode="wait">
-              {!selectedId && tab === 'messages' ? (
+              {grievanceId ? (
+                <motion.div key={`grievance-${grievanceId}`} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}
+                  className="flex-1 overflow-y-auto px-4 py-4" data-tour="grievance-detail">
+                  <GrievanceDetail id={grievanceId} />
+                </motion.div>
+              ) : !selectedId && tab === 'help' ? (
+                <motion.div key="help" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                  className="flex-1 overflow-y-auto px-4 py-4">
+                  <GrievanceList onOpen={setGrievanceId} active={open} />
+                </motion.div>
+              ) : !selectedId && tab === 'messages' ? (
                 <motion.div key="messages" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
                   className="flex-1 flex flex-col overflow-hidden">
                   <MessageLogPanel />
@@ -2187,7 +2183,7 @@ function OrderHistoryDrawer({ open, onClose }) {
               ) : selectedId ? (
                 <motion.div key="detail" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}
                   className="flex-1 flex flex-col overflow-hidden">
-                  <OrderDetailPanel txnId={selectedId} onBack={() => setSelectedId(null)} />
+                  <OrderDetailPanel txnId={selectedId} onBack={() => setSelectedId(null)} onOpenGrievance={setGrievanceId} />
                 </motion.div>
               ) : (
                 <motion.div key="list" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -2227,6 +2223,11 @@ function OrderHistoryDrawer({ open, onClose }) {
                               <span className={`shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full border ${sc.bg} ${sc.text} ${sc.border}`}>
                                 {txnStatusLabel(t, order.status)}
                               </span>
+                              {needsActionTxns.has(order.transaction_id) && (
+                                <span className="shrink-0 inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-500 text-white">
+                                  <LifeBuoy className="w-3 h-3" /> {t('Action needed')}
+                                </span>
+                              )}
                             </div>
                             <div className="flex items-center gap-3 mt-0.5 flex-wrap">
                               {order.item_price > 0 && (
@@ -2305,7 +2306,9 @@ const tourSteps = t => [
   { eyebrow: t('Order placed'), target: 'order-placed', title: t('Order placed!'),
     body: <p>{t("The seller has your order. Its items are listed below. You can cancel the whole order, or just some items, if the seller's policy allows it.")}</p> },
   { eyebrow: t('Order placed'), target: 'order-actions', title: t('After you order'),
-    body: <p>{rich(t('<b>Refresh Status</b> checks for updates, <b>Rate Order</b> tells the seller how it went, and <b>Get Support</b> raises a ticket with them.'))}</p> },
+    body: <p>{rich(t('<b>Refresh Status</b> checks for updates and <b>Rate Order</b> tells the seller how it went.'))}</p> },
+  { eyebrow: t('Order placed'), target: 'report-problem', title: t('Problem with an order?'),
+    body: <><p>{rich(t('If something goes wrong (a damaged or missing item, a late delivery, a refund that has not arrived), tap <b>Problem with this order?</b>.'))}</p><p className="text-slate-400">{t('Three short steps: what the problem is, which items, and what happened. The order page has the same button.')}</p></> },
   { eyebrow: t('Order placed'), target: 'continue', action: 'click', waitLabel: t('Click Continue Shopping'),
     title: t('Back to the shop'),
     body: <p>{rich(t('Click <b>Continue Shopping</b>. Your order is saved in your order history.'))}</p> },
@@ -2315,6 +2318,10 @@ const tourSteps = t => [
     body: <p>{rich(t('Every order you place is kept here. Click <b>Orders</b>.'))}</p> },
   { eyebrow: t('Orders'), target: 'orders-list', title: t('Order history'),
     body: <p>{t("Tap an order to see its status, delivery progress and items. From there you can cancel, or return items once they're delivered, within the seller's return window.")}</p> },
+  { eyebrow: t('Help'), target: 'help-button', closeDrawers: true, title: t('My help'),
+    body: <p>{rich(t('<b>My help</b> lists every problem you have reported, open ones first. A red number shows reports waiting for you, such as an offer from the seller to accept or reject.'))}</p> },
+  { eyebrow: t('Help'), title: t('Following a report'),
+    body: <p>{t('Each report shows where it stands (Sent, Being handled, Resolved, Closed), what happens next and who it is waiting on. When the seller offers a refund or a replacement, you accept or reject it there.')}</p> },
   { eyebrow: t('Done'), target: 'tour-button', closeDrawers: true, title: t("You're all set"),
     body: <p>{t('Happy shopping! You can run this tour again any time from here, and switch between English and Bahasa Indonesia with EN | ID next to it.')}</p> },
 ];
@@ -2330,6 +2337,9 @@ export default function App() {
   const [transaction, setTransaction] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isOrdersOpen, setIsOrdersOpen] = useState(false);
+  // Which page the orders drawer opens on: orders, or My help (optionally
+  // straight at one report).
+  const [ordersFocus, setOrdersFocus] = useState({ tab: 'orders', grievance: null });
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [cartCheckout, setCartCheckout] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState(null);
@@ -2343,6 +2353,8 @@ export default function App() {
   const debounceRef = useRef(null);
   const [authReady, setAuthReady] = useState(false);
   const [tourOpen, setTourOpen] = useState(false);
+  // Reports waiting on the buyer, for the My help badge.
+  const help = useGrievances('', authReady);
 
   // Gate on a token before rendering anything real. There's no login UI
   // here at all -- landing-page is the single entry point (see
@@ -2681,24 +2693,15 @@ export default function App() {
     finally { setIsLoading(false); }
   };
 
-  /* ── Beckn: Support ──────────────────────────────────────────────────── */
-  const handleSupport = async (description) => {
-    if (!transaction) return;
-    setIsLoading(true);
-    try {
-      const r = await apiFetch(`/support`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          transaction_id: transaction.id,
-          orderId: transaction.id,
-          description,
-        }),
-      });
-      const d = await r.json();
-      setTransaction(p => ({ ...p, supportTicketStatus: d.status || 'SUPPORT_SENT' }));
-      alert(t('Support ticket created! The seller will get back to you.'));
-    } catch (e) { alert(t('Support request failed: {error}', { error: e.message })); }
-    finally { setIsLoading(false); }
+  /* ── Orders drawer / My help ─────────────────────────────────────────── */
+  const openOrders = (tab = 'orders', grievance = null) => {
+    setOrdersFocus({ tab, grievance });
+    setIsOrdersOpen(true);
+  };
+  // From the checkout's "Problem with this order?" straight to the report.
+  const openGrievance = id => {
+    setIsCartOpen(false);
+    openOrders('help', id);
   };
 
   /* ── Drop items the seller no longer has, back to the cart ─────────── */
@@ -2799,11 +2802,25 @@ export default function App() {
           <span className="hidden sm:inline-flex"><LanguageToggle /></span>
 
           <button
-            onClick={() => setIsOrdersOpen(true)} data-tour="orders-button" title={t('Orders')}
+            onClick={() => openOrders()} data-tour="orders-button" title={t('Orders')}
             className="shrink-0 flex items-center gap-2 px-3 py-2 rounded-xl transition-all text-sm font-medium text-slate-400 hover:text-white border border-white/[0.08] hover:border-white/[0.15]"
           >
             <History className="w-4 h-4" />
             <span className="hidden xl:block">{t('Orders')}</span>
+          </button>
+
+          <button
+            onClick={() => openOrders('help')} data-tour="help-button" title={t('My help')}
+            aria-label={help.needsAction > 0 ? `${t('My help')} – ${t('{n} need your action', { n: help.needsAction })}` : t('My help')}
+            className="relative shrink-0 flex items-center gap-2 px-3 py-2 rounded-xl transition-all text-sm font-medium text-purple-200 hover:text-white border border-purple-500/25 hover:border-purple-500/45 bg-purple-500/10"
+          >
+            <LifeBuoy className="w-4 h-4" />
+            <span className="hidden xl:block">{t('My help')}</span>
+            {help.needsAction > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 min-w-5 h-5 px-1 bg-rose-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center" aria-hidden="true">
+                {help.needsAction}
+              </span>
+            )}
           </button>
 
           <button
@@ -3102,7 +3119,8 @@ export default function App() {
       </AnimatePresence>
 
       {/* ── Order History Drawer ─────────────────────────────────────────── */}
-      <OrderHistoryDrawer open={isOrdersOpen} onClose={() => setIsOrdersOpen(false)} />
+      <OrderHistoryDrawer open={isOrdersOpen} onClose={() => setIsOrdersOpen(false)}
+        initialTab={ordersFocus.tab} initialGrievance={ordersFocus.grievance} grievances={help} />
 
       {/* ── Cart Drawer ───────────────────────────────────────────────────── */}
       <AnimatePresence>
@@ -3262,7 +3280,7 @@ export default function App() {
                   onDone={resetCart}
                   onStatusChange={handleStatusChange}
                   onRate={handleRate}
-                  onSupport={handleSupport}
+                  onOpenGrievance={openGrievance}
                   onRequestStatus={handleRequestStatus}
                   onRemoveItems={removeUnavailable}
                 />

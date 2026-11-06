@@ -4,8 +4,8 @@ Swagger (OpenAPI 2.0) specs for the two backend services, **generated from the c
 
 | File | Service | Endpoints |
 |---|---|---|
-| [bap.yaml](bap.yaml) | `bap-application` — buyer backend | 30 |
-| [bpp.yaml](bpp.yaml) | `bpp-application` — seller backend | 44 |
+| [bap.yaml](bap.yaml) | `bap-application` — buyer backend | 38 |
+| [bpp.yaml](bpp.yaml) | `bpp-application` — seller backend | 55 |
 
 Don't edit these files by hand — they are rebuilt from the `// @...` annotations above each handler by `task docs:api` (see [Keeping the specs current](#keeping-the-specs-current)). They describe what the code does today, including some behaviour that may be worth changing (see [Things to know](#things-to-know)). For how the services fit together, see [../architecture.md](../architecture.md).
 
@@ -74,7 +74,7 @@ Payment in step 4 is a **mock**: the BAP marks the settlement `PAID` with a gene
 | `POST /return-items` | `update` | `UPDATE_SENT` | `on_update` |
 | `POST /update` | `update` (raw contract) | `UPDATE_SENT` | `on_update` |
 | `POST /rate` | `rate` | `RATE_SENT` | `on_rate` (logged only) |
-| `POST /support` | `support` | `SUPPORT_SENT` | `on_support` (logged only) |
+| `POST /grievances` and `/grievances/{id}/decision`, `/objection`, `/close`, `/response` | `support` (an `IONGrievance` event) | unchanged | `on_support` events update the grievance (see [architecture.md 7.8](../architecture.md#78-grievances-support--on_support)) |
 
 The seller can also send `on_status` **without being asked** (e.g. when the order ships or is delivered); the same webhook handles it.
 
@@ -117,7 +117,7 @@ Same structure; the seller side:
 | Group | Who calls it | Auth |
 |---|---|---|
 | `POST /api/v1/auth/bootstrap` | `landing-page` after login | Bearer token required; creates the seller profile on first login |
-| Dashboard `/api/v1/*` — stats, orders, inventory, catalogs, products, offers, publish, catalog index and latest published file, messages, support tickets, ratings, reconciliation | `bpp-frontend` | Bearer token required, and the user must have a seller profile (else `403 NO_PROVIDER`); every query is limited to that seller's own data |
+| Dashboard `/api/v1/*` — stats, orders, inventory, catalogs, products, offers, publish, catalog index and latest published file, messages, grievances, ratings, reconciliation | `bpp-frontend` | Bearer token required, and the user must have a seller profile (else `403 NO_PROVIDER`); every query is limited to that seller's own data |
 | `POST /api/v1/catalog/publish` | Scripts / provider integrations | None |
 | Beckn webhooks `/api/webhook/*` — select, init, confirm, status, update, cancel, rate, support, reconcile, on_reconcile, track, catalog/on_publish | `onix-bpp` | None (signature verified by the adapter) |
 

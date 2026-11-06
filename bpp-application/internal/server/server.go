@@ -18,12 +18,12 @@ import (
 	"github.com/ion/winroom/bpp/internal/config"
 	"github.com/ion/winroom/bpp/internal/confirmsvc"
 	"github.com/ion/winroom/bpp/internal/dashboardsvc"
+	"github.com/ion/winroom/bpp/internal/grievancesvc"
 	"github.com/ion/winroom/bpp/internal/initsvc"
 	"github.com/ion/winroom/bpp/internal/ratesvc"
 	"github.com/ion/winroom/bpp/internal/reconsvc"
 	"github.com/ion/winroom/bpp/internal/selectsvc"
 	"github.com/ion/winroom/bpp/internal/statussvc"
-	"github.com/ion/winroom/bpp/internal/supportsvc"
 	"github.com/ion/winroom/bpp/internal/updatesvc"
 )
 
@@ -151,8 +151,9 @@ func registerPostFulfillmentRoutes(svc *service.Service, g *gin.RouterGroup, poo
 	rateH := ratesvc.NewHandler(pool, cfg, svc.LogHarbour)
 	g.POST("/rate", rateH.Handle)
 
-	supportH := supportsvc.NewHandler(pool, cfg, svc.LogHarbour)
-	g.POST("/support", supportH.Handle)
+	// support carries the buyer app's grievance events (ION Grievance v1)
+	// -- see internal/grievancesvc.
+	g.POST("/support", grievancesvc.NewHandler(pool, cfg, svc.LogHarbour).HandleSupport)
 }
 
 // ---------------------------------------------------------------------------
@@ -194,6 +195,8 @@ func registerDashboardRoutes(v1 *gin.RouterGroup, pool *pgxpool.Pool, cfg *confi
 	dash.Use(auth.RequireSeller(verifier, pool))
 
 	dash.GET("/dashboard/stats", h.HandleStats)
+	// Order-level grievances (replaces the support-ticket list).
+	grievancesvc.NewHandler(pool, cfg, lh).Register(dash)
 
 	dash.GET("/orders", h.HandleListOrders)
 	dash.GET("/orders/:id", h.HandleGetOrder)

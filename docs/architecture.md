@@ -26,6 +26,7 @@ Related docs:
    - [7.5 After the order: status, fulfillment, cancel, update, rate, support](#75-after-the-order-status-fulfillment-cancel-update-rate-support)
    - [7.6 Order status lifecycle](#76-order-status-lifecycle)
    - [7.7 Settlement reconciliation](#77-settlement-reconciliation)
+   - [7.8 Grievances (support / on_support)](#78-grievances-support--on_support)
 8. [Who stores what](#8-who-stores-what)
 9. [Deployment](#9-deployment)
    - [9.1 Local (Docker Compose)](#91-local-docker-compose)
@@ -162,8 +163,8 @@ Solid arrows are API calls; dotted arrows are page navigation, caches, and key a
 
 | Path | What it is |
 |---|---|
-| `bap-application/` | Buyer backend (Go, Gin). `internal/clientsvc` = APIs for the frontend; `internal/on_*_svc` = Beckn callback handlers; `internal/reconcile_svc` = reconciliation; `internal/discoverwait` = joins async `on_discover` back to the search request; `internal/auth` = optional login check; `db/migrations` (tern), `db/queries` + `db/sqlc` (generated DB code). |
-| `bpp-application/` | Seller backend (Go, Gin + `alya`). `internal/selectsvc`, `initsvc`, `confirmsvc`, `statussvc`, `updatesvc`, `cancelsvc`, `ratesvc`, `supportsvc` = Beckn action handlers; `internal/dashboardsvc` = seller dashboard API; `internal/catalog` = catalog publish; `internal/authsvc` = seller bootstrap; `internal/auth` = seller login check; `internal/reconsvc` = reconciliation; `postman/` = API collections. |
+| `bap-application/` | Buyer backend (Go, Gin). `internal/clientsvc` = APIs for the frontend; `internal/on_*_svc` = Beckn callback handlers; `internal/reconcile_svc` = reconciliation; `internal/grievancesvc` = grievances (client API and `on_support`); `internal/grievance` = the ION Grievance v1 pack, shared with `bpp`; `internal/discoverwait` = joins async `on_discover` back to the search request; `internal/auth` = optional login check; `db/migrations` (tern), `db/queries` + `db/sqlc` (generated DB code). |
+| `bpp-application/` | Seller backend (Go, Gin + `alya`). `internal/selectsvc`, `initsvc`, `confirmsvc`, `statussvc`, `updatesvc`, `cancelsvc`, `ratesvc` = Beckn action handlers; `internal/grievancesvc` = grievances (`support` webhook and seller API); `internal/grievance` = the ION Grievance v1 pack, shared with `bap`; `internal/dashboardsvc` = seller dashboard API; `internal/catalog` = catalog publish; `internal/authsvc` = seller bootstrap; `internal/auth` = seller login check; `internal/reconsvc` = reconciliation; `postman/` = API collections. |
 | `bap-frontend/`, `bpp-frontend/`, `landing-page/` | React (Vite) apps, each served by nginx. `env.sh` writes runtime config into the page. |
 | `ion-landing-page/` | Static ION portal page; in the cloud also the path-based entry to the three UIs (`Dockerfile.cloud`). |
 | `onix-bap/`, `onix-bpp/`, `onix-catalog-publish/` | Cloud images of the vendor onix adapters: config `templates/*.tmpl` rendered from env vars at start-up. (Locally Compose uses the vendor images directly with `config/`.) |
@@ -189,7 +190,7 @@ Solid arrows are API calls; dotted arrows are page navigation, caches, and key a
 | Service | Role | Tech | Local port | Talks to |
 |---|---|---|---|---|
 | `bap-frontend` | Buyer shop: search, cart, checkout, order history, message log, reconciliation page | React (Vite), served by nginx | 3000 | `bap` (via its nginx `/api/` proxy) |
-| `bpp-frontend` | Seller dashboard: overview, catalogs, inventory, orders, messages, support, ratings, reconciliation | React (Vite), nginx | 3001 | `bpp` (via its nginx `/api/` proxy) |
+| `bpp-frontend` | Seller dashboard: overview, catalogs, inventory, orders, messages, grievances, ratings, reconciliation | React (Vite), nginx | 3001 | `bpp` (via its nginx `/api/` proxy) |
 | `landing-page` | Login / registration entry point; creates the seller profile; links into both frontends | React (Vite), nginx | 3002 | `zitadel` (OIDC), `bpp` (`/api/v1/auth/bootstrap`) |
 | `ion-landing-page` | Static ION portal page; in the cloud also the path-based hub for the three UIs | static HTML, nginx | 3003 | links to `landing-page` |
 | `bap` | Buyer backend: turns UI actions into Beckn requests, receives `on_*` callbacks, keeps order state | Go, Gin, sqlc, tern | 8083 | `onix-bap`, discovery (`discovery-service` / `mock-cds`), `postgres`, `zitadel` |
@@ -471,7 +472,6 @@ Both sides write every message in and out to `beckn_message_log`. `bap` keeps ev
 | `cancel`, `cancel-items` (all items) | `cancel` | cancels contract / commitments | `CANCEL_SENT` → `CANCELLED` |
 | `cancel-items` (some items), `return-items`, `update` | `update` | partial cancel / return, or updates contract attributes | `UPDATE_SENT` → from `on_update` |
 | `rate` | `rate` | `ratings` row | `RATE_SENT` |
-| `support` | `support` | `support_tickets` row | `SUPPORT_SENT` |
 
 `GET /api/v1/status/:id` reads `bap`'s own database only; `request-status` is what actually asks the seller.
 
@@ -522,11 +522,10 @@ stateDiagram-v2
     CONFIRMED --> COMPLETE: on_status (COMPLETE, e.g. after delivery)
     CONFIRMED --> CANCELLED: on_status / on_update (CANCELLED)
     COMPLETE --> RATE_SENT: POST /rate
-    COMPLETE --> SUPPORT_SENT: POST /support
 ```
 
 - `on_status` and `on_update` only change the status when the contract's state is ACTIVE, CANCELLED or COMPLETE; anything else leaves it unchanged. They can arrive in any state (the seller sends them unasked).
-- `on_rate` and `on_support` don't change the status, so an order stays at `RATE_SENT` / `SUPPORT_SENT` after rating or a support request.
+- `on_rate` doesn't change the status, so an order stays at `RATE_SENT` after rating. Grievances (7.8) never change the order's status.
 - On the seller side the contract itself goes **DRAFT** (init) → **ACTIVE** (confirm) → **COMPLETE** (delivered and past the completion window) or **CANCELLED**; fulfilment progress (Packed, Shipped, Delivered, returns) is tracked separately in `contract_performances`.
 
 ### 7.7 Settlement reconciliation
@@ -558,6 +557,40 @@ sequenceDiagram
 
 The BAP-initiated direction is the mirror image: `bap-frontend`'s reconciliation page → `POST /api/v1/reconciliation/send` on `bap` → `reconcile` via `onix-bap` → `bpp` answers with `on_reconcile`. Sending is manual on both sides (no scheduled job yet). Two settings control timing: `SETTLEMENT_WINDOW` (on `bpp`) and `RECONCILE_WAIT_FOR_SETTLEMENT_WINDOW` (on both; `false` lets contracts be reconciled before their window ends).
 
+### 7.8 Grievances (support / on_support)
+
+A **grievance** is a problem with one order after `on_confirm`, raised by the buyer (through `bap`) or by the seller (through `bpp`). It follows ion-specs **Grievance/v1**: every `/support` and `/on_support` carries one `IONGrievance` event in `message.support.supportAttributes`. `/support` is always sent by the BAP and `/on_support` by the BPP, whichever side raised it. A normal return or cancellation within policy stays in `update` / `cancel`; a grievance about one that went wrong links its return performance, refund settlement or the contract in `relatedReferences`.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant B as Buyer (bap-frontend)
+    participant BAP as bap
+    participant BPP as bpp
+    participant S as Seller (bpp-frontend)
+    B->>BAP: POST /api/v1/grievances (category, items, description)
+    BAP->>BPP: support OPENED (via onix)
+    BPP-->>BAP: on_support ACKNOWLEDGED (same messageId; automatic)
+    S->>BPP: POST /api/v1/grievances/:id/proposal
+    BPP->>BAP: on_support RESOLUTION_PROPOSED (version 1, 2, ...)
+    B->>BAP: POST /api/v1/grievances/:id/decision (accept / reject)
+    BAP->>BPP: support RESOLUTION_DECIDED
+    S->>BPP: POST /api/v1/grievances/:id/execute
+    BPP->>BAP: on_update (refund settlement / redelivery performance)
+    BPP->>BAP: on_support ACTION_COMPLETED (execution references)
+    S->>BPP: POST /api/v1/grievances/:id/resolve
+    BPP->>BAP: on_support RESOLVED
+    Note over B,BAP: within the objection period: OBJECTION or CLOSED, else deemed closed
+```
+
+- **Who approves a solution.** `EXPLICIT_AGREEMENT`: the buyer accepts or rejects that exact version. `POLICY_AUTHORIZED`: the order's return policy plus the QC of an approved return, no decision. `UNILATERAL`: the proposer bears it (the seller's goodwill, or `bap`'s `POST /api/v1/admin/grievances/:id/goodwill-refund`).
+- **Execution goes through the order's own flows.** A refund becomes a settlement on the contract (a refund agreed earlier that never arrived is paid out again on *its* settlement, so reconcile counts it once); a redelivery or replacement becomes a performance. The updated contract reaches `bap` as an unsolicited `on_update`. Money is still only agreed in reconcile (7.7).
+- **Seller grievance.** `bpp` opens it with an unsolicited `on_support` (e.g. `WRONG_RETURN` on a return); `bap` acknowledges automatically, the buyer answers with an explanation, the seller accepts or rejects it, and `bap` marks it resolved once accepted.
+- **Rules.** Both sides check every event against the grievance's earlier events (`internal/grievance.Check`: the pack README's "Rules enforced by ONIX") and NACK one that breaks them: a decision on a stale version, a proposer accepting its own proposal, `allocationBasis` not matching the authorization, a unilateral remedy charged to the other side, `RESOLVED` without execution references, an unknown action, a return/refund category without a link, objection or closure by the non-originator. Sides are told apart by endpoint, so this also works when one participant is both BAP and BPP (as in local dev).
+- **Storage.** `grievance_events` keeps every event; `grievances`, `grievance_resolutions` and `grievance_executions` are rebuilt from it. An outgoing event is stored before it is sent and dropped again if it is refused, so a failed send changes nothing.
+- **SLA.** The order's grievance SLA policy (`offerAttributes.policies.grievanceSla.policyRef`, default `ion://policy/grievance-sla.consumer.standard`) sets the first response (2 h), resolution (72 h) and objection period (7 days); the figures live in `internal/grievance/state.go` until the ION policy registry publishes them.
+- **Pending Beckn change.** Beckn 2.0.0 `Support` has no `supportAttributes` slot (`additionalProperties: false`), so ONIX schema validation rejects these messages until the slot proposed in protocol-specifications-v2#203 is released and vendored.
+
 ---
 
 ## 8. Who stores what
@@ -565,7 +598,7 @@ The BAP-initiated direction is the mirror image: `bap-frontend`'s reconciliation
 | Store | Owner | Holds |
 |---|---|---|
 | Postgres `bap` | `bap` | `bap_identities`, `transactions` (one per order, with status and `buyer_subject`), `contract_snapshots` (every contract version received), `beckn_message_log`, `discover_requests`, `reconciliations` — see [db/bap.md](db/bap.md) |
-| Postgres `bpp` | `bpp` | identities and keys, `users`, `providers`, `catalogs`, `resources`, `offers`, `contracts` and their commitments/considerations/performances/settlements, `ratings`, `support_tickets`, `beckn_message_log`, `reconciliations` — see [db/bpp.md](db/bpp.md) |
+| Postgres `bpp` | `bpp` | identities and keys, `users`, `providers`, `catalogs`, `resources`, `offers`, `contracts` and their commitments/considerations/performances/settlements, `ratings`, `grievances` and their events/resolutions/executions (`support_tickets` is no longer written), `beckn_message_log`, `reconciliations` — see [db/bpp.md](db/bpp.md) |
 | Postgres `zitadel` | `zitadel` | user accounts, the `reference-app` project and the `landing-page` OIDC app |
 | Catalog directory / bucket | `onix-catalog-publish` | signed catalog index, full catalogs, change files |
 | `discovery-service` memory | `discovery-service` | crawled catalogs (rebuilt on restart; no database) |

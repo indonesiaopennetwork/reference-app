@@ -1135,6 +1135,599 @@ definitions:
     - page
     - total
     type: object
+  grievance.Ack:
+    properties:
+      context:
+        $ref: '#/definitions/grievance.BecknContext'
+      error:
+        $ref: '#/definitions/grievance.AckError'
+      message:
+        properties:
+          ack:
+            properties:
+              status:
+                type: string
+            type: object
+        type: object
+    type: object
+  grievance.AckError:
+    properties:
+      code:
+        type: string
+      message:
+        type: string
+    type: object
+  grievance.ActionView:
+    properties:
+      actionId:
+        type: string
+      affected:
+        items:
+          $ref: '#/definitions/grievance.AffectedLine'
+        type: array
+      amount:
+        type: number
+      completedAt:
+        type: string
+      currency:
+        type: string
+      description:
+        type: string
+      effectType:
+        type: string
+      executed:
+        type: boolean
+      executionMethod:
+        type: string
+      executionReference:
+        type: string
+      liable:
+        description: ME | THEM
+        type: string
+      settlementRef:
+        type: string
+      type:
+        type: string
+    type: object
+  grievance.AffectedLine:
+    properties:
+      commitmentId:
+        type: string
+      performanceId:
+        type: string
+      quantity:
+        type: integer
+    type: object
+  grievance.BecknContext:
+    properties:
+      action:
+        type: string
+      bapId:
+        type: string
+      bapUri:
+        type: string
+      bppId:
+        type: string
+      bppUri:
+        type: string
+      domain:
+        type: string
+      messageId:
+        type: string
+      networkId:
+        type: string
+      schemaContext:
+        items:
+          type: string
+        type: array
+      timestamp:
+        type: string
+      transactionId:
+        type: string
+      ttl:
+        type: string
+      version:
+        type: string
+    type: object
+  grievance.DecisionView:
+    properties:
+      at:
+        type: string
+      by:
+        description: ME | THEM
+        type: string
+      reason:
+        type: string
+      result:
+        description: ACCEPTED | REJECTED
+        type: string
+    type: object
+  grievance.Descriptor:
+    properties:
+      code:
+        type: string
+      name:
+        type: string
+      shortDesc:
+        type: string
+    type: object
+  grievance.Message:
+    properties:
+      context:
+        $ref: '#/definitions/grievance.BecknContext'
+      message:
+        properties:
+          support:
+            $ref: '#/definitions/grievance.Support'
+        type: object
+    type: object
+  grievance.Next:
+    properties:
+      action:
+        description: Step* constants
+        type: string
+      waitingOn:
+        description: ME | THEM | "" (closed)
+        type: string
+    type: object
+  grievance.OfferView:
+    properties:
+      actions:
+        items:
+          $ref: '#/definitions/grievance.ActionView'
+        type: array
+      authorization:
+        description: EXPLICIT_AGREEMENT | POLICY_AUTHORIZED | UNILATERAL
+        type: string
+      decision:
+        $ref: '#/definitions/grievance.DecisionView'
+      fundedBy:
+        type: string
+      policyRef:
+        type: string
+      proposalId:
+        type: string
+      proposedAt:
+        type: string
+      proposedBy:
+        description: ME | THEM
+        type: string
+      total:
+        type: number
+      verification:
+        $ref: '#/definitions/grievance.Verification'
+      version:
+        type: integer
+    type: object
+  grievance.Order:
+    properties:
+      contractId:
+        type: string
+      currency:
+        type: string
+      lines:
+        items:
+          $ref: '#/definitions/grievance.OrderLine'
+        type: array
+      policyRef:
+        description: |-
+          PolicyRef is the order's grievance SLA policy
+          (offerAttributes.policies.grievanceSla.policyRef), or the default.
+        type: string
+      providerId:
+        type: string
+      providerName:
+        type: string
+      refunds:
+        items:
+          $ref: '#/definitions/grievance.Refund'
+        type: array
+      returnPolicyRef:
+        description: ReturnPolicyRef is the offers' returns policyRef, when they name
+          one.
+        type: string
+      returnable:
+        description: Returnable is whether any offer allows returns (policies.returns.allowed).
+        type: boolean
+      returns:
+        items:
+          $ref: '#/definitions/grievance.Return'
+        type: array
+      status:
+        type: string
+    type: object
+  grievance.OrderLine:
+    properties:
+      commitmentId:
+        type: string
+      name:
+        type: string
+      quantity:
+        type: number
+      resourceId:
+        type: string
+      status:
+        type: string
+      unitPrice:
+        type: number
+    type: object
+  grievance.Refund:
+    properties:
+      amount:
+        type: number
+      currency:
+        type: string
+      reference:
+        type: string
+      settledAt:
+        type: string
+      settlementId:
+        type: string
+      source:
+        description: Source is a goodwill or grievance refund's origin (e.g. GRIEVANCE).
+        type: string
+      status:
+        type: string
+      timelineDays:
+        type: integer
+    type: object
+  grievance.RelatedReference:
+    properties:
+      refId:
+        type: string
+      refType:
+        type: string
+    type: object
+  grievance.Return:
+    properties:
+      commitmentIds:
+        items:
+          type: string
+        type: array
+      performanceId:
+        type: string
+      reason:
+        type: string
+      status:
+        type: string
+    type: object
+  grievance.Support:
+    properties:
+      channels:
+        items:
+          type: object
+        type: array
+      descriptor:
+        $ref: '#/definitions/grievance.Descriptor'
+      orderId:
+        type: string
+      supportAttributes:
+        type: object
+    type: object
+  grievance.TimelineEntry:
+    properties:
+      at:
+        type: string
+      by:
+        description: ME | THEM
+        type: string
+      delivery:
+        description: SENDING | ACK | NACK | FAILED
+        type: string
+      error:
+        type: string
+      eventType:
+        type: string
+      note:
+        type: string
+      result:
+        type: string
+      version:
+        type: integer
+    type: object
+  grievance.Verification:
+    properties:
+      method:
+        type: string
+      verificationReference:
+        type: string
+      verifiedAt:
+        type: string
+      verifiedByNpId:
+        type: string
+    type: object
+  grievancesvc.DecideRequest:
+    properties:
+      accept:
+        type: boolean
+      reason:
+        type: string
+    required:
+    - accept
+    type: object
+  grievancesvc.ErrorResponse:
+    properties:
+      code:
+        enum:
+        - NOT_FOUND
+        - INVALID
+        - SEND_FAILED
+        type: string
+      error:
+        type: string
+    required:
+    - code
+    - error
+    type: object
+  grievancesvc.ExplanationRequest:
+    properties:
+      explanation:
+        type: string
+    required:
+    - explanation
+    type: object
+  grievancesvc.GrievanceDetail:
+    properties:
+      acknowledgedAt:
+        type: string
+      affected:
+        items:
+          $ref: '#/definitions/grievance.AffectedLine'
+        type: array
+      caseStatus:
+        description: |-
+          CaseStatus is the protocol status; DeemedClosed marks a RESOLVED one
+          past its objection period.
+        type: string
+      category:
+        type: string
+      channels:
+        items:
+          type: object
+        type: array
+      closedAt:
+        type: string
+      contractId:
+        type: string
+      deemedClosed:
+        type: boolean
+      description:
+        type: string
+      firstResponseDue:
+        type: string
+      history:
+        items:
+          $ref: '#/definitions/grievance.OfferView'
+        type: array
+      id:
+        type: string
+      lastEventAt:
+        type: string
+      lastSent:
+        allOf:
+        - $ref: '#/definitions/grievance.TimelineEntry'
+        description: |-
+          LastSent is the latest event this participant sent, so the UI can
+          tell "sent" (ACK) from "answered".
+      needsAction:
+        type: boolean
+      next:
+        $ref: '#/definitions/grievance.Next'
+      objectionDeadline:
+        type: string
+      offer:
+        allOf:
+        - $ref: '#/definitions/grievance.OfferView'
+        description: |-
+          Offer is the active resolution version; History the earlier ones,
+          newest first.
+      openedAt:
+        type: string
+      openedBy:
+        description: ME | THEM
+        type: string
+      order:
+        $ref: '#/definitions/grievance.Order'
+      orderId:
+        type: string
+      policyRef:
+        type: string
+      qcRecords:
+        description: |-
+          QCRecords are the order's returns that passed their check, for a
+          refund under the return policy.
+        items:
+          $ref: '#/definitions/grievance.Return'
+        type: array
+      raisedBy:
+        description: BUYER | SELLER
+        type: string
+      related:
+        items:
+          $ref: '#/definitions/grievance.RelatedReference'
+        type: array
+      resolutionDue:
+        type: string
+      resolvedAt:
+        type: string
+      timeline:
+        items:
+          $ref: '#/definitions/grievance.TimelineEntry'
+        type: array
+      transactionId:
+        type: string
+      unread:
+        type: boolean
+    type: object
+  grievancesvc.GrievanceListResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/grievancesvc.Item'
+        type: array
+      needsAction:
+        description: Grievances waiting on the seller.
+        type: integer
+    required:
+    - items
+    - needsAction
+    type: object
+  grievancesvc.Item:
+    properties:
+      acknowledgedAt:
+        type: string
+      affected:
+        items:
+          $ref: '#/definitions/grievance.AffectedLine'
+        type: array
+      caseStatus:
+        description: |-
+          CaseStatus is the protocol status; DeemedClosed marks a RESOLVED one
+          past its objection period.
+        type: string
+      category:
+        type: string
+      channels:
+        items:
+          type: object
+        type: array
+      closedAt:
+        type: string
+      deemedClosed:
+        type: boolean
+      description:
+        type: string
+      dueAt:
+        description: DueAt is the nearest open target (first response or resolution).
+        type: string
+      firstResponseDue:
+        type: string
+      history:
+        items:
+          $ref: '#/definitions/grievance.OfferView'
+        type: array
+      id:
+        type: string
+      lastEventAt:
+        type: string
+      lastSent:
+        allOf:
+        - $ref: '#/definitions/grievance.TimelineEntry'
+        description: |-
+          LastSent is the latest event this participant sent, so the UI can
+          tell "sent" (ACK) from "answered".
+      needsAction:
+        type: boolean
+      next:
+        $ref: '#/definitions/grievance.Next'
+      objectionDeadline:
+        type: string
+      offer:
+        allOf:
+        - $ref: '#/definitions/grievance.OfferView'
+        description: |-
+          Offer is the active resolution version; History the earlier ones,
+          newest first.
+      openedAt:
+        type: string
+      openedBy:
+        description: ME | THEM
+        type: string
+      orderId:
+        type: string
+      orderItems:
+        type: string
+      orderTotal:
+        type: number
+      policyRef:
+        type: string
+      raisedBy:
+        description: BUYER | SELLER
+        type: string
+      related:
+        items:
+          $ref: '#/definitions/grievance.RelatedReference'
+        type: array
+      resolutionDue:
+        type: string
+      resolvedAt:
+        type: string
+      timeline:
+        items:
+          $ref: '#/definitions/grievance.TimelineEntry'
+        type: array
+      transactionId:
+        type: string
+      unread:
+        type: boolean
+    type: object
+  grievancesvc.ProposalAction:
+    properties:
+      amount:
+        type: number
+      commitmentId:
+        type: string
+      description:
+        type: string
+      kind:
+        enum:
+        - REFUND_FULL
+        - REFUND_PARTIAL
+        - REPLACEMENT
+        - REDELIVERY
+        - INFORMATION
+        - NO_ACTION
+        type: string
+      quantity:
+        type: integer
+    required:
+    - kind
+    type: object
+  grievancesvc.ProposalRequest:
+    properties:
+      actions:
+        items:
+          $ref: '#/definitions/grievancesvc.ProposalAction'
+        type: array
+      qcReference:
+        description: QCReference is the approved return whose QC a POLICY route rests
+          on.
+        type: string
+      route:
+        description: |-
+          Route is who allows it: EXPLICIT (the buyer accepts), POLICY (the
+          order's return policy, with the QC of a returned item) or UNILATERAL
+          (the seller bears it without asking).
+        enum:
+        - EXPLICIT
+        - POLICY
+        - UNILATERAL
+        type: string
+    required:
+    - actions
+    - route
+    type: object
+  grievancesvc.RaiseRequest:
+    properties:
+      affected:
+        items:
+          $ref: '#/definitions/grievance.AffectedLine'
+        type: array
+      category:
+        enum:
+        - WRONG_RETURN
+        - RETURN_QC_DISPUTED
+        - OTHER
+        type: string
+      description:
+        type: string
+      returnId:
+        description: ReturnID is the return it is about (its performance id), if any.
+        type: string
+    required:
+    - category
+    - description
+    type: object
   reconsvc.Diff:
     properties:
       diff:
@@ -2636,6 +3229,362 @@ paths:
       summary: Dashboard key metrics
       tags:
       - dashboard
+  /api/v1/grievances:
+    get:
+      description: 'The seller''s grievances (buyer and seller raised), most urgent
+        first: waiting on the seller, then by the nearest response/resolution target
+        of the order''s grievance SLA policy. needsAction counts the ones waiting
+        on the seller (over all, not just this filter).'
+      operationId: listGrievances
+      parameters:
+      - description: Case status.
+        enum:
+        - OPEN
+        - IN_PROGRESS
+        - RESOLVED
+        - CLOSED
+        in: query
+        name: status
+        type: string
+      - description: Category, e.g. DAMAGED_ITEM.
+        in: query
+        name: category
+        type: string
+      - description: 'action: waiting on the seller; sla: a target within 2 hours
+          or past.'
+        enum:
+        - action
+        - sla
+        in: query
+        name: only
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Grievances.
+          schema:
+            $ref: '#/definitions/grievancesvc.GrievanceListResponse'
+        "401":
+          description: Bearer token missing or invalid.
+          schema:
+            $ref: '#/definitions/auth.ErrorResponse'
+        "403":
+          description: No seller profile.
+          schema:
+            $ref: '#/definitions/auth.NoProviderResponse'
+      security:
+      - BearerAuth: []
+      summary: Grievance inbox
+      tags:
+      - grievances
+  /api/v1/grievances/{id}:
+    get:
+      description: The grievance from the seller's side (next step, active offer,
+        earlier versions, timeline) with the order's lines, returns and refunds and
+        the returns that passed QC (for a refund under the return policy). Marks it
+        seen.
+      operationId: getGrievance
+      parameters:
+      - description: Grievance id.
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Grievance.
+          schema:
+            $ref: '#/definitions/grievancesvc.GrievanceDetail'
+        "404":
+          description: Not one of the seller's grievances.
+          schema:
+            $ref: '#/definitions/grievancesvc.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get a grievance
+      tags:
+      - grievances
+  /api/v1/grievances/{id}/acknowledge:
+    post:
+      description: Sends the direct on_support callback of the grievance's OPENED
+        (same messageId). Only needed with GRIEVANCE_AUTO_ACKNOWLEDGE=false; otherwise
+        it is sent on arrival.
+      operationId: acknowledgeGrievance
+      parameters:
+      - description: Grievance id.
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Sent.
+          schema:
+            $ref: '#/definitions/grievancesvc.GrievanceDetail'
+        "400":
+          description: Already acknowledged, or the event breaks the rules.
+          schema:
+            $ref: '#/definitions/grievancesvc.ErrorResponse'
+        "404":
+          description: Not one of the seller's grievances.
+          schema:
+            $ref: '#/definitions/grievancesvc.ErrorResponse'
+        "502":
+          description: Not delivered (SEND_FAILED).
+          schema:
+            $ref: '#/definitions/grievancesvc.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Acknowledge a buyer grievance (ACKNOWLEDGED)
+      tags:
+      - grievances
+  /api/v1/grievances/{id}/close:
+    post:
+      description: Closes a grievance the seller raised. Only the originating participant
+        closes.
+      operationId: closeGrievance
+      parameters:
+      - description: Grievance id.
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Sent.
+          schema:
+            $ref: '#/definitions/grievancesvc.GrievanceDetail'
+        "400":
+          description: Not the originator, or already closed.
+          schema:
+            $ref: '#/definitions/grievancesvc.ErrorResponse'
+        "404":
+          description: Not one of the seller's grievances.
+          schema:
+            $ref: '#/definitions/grievancesvc.ErrorResponse'
+        "502":
+          description: Not delivered (SEND_FAILED).
+          schema:
+            $ref: '#/definitions/grievancesvc.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Close a seller grievance (CLOSED)
+      tags:
+      - grievances
+  /api/v1/grievances/{id}/decision:
+    post:
+      consumes:
+      - application/json
+      description: 'For a grievance the seller raised: accepts or rejects the latest
+        version of the buyer app''s answer as a whole.'
+      operationId: decideResolution
+      parameters:
+      - description: Grievance id.
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Decision
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/grievancesvc.DecideRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Sent.
+          schema:
+            $ref: '#/definitions/grievancesvc.GrievanceDetail'
+        "400":
+          description: Nothing to decide, or the event breaks the rules.
+          schema:
+            $ref: '#/definitions/grievancesvc.ErrorResponse'
+        "404":
+          description: Not one of the seller's grievances.
+          schema:
+            $ref: '#/definitions/grievancesvc.ErrorResponse'
+        "502":
+          description: Not delivered (SEND_FAILED).
+          schema:
+            $ref: '#/definitions/grievancesvc.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Accept or reject the buyer's answer (RESOLUTION_DECIDED)
+      tags:
+      - grievances
+  /api/v1/grievances/{id}/execute:
+    post:
+      description: Runs each pending action through the order's own flows -- a refund
+        settlement (a linked refund that never arrived is paid out again on its settlement),
+        or a redelivery/replacement performance -- sends the updated contract with
+        an unsolicited on_update, then ACTION_COMPLETED with each action's execution
+        reference. Refused until an EXPLICIT_AGREEMENT version is accepted.
+      operationId: executeResolution
+      parameters:
+      - description: Grievance id.
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Sent.
+          schema:
+            $ref: '#/definitions/grievancesvc.GrievanceDetail'
+        "400":
+          description: Not accepted yet, or nothing left to carry out.
+          schema:
+            $ref: '#/definitions/grievancesvc.ErrorResponse'
+        "404":
+          description: Not one of the seller's grievances.
+          schema:
+            $ref: '#/definitions/grievancesvc.ErrorResponse'
+        "502":
+          description: Not delivered (SEND_FAILED).
+          schema:
+            $ref: '#/definitions/grievancesvc.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Carry out the accepted solution (ACTION_COMPLETED)
+      tags:
+      - grievances
+  /api/v1/grievances/{id}/objection:
+    post:
+      consumes:
+      - application/json
+      description: Reopens a RESOLVED grievance the seller raised, within the objection
+        period of its grievance SLA policy.
+      operationId: objectGrievance
+      parameters:
+      - description: Grievance id.
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: What is still wrong
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/grievancesvc.ExplanationRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Sent.
+          schema:
+            $ref: '#/definitions/grievancesvc.GrievanceDetail'
+        "400":
+          description: Not resolved, period over, or not the originator.
+          schema:
+            $ref: '#/definitions/grievancesvc.ErrorResponse'
+        "404":
+          description: Not one of the seller's grievances.
+          schema:
+            $ref: '#/definitions/grievancesvc.ErrorResponse'
+        "502":
+          description: Not delivered (SEND_FAILED).
+          schema:
+            $ref: '#/definitions/grievancesvc.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Object to a resolved grievance (OBJECTION)
+      tags:
+      - grievances
+  /api/v1/grievances/{id}/proposal:
+    post:
+      consumes:
+      - application/json
+      description: Sends version 1, or the next version after a rejection or objection.
+        route EXPLICIT waits for the buyer's decision; POLICY cites the order's return
+        policy and the QC of an approved return (qcReference) and needs no decision;
+        UNILATERAL is borne by the seller without asking. Refund amounts are capped
+        at what the buyer paid for the lines. A refund on a REFUND_NOT_RECEIVED grievance
+        reuses the linked refund settlement.
+      operationId: proposeResolution
+      parameters:
+      - description: Grievance id.
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Solution
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/grievancesvc.ProposalRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Sent.
+          schema:
+            $ref: '#/definitions/grievancesvc.GrievanceDetail'
+        "400":
+          description: Invalid route, action, amount or QC record, or the event breaks
+            the rules.
+          schema:
+            $ref: '#/definitions/grievancesvc.ErrorResponse'
+        "404":
+          description: Not one of the seller's grievances.
+          schema:
+            $ref: '#/definitions/grievancesvc.ErrorResponse'
+        "502":
+          description: Not delivered (SEND_FAILED).
+          schema:
+            $ref: '#/definitions/grievancesvc.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Propose a solution (RESOLUTION_PROPOSED)
+      tags:
+      - grievances
+  /api/v1/grievances/{id}/resolve:
+    post:
+      description: Sends RESOLVED once every action that moves money or goods has
+        an execution reference (and, for EXPLICIT_AGREEMENT, the version was accepted).
+      operationId: resolveGrievance
+      parameters:
+      - description: Grievance id.
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Sent.
+          schema:
+            $ref: '#/definitions/grievancesvc.GrievanceDetail'
+        "400":
+          description: Actions still pending, or not accepted.
+          schema:
+            $ref: '#/definitions/grievancesvc.ErrorResponse'
+        "404":
+          description: Not one of the seller's grievances.
+          schema:
+            $ref: '#/definitions/grievancesvc.ErrorResponse'
+        "502":
+          description: Not delivered (SEND_FAILED).
+          schema:
+            $ref: '#/definitions/grievancesvc.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Mark the grievance resolved (RESOLVED)
+      tags:
+      - grievances
   /api/v1/inventory/items:
     get:
       description: Paginated list of the seller's resources, each with its catalog,
@@ -2975,6 +3924,72 @@ paths:
       summary: Set an order's fulfillment status
       tags:
       - orders
+  /api/v1/orders/{id}/grievances:
+    get:
+      operationId: listOrderGrievances
+      parameters:
+      - description: Contract id.
+        format: uuid
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Grievances (needsAction is 0).
+          schema:
+            $ref: '#/definitions/grievancesvc.GrievanceListResponse'
+      security:
+      - BearerAuth: []
+      summary: An order's grievances
+      tags:
+      - grievances
+    post:
+      consumes:
+      - application/json
+      description: Sends an unsolicited /on_support with an IONGrievance OPENED, raisedBy.side
+        SELLER, against the buyer -- e.g. WRONG_RETURN about a return (returnId links
+        its performance and fills the affected lines).
+      operationId: raiseGrievance
+      parameters:
+      - description: Contract id.
+        format: uuid
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Grievance
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/grievancesvc.RaiseRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Opened.
+          schema:
+            $ref: '#/definitions/grievancesvc.GrievanceDetail'
+        "400":
+          description: Invalid category, description, return or lines.
+          schema:
+            $ref: '#/definitions/grievancesvc.ErrorResponse'
+        "404":
+          description: Not one of the seller's orders.
+          schema:
+            $ref: '#/definitions/grievancesvc.ErrorResponse'
+        "502":
+          description: Not delivered (SEND_FAILED).
+          schema:
+            $ref: '#/definitions/grievancesvc.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Report a problem with an order (seller grievance OPENED)
+      tags:
+      - grievances
   /api/v1/providers:
     get:
       description: Returns a list with only the seller's own provider (at most one
@@ -3489,33 +4504,35 @@ paths:
     post:
       consumes:
       - application/json
-      description: 'Returns a synchronous ACK, then works asynchronously: creates
-        a support ticket from message.support (orderId is treated as a transaction
-        id when linking it to a contract) and sends on_support with the ticket id
-        and the BPP''s hard-coded support channels.'
-      operationId: becknSupport
+      description: 'Delivered by onix-bpp''s receiver. message.support.supportAttributes
+        is an IONGrievance (ion-specs Grievance/v1): checked against the grievance''s
+        earlier events (stale decision, proposer deciding its own proposal, allocation
+        rules, missing links, objection/closure by a non-originator, ...) and stored,
+        or NACKed with the reason. A new buyer grievance is acknowledged with its
+        direct on_support callback (same messageId) unless GRIEVANCE_AUTO_ACKNOWLEDGE=false.
+        A plain support without supportAttributes is ACKed and answered with an on_support
+        echoing the order.'
+      operationId: webhookSupport
       parameters:
-      - description: Beckn message forwarded by onix-bpp
+      - description: Beckn support
         in: body
-        name: body
+        name: request
         required: true
         schema:
-          $ref: '#/definitions/server.BecknWebhookRequest'
+          $ref: '#/definitions/grievance.Message'
       produces:
       - application/json
       responses:
         "200":
-          description: Synchronous ACK; context echoes the inbound context fields
+          description: ACK, or NACK with error.message.
           schema:
-            $ref: '#/definitions/server.BecknAckResponse'
+            $ref: '#/definitions/grievance.Ack'
         "400":
-          description: 'NACK: body not decodable into the request type (context then
-            all empty strings), or context.bapUri empty (context echoed). No reason
-            field'
+          description: Body is not JSON (NACK).
           schema:
-            $ref: '#/definitions/server.BecknAckResponse'
+            $ref: '#/definitions/grievance.Ack'
       security: []
-      summary: Beckn support
+      summary: Receive a grievance event from the buyer app (Beckn support)
       tags:
       - beckn webhooks
   /api/webhook/track:

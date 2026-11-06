@@ -120,6 +120,11 @@ type Config struct {
 	// this API through its own same-origin nginx proxy, needing no CORS
 	// exception). Env: LANDING_PAGE_ORIGIN
 	LandingPageOrigin string
+
+	// GrievanceAutoAcknowledge acknowledges a buyer grievance (on_support
+	// ACKNOWLEDGED) as soon as it arrives. With it off, the seller
+	// acknowledges from the dashboard. GRIEVANCE_AUTO_ACKNOWLEDGE, default true.
+	GrievanceAutoAcknowledge bool
 }
 
 // Load reads all config values from the environment and returns a validated Config.
@@ -160,9 +165,10 @@ func Load() (*Config, error) {
 		BppPrivateKey: os.Getenv("BPP_PRIVATE_KEY"),
 		BppKeyID:      os.Getenv("BPP_KEY_ID"),
 
-		ZitadelIssuer:      getEnv("ZITADEL_ISSUER", "http://localhost:8090"),
-		ZitadelInternalURL: os.Getenv("ZITADEL_INTERNAL_URL"),
-		LandingPageOrigin:  getEnv("LANDING_PAGE_ORIGIN", "http://localhost:3002"),
+		ZitadelIssuer:            getEnv("ZITADEL_ISSUER", "http://localhost:8090"),
+		ZitadelInternalURL:       os.Getenv("ZITADEL_INTERNAL_URL"),
+		LandingPageOrigin:        getEnv("LANDING_PAGE_ORIGIN", "http://localhost:3002"),
+		GrievanceAutoAcknowledge: getEnv("GRIEVANCE_AUTO_ACKNOWLEDGE", "true") != "false",
 	}
 	if cfg.ZitadelInternalURL == "" {
 		cfg.ZitadelInternalURL = cfg.ZitadelIssuer

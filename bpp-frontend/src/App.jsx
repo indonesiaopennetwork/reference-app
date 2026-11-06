@@ -6,12 +6,15 @@ import {
   RefreshCw, X, ChevronLeft, ChevronRight as ChevronRightIcon,
   Upload, Plus, Trash2, Eye, Search,
   Store, Tag,
-  ArrowRight, Circle, Star, Ticket, Ban, Wand2,
+  ArrowRight, Circle, Star, MessageSquareWarning, Ban, Wand2,
   BookOpen, Send, ArrowLeft, ExternalLink,
   ChevronDown, Copy, Check, Scale, Pencil, Compass, Lock,
   PauseCircle, PlayCircle, Layers, FileText,
 } from 'lucide-react'
 import { captureTokenFromUrl, getToken, getIdToken, clearToken, redirectToLogin, basePath } from './auth.js'
+import { apiFetch } from './api.js'
+import { GrievancesPage, OrderGrievances } from './Grievances.jsx'
+import { useNeedsAction } from './grievanceData.js'
 import Tour from './Tour.jsx'
 import { useReconSelection, inDateRange } from './reconSelection.js'
 import { BatchSettlements, AnswerSummary, CollectionChip } from './ReconDetails.jsx'
@@ -20,31 +23,10 @@ import { CrcSelect, CrcAttributes, crcByCode, crcResourceAttributes, crcFormValu
 import { CRC_AUTOFILL } from './crcSamples.js'
 import { useI18n, rich, LanguageToggle, tNow, localeNow } from './i18n.jsx'
 
-const API_BASE = `${basePath}api/v1`
 const BRAND = 'linear-gradient(135deg,#00b8e6 0%,#1e2fa0 100%)'
 const BRAND2 = 'linear-gradient(135deg,#e6006e 0%,#7c3aed 100%)'
 
 // ─── helpers ────────────────────────────────────────────────────────────────
-
-async function apiFetch(path, opts = {}) {
-  const token = getToken()
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    ...opts,
-  })
-  if (res.status === 401) {
-    // Token missing/expired/invalid -- nothing to recover client-side,
-    // send the seller back through landing-page's login redirect.
-    clearToken()
-    redirectToLogin()
-    throw new Error('unauthorized')
-  }
-  if (!res.ok) { const b = await res.text(); throw new Error(b || res.statusText) }
-  return res.json()
-}
 
 // LIVE_EVERY is how often a live page (useApi with { live: true }) refreshes
 // its data in the background, so changes made elsewhere -- the buyer app's
@@ -249,7 +231,7 @@ const NAV_ITEMS = [
   { id: 'orders', label: 'Orders', icon: ShoppingBag, desc: 'Manage contracts' },
   { id: 'inventory', label: 'Inventory', icon: Package, desc: 'Resources & offers' },
   { id: 'reconciliation', label: 'Reconciliation', icon: Scale, desc: 'Settle with buyer apps' },
-  { id: 'support', label: 'Support Tickets', icon: Ticket, desc: 'Customer support' },
+  { id: 'support', label: 'Grievances', icon: MessageSquareWarning, desc: 'Buyer complaints' },
   { id: 'ratings', label: 'Ratings', icon: Star, desc: 'Order ratings' },
   { id: 'messages', label: 'Message Log', icon: MessageSquare, desc: 'Protocol audit' },
 ]
@@ -345,8 +327,16 @@ const tourSteps = t => [
     body: <p>{rich(t("After delivery plus your settlement window, an order's payment falls <b>due</b>. Send <b>reconcile</b> to the buyer app (it can also send you one); when both sides agree, SEAM has the PJP pay you from the held funds."))}</p>
   },
   {
-    eyebrow: t('Support'), page: 'support', target: 'nav-support', title: t('Support tickets'),
-    body: <p>{t('Help requests buyers raise about their orders.')}</p>
+    eyebrow: t('Grievances'), page: 'support', target: 'nav-support', title: t('Complaints'),
+    body: <><p>{t('When a buyer has a problem with an order, the complaint lands here. The ones waiting on you come first, with a timer showing how long you have to reply or resolve.')}</p><p className="text-slate-400">{t('The number next to the menu item counts complaints that need your action.')}</p></>
+  },
+  {
+    eyebrow: t('Grievances'), page: 'support', target: 'grievance-filters', title: t('Find what needs you'),
+    body: <p>{rich(t('<b>Needs action</b> shows only complaints waiting on you; <b>Time limit nearly up</b> shows those close to their deadline. You can also filter by status and by problem.'))}</p>
+  },
+  {
+    eyebrow: t('Grievances'), page: 'support', target: 'grievance-list', title: t('Handle a complaint'),
+    body: <><p>{rich(t('Open a complaint to see the order, what the buyer said and the one next step. <b>Propose a solution</b> (refund, replacement, sending again or an explanation), then <b>Process refund</b> or <b>Send again</b>, and <b>Mark resolved</b>.'))}</p><p className="text-slate-400">{rich(t('To report a problem with a return yourself, open the order and click <b>Report a problem</b>.'))}</p></>
   },
   {
     eyebrow: t('Ratings'), page: 'ratings', target: 'nav-ratings', title: t('Ratings'),
@@ -363,7 +353,7 @@ const tourSteps = t => [
 ]
 const TOUR_DONE_KEY = 'bpp.tourDone'
 
-function Sidebar({ active, onNav, open, onClose, onTour }) {
+function Sidebar({ active, onNav, open, onClose, onTour, badges = {} }) {
   const { t } = useI18n()
   const ownProvider = useOwnProvider()
   const bapBaseUrl = window.__env__?.BAP_URL || import.meta.env.VITE_BAP_URL || '#'
@@ -427,6 +417,12 @@ function Sidebar({ active, onNav, open, onClose, onTour }) {
                 <p className="text-sm leading-none">{t(label)}</p>
                 <p className={`text-[10px] mt-0.5 truncate ${isActive ? 'text-cyan-400/60' : 'text-slate-600'}`}>{t(desc)}</p>
               </div>
+              {badges[id] > 0 && (
+                <span className="shrink-0 min-w-5 h-5 px-1.5 rounded-full bg-amber-400 text-[10px] font-bold text-slate-950 flex items-center justify-center"
+                  title={t('{count} need your action', { count: badges[id] })}>
+                  {badges[id]}<span className="sr-only"> {t('{count} need your action', { count: badges[id] })}</span>
+                </span>
+              )}
               {isActive && <ChevronRight size={13} style={{ color: '#00b8e6', flexShrink: 0 }} />}
             </button>
           )
@@ -612,13 +608,11 @@ function ActivityRow({ o, onView }) {
   )
 }
 
-function OverviewPage({ onNav }) {
+function OverviewPage({ onNav, needsAction = null }) {
   const { t } = useI18n()
   const { data: stats, loading: sLoad, error: sErr, reload } = useApi('/dashboard/stats', [], { live: true })
   const { data: orders } = useApi('/orders?limit=6', [], { live: true })
-  const { data: supportData } = useApi('/support-tickets?page=1&limit=1')
   const { data: ratingsData } = useApi('/ratings?page=1&limit=1')
-  const totalTickets = supportData?.total ?? null
   const totalRatings = ratingsData?.total ?? null
 
   return (
@@ -670,7 +664,8 @@ function OverviewPage({ onNav }) {
       <div className="grid grid-cols-2 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
         <StatCard label={t('Active Offers')} value={stats?.offer_count} icon={Tag} gradient="linear-gradient(135deg,#e6006e,#7c3aed)" loading={sLoad} onClick={() => onNav('inventory', { initialTab: 'offers' })} />
         <StatCard label={t('Out of Stock')} value={stats?.out_of_stock ?? 0} icon={Ban} gradient="linear-gradient(135deg,#ef4444,#b91c1c)" loading={sLoad} onClick={() => onNav('inventory', { initialTab: 'availability' })} />
-        <StatCard label={t('Support Tickets')} value={totalTickets} icon={Ticket} gradient="linear-gradient(135deg,#8b5cf6,#6d28d9)" loading={totalTickets === null} onClick={() => onNav('support')} />
+        <StatCard label={t('Needs action')} value={needsAction} icon={MessageSquareWarning} gradient="linear-gradient(135deg,#8b5cf6,#6d28d9)" loading={needsAction === null}
+          sub={t('Complaints waiting on you')} onClick={() => onNav('support', { only: 'action' })} />
         <StatCard label={t('Ratings')} value={totalRatings} icon={Star} gradient="linear-gradient(135deg,#f59e0b,#b45309)" loading={totalRatings === null} onClick={() => onNav('ratings')} />
       </div>
 
@@ -710,7 +705,7 @@ function OverviewPage({ onNav }) {
 
 // ─── Orders ───────────────────────────────────────────────────────────────────
 
-function OrderDetailDrawer({ order, onClose }) {
+function OrderDetailDrawer({ order, onClose, onOpenGrievance }) {
   const { t } = useI18n()
   const { data, loading, reload } = useApi(order?.id ? `/orders/${order.id}` : null, [order?.id], { live: true })
   const [updating, setUpdating] = useState(false)
@@ -847,6 +842,12 @@ function OrderDetailDrawer({ order, onClose }) {
                     </section>
                   )}
 
+                  {/* Complaints: the order's grievances, and "Report a problem" on its returns */}
+                  {data?.contract?.id && (
+                    <OrderGrievances contractId={data.contract.id} onOpen={onOpenGrievance}
+                      returns={returnPerfs.map(rp => ({ performanceId: rp.id, status: rp.status?.code || '' }))} />
+                  )}
+
                   {/* Commitments */}
                   {data?.commitments?.length > 0 && (
                     <section>
@@ -947,7 +948,7 @@ function FulfillmentStatus({ status, returnStatus, contractStatus }) {
   )
 }
 
-function OrdersPage() {
+function OrdersPage({ onNav }) {
   const { t } = useI18n()
   const [page, setPage] = useState(1)
   const [selected, setSelected] = useState(null)
@@ -1024,7 +1025,8 @@ function OrdersPage() {
         <Pagination page={page} totalPages={totalPages} onPage={setPage} total={total} limit={limit} />
       </Card>
 
-      <OrderDetailDrawer order={selected} onClose={() => setSelected(null)} />
+      <OrderDetailDrawer order={selected} onClose={() => setSelected(null)}
+        onOpenGrievance={onNav ? id => { setSelected(null); onNav('support', { grievanceId: id }) } : undefined} />
     </div>
   )
 }
@@ -3299,66 +3301,6 @@ function OrderRatings({ contractId }) {
   )
 }
 
-// ─── SupportPage ─────────────────────────────────────────────────────────────
-
-function SupportPage() {
-  const { t } = useI18n()
-  const [page, setPage] = useState(1)
-  const limit = 20
-  const { data, loading, error, reload } = useApi(`/support-tickets?page=${page}&limit=${limit}`, [page], { live: true })
-  const items = data?.items || []
-  const total = data?.total ?? 0
-  const totalPages = Math.ceil(total / limit) || 1
-
-  const statusCls = {
-    OPEN: 'bg-amber-500/15 text-amber-400 border border-amber-500/25',
-    RESOLVED: 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25',
-  }
-
-  return (
-    <div>
-      <PageHeader title={t('Support Tickets')} subtitle={t('Customer support requests received via Beckn protocol')}
-        action={<button onClick={reload} className="shrink-0 whitespace-nowrap flex items-center gap-2 text-xs font-semibold px-4 py-2 rounded-xl text-slate-300 border border-white/10 hover:border-white/20 transition-all"><RefreshCw size={13} /> {t('Refresh')}</button>} />
-
-      {error && <ErrorBox message={error} onRetry={reload} />}
-
-      <Card>
-        {loading ? <LoadingSpinner label={t('Loading tickets…')} /> : (
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="border-b border-white/[0.06]">
-                {['Ticket ID', 'Order (Txn)', 'BAP', 'Description', 'Status', 'Created'].map(h => (
-                  <th key={h} className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-slate-500">{t(h)}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {items.map(tk => (
-                <tr key={tk.id} className="border-b border-white/[0.04] hover:bg-white/[0.02] transition-colors">
-                  <td className="px-5 py-3 font-mono text-slate-400">{tk.id.slice(0, 8)}…</td>
-                  <td className="px-5 py-3 font-mono text-slate-400">{tk.transactionId ? tk.transactionId.slice(0, 8) + '…' : '—'}</td>
-                  <td className="px-5 py-3 text-slate-300 max-w-[140px] truncate">{tk.bapId || '—'}</td>
-                  <td className="px-5 py-3 text-slate-300 max-w-[200px] truncate">{tk.name || tk.shortDesc || '—'}</td>
-                  <td className="px-5 py-3">
-                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold ${statusCls[tk.status] || 'bg-slate-500/15 text-slate-400'}`}>
-                      {tk.status ? t(tk.status) : '—'}
-                    </span>
-                  </td>
-                  <td className="px-5 py-3 text-slate-500">{fmtDateShort(tk.createdAt)}</td>
-                </tr>
-              ))}
-              {!items.length && (
-                <tr><td colSpan={6} className="px-5 py-12 text-center text-slate-500">{t('No support tickets yet')}</td></tr>
-              )}
-            </tbody>
-          </table>
-        )}
-        <Pagination page={page} totalPages={totalPages} onPage={setPage} total={total} limit={limit} />
-      </Card>
-    </div>
-  )
-}
-
 // ─── RatingsPage ─────────────────────────────────────────────────────────────
 
 function RatingsPage() {
@@ -4833,7 +4775,7 @@ const PAGES = {
   publish: PublishPage,
   messages: MessagesPage,
   reconciliation: ReconciliationPage,
-  support: SupportPage,
+  support: GrievancesPage,
   ratings: RatingsPage,
 }
 
@@ -4844,6 +4786,8 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [authReady, setAuthReady] = useState(false)
   const Page = PAGES[page] || OverviewPage
+  // Complaints waiting on the seller: sidebar badge and dashboard card.
+  const needsAction = useNeedsAction(authReady)
 
   const onNav = (target, extra = {}) => { setPage(target); setNavExtra(extra); setSidebarOpen(false) }
 
@@ -4896,7 +4840,8 @@ export default function App() {
 
   return (
     <div className="flex min-h-screen" style={{ background: '#080d1e' }}>
-      <Sidebar active={page} onNav={onNav} open={sidebarOpen} onClose={() => setSidebarOpen(false)} onTour={() => setTourOpen(true)} />
+      <Sidebar active={page} onNav={onNav} open={sidebarOpen} onClose={() => setSidebarOpen(false)} onTour={() => setTourOpen(true)}
+        badges={{ support: needsAction }} />
       <Tour steps={tourStepList} open={tourOpen} onClose={closeTour} onStep={onTourStep} state={{ page }} />
 
       <main className="flex-1 lg:ml-64 min-h-screen overflow-y-auto">
@@ -4924,7 +4869,7 @@ export default function App() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -8 }}
               transition={{ duration: 0.18 }}>
-              <Page onNav={onNav} {...navExtra} />
+              <Page onNav={onNav} needsAction={needsAction} {...navExtra} />
             </motion.div>
           </AnimatePresence>
         </div>

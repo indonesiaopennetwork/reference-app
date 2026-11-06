@@ -72,25 +72,30 @@ modules:
         keyManager:
           id: simplekeymanager
           config:
-            networkParticipant: sample-cn.bpp-backend2.ion-ref-app.ayushmatha.in
-            keyId: sample-cn-ion-ref-app-ayushmatha-in
+            networkParticipant: onix-bap-x7m2wmy7nq-et.a.run.app
+            keyId: 76EU91ME6AjAq2emEzHCJ2aNXgZAfRTF2VNRa3o6j6m7KPT7AdKmLc
             signingPrivateKey: REMOVED
-            signingPublicKey: nNrqM6oH1Hhvq8c8D9I40Zd3aPNmLqx8+CYiAlTbhoY=
+            signingPublicKey: nHKQUR4dfE40eGnxP6phRvWiNzYRQuetJiybTtpndbs=
             encrPrivateKey: REMOVED
-            encrPublicKey: nNrqM6oH1Hhvq8c8D9I40Zd3aPNmLqx8+CYiAlTbhoY=
+            encrPublicKey: nHKQUR4dfE40eGnxP6phRvWiNzYRQuetJiybTtpndbs=
         schemaValidator:
           id: schemav2validator
           config:
-            type: url
-            # Release 1's Beckn core contract (ion-specs vendored/beckn, identical to
-            # upstream core-v2.0.0-lts), as ion-additional.yaml references it.
-            location: https://schema.ion.id/release1/schema/vendored/beckn/api/v2.0.0/beckn.yaml
+            # TEMPORARY (grievance testing): local ion-specs beckn.yaml patched with
+            # Support.supportAttributes (Beckn PR #204), mounted by
+            # docker-compose.override.yml. Revert to:
+            #   type: url
+            #   location: https://schema.ion.id/release1/schema/vendored/beckn/api/v2.0.0/beckn.yaml
+            type: file
+            location: /app/schemas/beckn.yaml
             cacheTTL: "3600"
             extendedSchema_enabled: "true"
             extendedSchema_cacheTTL: "86400"
             extendedSchema_maxCacheSize: "100"
             extendedSchema_downloadTimeout: "30"
             extendedSchema_allowedDomains: "raw.githubusercontent.com,schema.ion.id,schema.beckn.io"
+            # TEMPORARY: the Grievance pack (IONGrievance) is not on schema.ion.id yet.
+            extendedSchema_localSchemaPath: /app/local-schemas
             # ION endpoints Beckn does not define (/reconcile, /on_reconcile), merged
             # into the action index.
             auxiliaryTypes: "url"
@@ -146,25 +151,30 @@ modules:
         keyManager:
           id: simplekeymanager
           config:
-            networkParticipant: sample-cn.bpp-backend2.ion-ref-app.ayushmatha.in
-            keyId: sample-cn-ion-ref-app-ayushmatha-in
+            networkParticipant: onix-bap-x7m2wmy7nq-et.a.run.app
+            keyId: 76EU91ME6AjAq2emEzHCJ2aNXgZAfRTF2VNRa3o6j6m7KPT7AdKmLc
             signingPrivateKey: REMOVED
-            signingPublicKey: nNrqM6oH1Hhvq8c8D9I40Zd3aPNmLqx8+CYiAlTbhoY=
+            signingPublicKey: nHKQUR4dfE40eGnxP6phRvWiNzYRQuetJiybTtpndbs=
             encrPrivateKey: REMOVED
-            encrPublicKey: nNrqM6oH1Hhvq8c8D9I40Zd3aPNmLqx8+CYiAlTbhoY=
+            encrPublicKey: nHKQUR4dfE40eGnxP6phRvWiNzYRQuetJiybTtpndbs=
         schemaValidator:
           id: schemav2validator
           config:
-            type: url
-            # Release 1's Beckn core contract (ion-specs vendored/beckn, identical to
-            # upstream core-v2.0.0-lts), as ion-additional.yaml references it.
-            location: https://schema.ion.id/release1/schema/vendored/beckn/api/v2.0.0/beckn.yaml
+            # TEMPORARY (grievance testing): local ion-specs beckn.yaml patched with
+            # Support.supportAttributes (Beckn PR #204), mounted by
+            # docker-compose.override.yml. Revert to:
+            #   type: url
+            #   location: https://schema.ion.id/release1/schema/vendored/beckn/api/v2.0.0/beckn.yaml
+            type: file
+            location: /app/schemas/beckn.yaml
             cacheTTL: "3600"
             extendedSchema_enabled: "true"
             extendedSchema_cacheTTL: "86400"
             extendedSchema_maxCacheSize: "100"
             extendedSchema_downloadTimeout: "30"
             extendedSchema_allowedDomains: "raw.githubusercontent.com,schema.ion.id,schema.beckn.io"
+            # TEMPORARY: the Grievance pack (IONGrievance) is not on schema.ion.id yet.
+            extendedSchema_localSchemaPath: /app/local-schemas
             # ION endpoints Beckn does not define (/reconcile, /on_reconcile), merged
             # into the action index.
             auxiliaryTypes: "url"

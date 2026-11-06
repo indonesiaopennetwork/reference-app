@@ -394,35 +394,6 @@ func (h *ClientHandler) HandleRate(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "RATE_SENT"})
 }
 
-// HandleSupport raises a support request for an order.
-//
-//	@Summary		Raise a support request (Beckn support)
-//	@ID				requestSupport
-//	@Description	Sends Beckn support with support.orderId (defaults to the transaction id) and support.descriptor.shortDesc = description, and sets the status to SUPPORT_SENT. The answer arrives via /api/webhook/on_support. The bearer token is optional: without one the request is served anonymously; one that fails verification is rejected with 401.
-//	@Tags			order actions
-//	@Accept			json
-//	@Produce		json
-//	@Param			request body ClientSupportRequest true "Request body"
-//	@Success		200 {object} ActionStatusResponse "Support request sent (status SUPPORT_SENT)."
-//	@Failure		400 {object} ErrorResponse "Request body missing, not JSON, or missing a required field."
-//	@Failure		401 {object} ErrorResponse "A bearer token was sent but failed verification (no token is fine)."
-//	@Failure		500 {object} ErrorResponse "Transaction or snapshot not found, database error, or the adapter call failed / returned non-200 (the error text says which)."
-//	@Security		BearerAuth
-//	@Router			/api/v1/support [post]
-func (h *ClientHandler) HandleSupport(c *gin.Context) {
-	var req ClientSupportRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-	if err := h.svc.Support(c.Request.Context(), &req); err != nil {
-		h.lh.WithModule("client_handler").Err().Error(err).Log("support failed")
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"status": "SUPPORT_SENT"})
-}
-
 // HandleCatalog returns the food retail catalog.
 //
 //	@Summary		Static demo catalog
