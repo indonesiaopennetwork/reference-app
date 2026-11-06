@@ -10,7 +10,9 @@ resource "google_cloud_run_v2_service" "bpp_frontend" {
     service_account = google_service_account.cloud_run_sa.email
 
     scaling {
-      min_instance_count = 0
+      # 1, not 0: see the scaling comment on bap/onix-bap -- keeps the
+      # first page load after idle from paying a cold start too.
+      min_instance_count = 1
       max_instance_count = 3
     }
 

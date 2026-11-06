@@ -25,7 +25,12 @@ resource "google_cloud_run_v2_service" "bap" {
     service_account = google_service_account.cloud_run_sa.email
 
     scaling {
-      min_instance_count = 0
+      # 1, not 0: at 0, the first request after any idle period pays a
+      # Cloud Run cold start plus onix's own cold-cache tax (extended
+      # schema / DeDi registry lookups, measured at 10-35s+ elsewhere in
+      # this project) -- long enough for a transient local network hiccup
+      # to abort the in-flight request client-side (net::ERR_NETWORK_CHANGED).
+      min_instance_count = 1
       max_instance_count = 3
     }
 

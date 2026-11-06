@@ -17,7 +17,9 @@ resource "google_cloud_run_v2_service" "dedi_static" {
     execution_environment = "EXECUTION_ENVIRONMENT_GEN2"
 
     scaling {
-      min_instance_count = 0
+      # 1, not 0: see the scaling comment on bap/onix-bap -- avoids a cold
+      # start on the first DeDi/catalog file fetch after idle too.
+      min_instance_count = 1
       max_instance_count = 3
     }
 

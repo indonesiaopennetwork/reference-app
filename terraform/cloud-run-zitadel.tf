@@ -67,7 +67,13 @@ resource "google_cloud_run_v2_service" "zitadel" {
     execution_environment = "EXECUTION_ENVIRONMENT_GEN2"
 
     scaling {
-      min_instance_count = 0
+      # 1, not 0: every login (via landing-page's OIDC flow) hits zitadel.
+      # At 0, the first login after any idle period pays a cold start on
+      # top of zitadel's own slow-to-initialize startup (DB connection via
+      # cloudsql-proxy), long enough for a transient local network hiccup
+      # to abort the in-flight request client-side (net::ERR_NETWORK_CHANGED),
+      # which then looks fine again on the next click once it's warm.
+      min_instance_count = 1
       max_instance_count = 3
     }
 

@@ -17,7 +17,10 @@ resource "google_cloud_run_v2_service" "ion_landing_page" {
     execution_environment = "EXECUTION_ENVIRONMENT_GEN2"
 
     scaling {
-      min_instance_count = 0
+      # 1, not 0: this is the outer proxy every request goes through
+      # (demo.ion.id/tsp/remiges/...) -- see the scaling comment on
+      # bap/onix-bap for why 0 is risky here too.
+      min_instance_count = 1
       max_instance_count = 3
     }
 

@@ -31,7 +31,14 @@ resource "google_cloud_run_v2_service" "landing_page" {
     service_account = google_service_account.cloud_run_sa.email
 
     scaling {
-      min_instance_count = 0
+      # 1, not 0: landing-page is the OIDC entry point every login goes
+      # through. At 0, the first login after any idle period pays a cold
+      # start plus onix's own cold-cache tax (extended schema / DeDi
+      # registry lookups, measured at 10-35s+ elsewhere in this project) on
+      # top of it -- long enough for a transient local network hiccup to
+      # abort the in-flight request client-side (net::ERR_NETWORK_CHANGED),
+      # which then looks fine again on the next click once everything's warm.
+      min_instance_count = 1
       max_instance_count = 3
     }
 
