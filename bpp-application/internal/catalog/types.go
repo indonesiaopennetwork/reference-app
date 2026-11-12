@@ -159,6 +159,7 @@ var onixVisibleToNetworks = []string{
 	"nfh.global/testnet",
 	"ion.id/ion-launch",
 	"ion.id/staging",
+	"ion.id/testnet",
 }
 
 // ToOnixCatalog converts a Catalog into the shape onix-catalog-publisher
