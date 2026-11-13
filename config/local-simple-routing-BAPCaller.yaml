@@ -15,14 +15,13 @@ routingRules:
   - version: "2.0.0"
     targetType: "url"
     target:
-      # discovery-service, not mock-cds: the real, spec-compliant crawler
-      # (retiredAt tombstones, isActive pause/resume, textSearch matching)
-      # -- mock-cds.py just globs every *.latest.json.gz file on disk with
-      # no lifecycle awareness at all, so a retired/paused catalog kept
-      # showing up in search through it indefinitely. discovery-service's
-      # TRUSTED_CALLER_KEY_ID/TRUSTED_CALLER_PUBLIC_KEY_BASE64 (docker-
-      # compose.yml) already trust onix-bap's own signing key (BAP_KEY_ID/
-      # BAP_ONIX_SIGNING_PUBLIC_KEY), so its signed requests are accepted.
-      url: "http://discovery-service:8087"
+      # mock-cds (scripts/mock-cds.py): ACKs the discover, then sends
+      # on_discover to the request's bapUri, signed as the BAP. It answers
+      # from the *.latest.json.gz catalog files on disk, skipping paused,
+      # retired and schema-invalid ones (see its skip_reason). For the real
+      # crawler use discovery-service instead: url "http://discovery-service:8087"
+      # -- its TRUSTED_CALLER_KEY_ID/TRUSTED_CALLER_PUBLIC_KEY_BASE64
+      # (docker-compose.yml) already trust onix-bap's signing key.
+      url: "http://mock-cds:8086"
     endpoints:
       - discover
