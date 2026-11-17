@@ -72,8 +72,8 @@ modules:
         keyManager:
           id: simplekeymanager
           config:
-            networkParticipant: sample-cn.bpp-backend2.ion-ref-app.ayushmatha.in
-            keyId: sample-cn-ion-ref-app-ayushmatha-in
+            networkParticipant: cn.bpp.ion.remiges.tech
+            keyId: cn-ion-ref-app-remiges-tech
             signingPrivateKey: REMOVED
             signingPublicKey: nNrqM6oH1Hhvq8c8D9I40Zd3aPNmLqx8+CYiAlTbhoY=
             encrPrivateKey: REMOVED
@@ -146,8 +146,8 @@ modules:
         keyManager:
           id: simplekeymanager
           config:
-            networkParticipant: sample-cn.bpp-backend2.ion-ref-app.ayushmatha.in
-            keyId: sample-cn-ion-ref-app-ayushmatha-in
+            networkParticipant: cn.bpp.ion.remiges.tech
+            keyId: cn-ion-ref-app-remiges-tech
             signingPrivateKey: REMOVED
             signingPublicKey: nNrqM6oH1Hhvq8c8D9I40Zd3aPNmLqx8+CYiAlTbhoY=
             encrPrivateKey: REMOVED

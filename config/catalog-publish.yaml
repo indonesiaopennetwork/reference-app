@@ -66,8 +66,8 @@ modules:
         keyManager:
           id: simplekeymanager
           config:
-            subscriberId: sample-pn.bpp-backend2.ion-ref-app.ayushmatha.in
-            keyId: sample-pn-ion-ref-app-ayushmatha-in
+            subscriberId: pn.bpp.ion.remiges.tech
+            keyId: pn-ion-ref-app-remiges-tech
             signingPrivateKey: REMOVED
             signingPublicKey: nNrqM6oH1Hhvq8c8D9I40Zd3aPNmLqx8+CYiAlTbhoY=
             encrPrivateKey: REMOVED
