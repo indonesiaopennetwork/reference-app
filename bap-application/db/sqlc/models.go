@@ -157,6 +157,58 @@ func (ns NullMessageDirection) Value() (driver.Value, error) {
 	return string(ns.MessageDirection), nil
 }
 
+// PaymentSessionStatus mirrors the payment_session_status enum (migration
+// 017_payment_sessions.sql). This type, TransactionStatusAWAITINGPAYMENT
+// below, and the PaymentSession struct further down were added by hand
+// rather than via a full `sqlc generate` -- the installed sqlc version
+// generates other, unrelated tables/enums (Reconciliation, DiscoverRequest,
+// BecknActionReconcile, and AckStatus's null-wrapper shape) differently
+// from how this file was last committed, and regenerating the whole file
+// would pull in that unrelated churn.
+type PaymentSessionStatus string
+
+const (
+	PaymentSessionStatusPENDING PaymentSessionStatus = "PENDING"
+	PaymentSessionStatusPAID    PaymentSessionStatus = "PAID"
+	PaymentSessionStatusFAILED  PaymentSessionStatus = "FAILED"
+	PaymentSessionStatusEXPIRED PaymentSessionStatus = "EXPIRED"
+)
+
+func (e *PaymentSessionStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = PaymentSessionStatus(s)
+	case string:
+		*e = PaymentSessionStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for PaymentSessionStatus: %T", src)
+	}
+	return nil
+}
+
+type NullPaymentSessionStatus struct {
+	PaymentSessionStatus PaymentSessionStatus `json:"payment_session_status"`
+	Valid                bool                 `json:"valid"` // Valid is true if PaymentSessionStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullPaymentSessionStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.PaymentSessionStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.PaymentSessionStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullPaymentSessionStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.PaymentSessionStatus), nil
+}
+
 type TransactionStatus string
 
 const (
@@ -175,6 +227,7 @@ const (
 	TransactionStatusSUPPORTSENT      TransactionStatus = "SUPPORT_SENT"
 	TransactionStatusDISCOVERSENT     TransactionStatus = "DISCOVER_SENT"
 	TransactionStatusDISCOVERRECEIVED TransactionStatus = "DISCOVER_RECEIVED"
+	TransactionStatusAWAITINGPAYMENT  TransactionStatus = "AWAITING_PAYMENT"
 )
 
 func (e *TransactionStatus) Scan(src interface{}) error {
@@ -273,6 +326,22 @@ type ContractSnapshot struct {
 	Contract   json.RawMessage    `json:"contract"`
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+}
+
+// One row per DOKU Checkout session created for a transaction. invoice_number is the key DOKU's async notification webhook reports back.
+type PaymentSession struct {
+	ID              uuid.UUID            `json:"id"`
+	TransactionID   uuid.UUID            `json:"transaction_id"`
+	InvoiceNumber   string               `json:"invoice_number"`
+	DokuTokenID     *string              `json:"doku_token_id"`
+	Status          PaymentSessionStatus `json:"status"`
+	GatewayRef      *string              `json:"gateway_ref"`
+	Method          *string              `json:"method"`
+	Amount          pgtype.Numeric       `json:"amount"`
+	PaidAt          pgtype.Timestamptz   `json:"paid_at"`
+	RawNotification json.RawMessage      `json:"raw_notification"`
+	CreatedAt       pgtype.Timestamptz   `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz   `json:"updated_at"`
 }
 
 // One row per Beckn transactionId initiated by this BAP. Status advances as select → init → confirm actions progress.

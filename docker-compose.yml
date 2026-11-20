@@ -584,6 +584,22 @@ services:
       # identity resolution (see internal/auth.OptionalAuth).
       ZITADEL_ISSUER: http://localhost:8090
       ZITADEL_INTERNAL_URL: http://zitadel:8080
+
+      # DOKU Checkout (https://developers.doku.com/accept-payments/doku-checkout)
+      # -- sandbox by default. DOKU_CALLBACK_BASE_URL is bap-frontend's own
+      # publicly-reachable origin (the buyer's browser, not this container,
+      # is redirected there); locally that's the host-published frontend
+      # port below, not the in-network "frontend" service name.
+      # DOKU_NOTIFICATION_PATH must match whatever Notification URL is
+      # configured in the DOKU Back Office for this Client-Id -- see
+      # internal/dokusvc's package doc. DOKU's sandbox needs a tunnel
+      # (ngrok/cloudflared) to reach this container's webhook locally; see
+      # the plan's "Known gap: local webhook reachability" note.
+      DOKU_CLIENT_ID: ${DOKU_CLIENT_ID:-}
+      DOKU_SECRET_KEY: ${DOKU_SECRET_KEY:-}
+      DOKU_BASE_URL: ${DOKU_BASE_URL:-https://api-sandbox.doku.com}
+      DOKU_NOTIFICATION_PATH: ${DOKU_NOTIFICATION_PATH:-/api/webhook/doku-notification}
+      DOKU_CALLBACK_BASE_URL: ${DOKU_CALLBACK_BASE_URL:-http://localhost:3000}
     ports:
       - "8083:8083"
     networks:

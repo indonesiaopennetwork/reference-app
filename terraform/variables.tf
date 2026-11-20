@@ -213,6 +213,22 @@ variable "extra_catalog_index_urls" {
   default     = []
 }
 
+# DOKU Checkout (https://developers.doku.com/accept-payments/doku-checkout)
+# -- the real payment gateway bap-application uses in place of the mock
+# payment. The Client-Id/Secret Key themselves are secrets (doku-client-id/
+# doku-secret-key, see secrets.tf + scripts/seed-secrets.sh), not variables.
+variable "doku_base_url" {
+  description = "DOKU API host bap-application calls to create a checkout session: sandbox by default, https://api.doku.com in production."
+  type        = string
+  default     = "https://api-sandbox.doku.com"
+}
+
+variable "doku_notification_path" {
+  description = "Path DOKU is configured (in the DOKU Back Office, for this Client-Id) to POST its payment notification to -- used only to verify that notification's signature, not the actual route registration (bap-application always serves it at /api/webhook/doku-notification)."
+  type        = string
+  default     = "/api/webhook/doku-notification"
+}
+
 # --- bpp / DeDi static-file custom domain ---
 # The domain must already be verified in Search Console under the account
 # that owns this project before google_cloud_run_domain_mapping will apply

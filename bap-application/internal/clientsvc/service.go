@@ -21,6 +21,7 @@ import (
 	dbsqlc "github.com/ion/winroom/bap/db/sqlc"
 	"github.com/ion/winroom/bap/internal/config"
 	"github.com/ion/winroom/bap/internal/discoverwait"
+	"github.com/ion/winroom/bap/internal/dokusvc"
 	"github.com/ion/winroom/bap/internal/httpclient"
 	"github.com/ion/winroom/bap/internal/settlement"
 )
@@ -47,6 +48,7 @@ type ClientService struct {
 	lh       *logharbour.Logger
 	client   *http.Client
 	registry *discoverwait.Registry
+	doku     *dokusvc.Client
 }
 
 func NewClientService(pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.Logger, registry *discoverwait.Registry) *ClientService {
@@ -61,6 +63,7 @@ func NewClientService(pool *pgxpool.Pool, cfg *config.Config, lh *logharbour.Log
 		// round trip took 54s end-to-end; 90s leaves real margin above that.
 		client:   httpclient.New(90 * time.Second),
 		registry: registry,
+		doku:     dokusvc.NewClient(cfg.DokuBaseURL, cfg.DokuClientID, cfg.DokuSecretKey),
 	}
 }
 
@@ -808,7 +811,18 @@ func (s *ClientService) Confirm(ctx context.Context, req *ClientConfirmRequest) 
 	if err := json.Unmarshal(snapshot.Contract, &contract); err != nil {
 		return fmt.Errorf("parse contract snapshot: %w", err)
 	}
-	if err := attachSettlement(contract, s.cfg); err != nil {
+
+	// Confirm only ever proceeds once a real DOKU Checkout payment has
+	// cleared for this transaction -- see internal/dokunotifysvc, the only
+	// caller that reaches this point after a genuine buyer payment. A
+	// transaction with no PAID payment_sessions row (e.g. Confirm called
+	// directly without having gone through POST /api/v1/payment/checkout
+	// first) is rejected rather than silently treated as paid.
+	paymentSession, err := q.GetLatestPaidPaymentSession(ctx, txnID)
+	if err != nil {
+		return fmt.Errorf("no completed DOKU payment found for txn %s: %w", txnID, err)
+	}
+	if err := attachSettlement(contract, s.cfg, &paymentSession); err != nil {
 		return fmt.Errorf("attach settlement for txn %s: %w", txnID, err)
 	}
 
@@ -837,18 +851,98 @@ func (s *ClientService) Confirm(ctx context.Context, req *ClientConfirmRequest) 
 	return s.sendToBPP(ctx, s.cfg.BapCallerURL, "confirm", txnID, msgID, s.cfg.NetworkID, becknReq)
 }
 
-// mockGatewayName identifies the stand-in payment gateway: there is no real
-// gateway yet, so Pay & Confirm is treated as a successful payment and a UUID
-// is generated in place of the gateway's transaction reference.
-const mockGatewayName = "mock-gateway"
+// InitiatePayment creates a DOKU Checkout session for the transaction's
+// quoted amount (the on_init contract snapshot's first consideration) and
+// records a PENDING payment_sessions row keyed by the transaction id as
+// DOKU's invoice_number. The frontend redirects the buyer's browser to the
+// returned PaymentURL; the real Beckn confirm only fires later, from
+// internal/dokunotifysvc, once DOKU's notification reports this session
+// paid (see attachSettlement and package dokunotifysvc's doc).
+func (s *ClientService) InitiatePayment(ctx context.Context, transactionID string) (*InitiatePaymentResult, error) {
+	txnID, err := uuid.Parse(transactionID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid transaction id %q: %w", transactionID, err)
+	}
+	q := dbsqlc.New(s.pool)
 
-// attachSettlement records the buyer's payment on the settlement object
-// agreed in init / on_init, which the BPP needs to activate the contract on
-// confirm: status PAID, paidAt and gatewayRef, with orderAmount the
-// consideration total paid into the PJP. The terms, accounts and the finder
-// fee the BPP stated are kept. A contract from before init declared the
-// settlement gets a fresh one with this BAP's account only.
-func attachSettlement(contract map[string]interface{}, cfg *config.Config) error {
+	txn, err := q.GetTransaction(ctx, txnID)
+	if err != nil {
+		return nil, fmt.Errorf("transaction %s not found: %w", transactionID, err)
+	}
+
+	snapshot, err := q.GetLatestContractSnapshot(ctx, txnID)
+	if err != nil || len(snapshot.Contract) == 0 || string(snapshot.Contract) == "null" {
+		return nil, fmt.Errorf("no contract snapshot found for payment checkout, txn %s", txnID)
+	}
+	var contract map[string]interface{}
+	if err := json.Unmarshal(snapshot.Contract, &contract); err != nil {
+		return nil, fmt.Errorf("parse contract snapshot: %w", err)
+	}
+	_, amount, currency, err := firstConsideration(contract)
+	if err != nil {
+		return nil, err
+	}
+
+	// Redirect to the domain root, not a nested path: bap-frontend's build
+	// uses a relative vite asset base (base: './' -- see vite.config.js) so
+	// it works both at a domain root and behind ion-landing-page's path
+	// prefix, which means a full top-level navigation landing on a nested
+	// path (e.g. /payment/return) resolves its JS/CSS against that nested
+	// path instead of the asset root and never loads -- a blank page with
+	// no console error, since the app's own JS never runs. The root path
+	// always loads correctly, so mark this as a DOKU return via a query
+	// param instead of a route (see App.jsx's resume block).
+	returnURL := fmt.Sprintf("%s/?doku_return=1&transaction_id=%s", strings.TrimRight(s.cfg.DokuCallbackBaseURL, "/"), transactionID)
+	// A fresh invoice number per attempt, not the transaction ID itself:
+	// the buyer can retry (e.g. after abandoning a prior DOKU session), and
+	// payment_sessions.invoice_number is UNIQUE -- transactionID repeats on
+	// every retry, a fresh UUID doesn't. TransactionID (below) already
+	// carries the link back to the order for every other query.
+	invoiceNumber := uuid.NewString()
+	resp, err := s.doku.CreateCheckout(ctx, dokusvc.CheckoutRequest{
+		Amount:                int64(amount),
+		InvoiceNumber:         invoiceNumber,
+		Currency:              currency,
+		CallbackURL:           returnURL,
+		CallbackURLResult:     returnURL,
+		PaymentDueDateMinutes: 60,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create doku checkout session for txn %s: %w", txnID, err)
+	}
+
+	if _, err := q.InsertPaymentSession(ctx, dbsqlc.InsertPaymentSessionParams{
+		TransactionID: txnID,
+		InvoiceNumber: invoiceNumber,
+		DokuTokenID:   strPtr(resp.TokenID),
+		Amount:        numericFromFloat(amount),
+	}); err != nil {
+		return nil, fmt.Errorf("record payment session for txn %s: %w", txnID, err)
+	}
+
+	bppID, bppURI := s.resolveBPP(txn)
+	if err := q.UpsertTransaction(ctx, dbsqlc.UpsertTransactionParams{
+		TransactionID: txnID,
+		BapID:         s.cfg.BapID,
+		NetworkID:     &s.cfg.NetworkID,
+		BppID:         &bppID,
+		BppUri:        &bppURI,
+		Status:        dbsqlc.TransactionStatusAWAITINGPAYMENT,
+	}); err != nil {
+		return nil, err
+	}
+
+	return &InitiatePaymentResult{PaymentURL: resp.PaymentURL, ExpiredAt: resp.ExpiredDate}, nil
+}
+
+// attachSettlement records the buyer's real DOKU Checkout payment (ps, a
+// PAID payment_sessions row -- see dbsqlc.GetLatestPaidPaymentSession) on
+// the settlement object agreed in init / on_init, which the BPP needs to
+// activate the contract on confirm: status PAID, paidAt and gatewayRef, with
+// orderAmount the consideration total paid into the PJP. The terms, accounts
+// and the finder fee the BPP stated are kept. A contract from before init
+// declared the settlement gets a fresh one with this BAP's account only.
+func attachSettlement(contract map[string]interface{}, cfg *config.Config, ps *dbsqlc.PaymentSession) error {
 	considerationID, amount, _, err := firstConsideration(contract)
 	if err != nil {
 		return err
@@ -864,8 +958,19 @@ func attachSettlement(contract map[string]interface{}, cfg *config.Config) error
 	payment["status"] = "COMMITTED"
 	attrs["status"] = "PAID"
 	attrs["orderAmount"] = map[string]interface{}{"value": amount}
-	attrs["paidAt"] = time.Now().UTC().Format(time.RFC3339)
-	attrs["gatewayRef"] = mockGatewayName + "-" + uuid.New().String()
+	if ps.Method != nil && *ps.Method != "" {
+		attrs["method"] = *ps.Method
+	}
+	paidAt := time.Now().UTC()
+	if ps.PaidAt.Valid {
+		paidAt = ps.PaidAt.Time.UTC()
+	}
+	attrs["paidAt"] = paidAt.Format(time.RFC3339)
+	gatewayRef := "doku-" + ps.InvoiceNumber
+	if ps.GatewayRef != nil && *ps.GatewayRef != "" {
+		gatewayRef = "doku-" + *ps.GatewayRef
+	}
+	attrs["gatewayRef"] = gatewayRef
 	settlement.SetFigures(attrs, settlement.Compute(contract, false))
 	contract["settlements"] = []interface{}{payment}
 	return nil
@@ -1800,6 +1905,15 @@ func prettyLog(label string, v interface{}) {
 }
 
 // --- Generic helpers ---
+
+// numericFromFloat converts an IDR amount to the pgtype.Numeric
+// payment_sessions.amount expects, via its string Scan path (pgx v5's
+// Numeric has no direct float64 setter).
+func numericFromFloat(f float64) pgtype.Numeric {
+	var n pgtype.Numeric
+	_ = n.Scan(fmt.Sprintf("%.2f", f))
+	return n
+}
 
 func strPtr(s string) *string {
 	if s == "" {

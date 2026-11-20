@@ -105,6 +105,34 @@ type Config struct {
 	SettlementBankCode      string
 	SettlementAccountNumber string
 	SettlementAccountName   string
+
+	// DokuClientID/DokuSecretKey authenticate this app to DOKU Checkout
+	// (https://developers.doku.com/accept-payments/doku-checkout) -- from
+	// the DOKU Back Office. Env: DOKU_CLIENT_ID, DOKU_SECRET_KEY. Left
+	// empty, InitiatePayment fails with a clear error rather than this app
+	// refusing to start -- an environment that hasn't set up DOKU yet
+	// should still serve every other route.
+	DokuClientID  string
+	DokuSecretKey string
+
+	// DokuBaseURL is DOKU's API host: sandbox by default
+	// (https://api-sandbox.doku.com), or https://api.doku.com in
+	// production. Env: DOKU_BASE_URL.
+	DokuBaseURL string
+
+	// DokuNotificationPath is the path DOKU is configured (in the Back
+	// Office) to POST its payment notification to -- used as the
+	// Request-Target signature component when verifying that notification
+	// (see internal/dokusvc.Client.VerifyNotification), not as the actual
+	// route registration (that's server.go's own
+	// "/api/webhook/doku-notification"). Env: DOKU_NOTIFICATION_PATH.
+	DokuNotificationPath string
+
+	// DokuCallbackBaseURL is this BAP's own public frontend origin, used to
+	// build DOKU's order.callback_url/callback_url_result (where DOKU sends
+	// the buyer's browser back to -- see internal/dokusvc.CheckoutRequest).
+	// Env: DOKU_CALLBACK_BASE_URL.
+	DokuCallbackBaseURL string
 }
 
 // Load reads all config values from the environment and returns a validated Config.
@@ -143,6 +171,12 @@ func Load() (*Config, error) {
 		SettlementBankCode:      getEnv("SETTLEMENT_BANK_CODE", "MANDIRI"),
 		SettlementAccountNumber: getEnv("SETTLEMENT_ACCOUNT_NUMBER", "1370000000001"),
 		SettlementAccountName:   os.Getenv("SETTLEMENT_ACCOUNT_NAME"),
+
+		DokuClientID:         os.Getenv("DOKU_CLIENT_ID"),
+		DokuSecretKey:        os.Getenv("DOKU_SECRET_KEY"),
+		DokuBaseURL:          getEnv("DOKU_BASE_URL", "https://api-sandbox.doku.com"),
+		DokuNotificationPath: getEnv("DOKU_NOTIFICATION_PATH", "/api/webhook/doku-notification"),
+		DokuCallbackBaseURL:  os.Getenv("DOKU_CALLBACK_BASE_URL"),
 	}
 
 	if cfg.SettlementAccountName == "" {

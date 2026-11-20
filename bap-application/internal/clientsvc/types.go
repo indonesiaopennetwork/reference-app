@@ -45,15 +45,35 @@ type ClientInitRequest struct {
 	Billing       json.RawMessage `json:"billing" binding:"required" swaggertype:"object"`
 }
 
-// ClientConfirmRequest — frontend initiates Confirm.
+// ClientConfirmRequest — frontend initiates Confirm. Confirm now only
+// succeeds once a DOKU payment has actually cleared for this transaction
+// (see ClientService.Confirm); the normal path to get there is
+// ClientInitiatePaymentRequest, not calling this directly.
 type ClientConfirmRequest struct {
 	TransactionID string `json:"transaction_id" binding:"required" format:"uuid"`
+}
+
+// ClientInitiatePaymentRequest — frontend requests a DOKU Checkout session
+// for a transaction whose quote has been received (status INIT_RECEIVED).
+type ClientInitiatePaymentRequest struct {
+	TransactionID string `json:"transaction_id" binding:"required" format:"uuid"`
+}
+
+// InitiatePaymentResult is what the frontend needs to send the buyer to
+// DOKU's hosted checkout page.
+type InitiatePaymentResult struct {
+	// PaymentURL is where to redirect the buyer's browser
+	// (response.payment.url from DOKU's checkout API).
+	PaymentURL string `json:"payment_url"`
+	// ExpiredAt is DOKU's response.payment.expired_date, format
+	// "yyyyMMddHHmmss", UTC+7 -- as DOKU returns it, not reformatted.
+	ExpiredAt string `json:"expired_at"`
 }
 
 // ClientStatusResponse returns the current state of a transaction/contract.
 type ClientStatusResponse struct {
 	TransactionID string          `json:"transaction_id" format:"uuid" validate:"required"`
-	Status        string          `json:"status" enums:"SELECT_SENT,QUOTE_RECEIVED,INIT_SENT,INIT_RECEIVED,CONFIRM_SENT,CONFIRMED,CANCELLED,COMPLETE,STATUS_SENT,CANCEL_SENT,UPDATE_SENT,RATE_SENT,SUPPORT_SENT,DISCOVER_SENT,DISCOVER_RECEIVED" validate:"required"`
+	Status        string          `json:"status" enums:"SELECT_SENT,QUOTE_RECEIVED,INIT_SENT,INIT_RECEIVED,AWAITING_PAYMENT,CONFIRM_SENT,CONFIRMED,CANCELLED,COMPLETE,STATUS_SENT,CANCEL_SENT,UPDATE_SENT,RATE_SENT,SUPPORT_SENT,DISCOVER_SENT,DISCOVER_RECEIVED" validate:"required"`
 	Contract      json.RawMessage `json:"contract,omitempty" swaggertype:"object"` // Latest snapshot
 	UpdatedAt     time.Time       `json:"updated_at" format:"date-time" validate:"required"`
 }

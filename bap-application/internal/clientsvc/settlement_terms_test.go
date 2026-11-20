@@ -2,9 +2,27 @@ package clientsvc
 
 import (
 	"testing"
+	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
+	dbsqlc "github.com/ion/winroom/bap/db/sqlc"
 	"github.com/ion/winroom/bap/internal/config"
 )
+
+// paidSession is a stand-in for the PAID payment_sessions row attachSettlement
+// expects -- what dbsqlc.GetLatestPaidPaymentSession would return after a real
+// DOKU notification.
+func paidSession() *dbsqlc.PaymentSession {
+	gatewayRef := "ref-1"
+	method := "QRIS"
+	return &dbsqlc.PaymentSession{
+		InvoiceNumber: "inv-1",
+		GatewayRef:    &gatewayRef,
+		Method:        &method,
+		PaidAt:        pgtype.Timestamptz{Time: time.Now(), Valid: true},
+	}
+}
 
 func termsConfig() *config.Config {
 	return &config.Config{SettlementBankCode: "MANDIRI", SettlementAccountNumber: "1", SettlementAccountName: "bap"}
@@ -61,7 +79,7 @@ func TestConfirmPaysTheSettlementKeepingTheAgreedTerms(t *testing.T) {
 	price := asObj(asObj(asSlice(c["consideration"])[0])["considerationAttributes"])
 	asObj(price["buyerFinderFee"])["feeAmount"] = 2500.0
 	declaredID := asObj(asSlice(c["settlements"])[0])["id"]
-	if err := attachSettlement(c, termsConfig()); err != nil {
+	if err := attachSettlement(c, termsConfig(), paidSession()); err != nil {
 		t.Fatal(err)
 	}
 	st := asObj(asSlice(c["settlements"])[0])

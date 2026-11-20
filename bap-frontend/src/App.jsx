@@ -41,6 +41,31 @@ async function apiFetch(path, opts = {}) {
   return res;
 }
 
+// localStorage key for the transaction id this browser was sent to DOKU's
+// hosted checkout page for -- read back by App() on /payment/return to
+// resume the right transaction's polling/checkout UI after the buyer comes
+// back, since a full top-level navigation away and back loses all React
+// state. See goToDokuCheckout and App()'s auth-gating effect.
+const PENDING_PAYMENT_TXN_KEY = 'bap.pendingPaymentTxn';
+
+// Creates a DOKU Checkout session for transactionId (POST /api/v1/payment/checkout)
+// and navigates the browser to DOKU's hosted payment page. This is the only
+// path to a real payment in this app -- there is no more client-side Confirm
+// call; the real Beckn confirm fires server-side, from DOKU's notification
+// webhook, once the buyer actually pays (see bap-application's
+// internal/dokunotifysvc). Throws on failure, same contract as a raw fetch
+// call the caller already wraps in try/catch.
+async function goToDokuCheckout(transactionId) {
+  const r = await apiFetch('/payment/checkout', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ transaction_id: transactionId }),
+  });
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
+  const { payment_url } = await r.json();
+  try { localStorage.setItem(PENDING_PAYMENT_TXN_KEY, transactionId); } catch { /* storage blocked */ }
+  window.location.href = payment_url;
+}
+
 /* ─────────────────────────── helpers ────────────────────────────────────── */
 
 function parseCatalogs(data) {
@@ -495,14 +520,21 @@ function ProductModal({ product, transaction, onClose, onSelect, onInit, onConfi
     )
     : null;
 
-  // Placing the order: init, then confirm, run in the background (App).
+  // Placing the order: init, then a DOKU Checkout redirect, then confirm
+  // (server-side, once DOKU's notification confirms payment) all run in the
+  // background (App). AWAITING_PAYMENT is only "placing" while actively
+  // mid-redirect (transaction.placing) -- once resumed without a completed
+  // payment, it falls through to the retry block below instead of a
+  // permanent spinner.
   const placing = status === 'INIT_SENT' || status === 'CONFIRM_SENT' ||
-    (status === 'INIT_RECEIVED' && transaction?.placing);
+    ((status === 'INIT_RECEIVED' || status === 'AWAITING_PAYMENT') && transaction?.placing);
   const isPending = status === 'SELECT_SENT' || placing;
 
   const pendingLabel = status === 'SELECT_SENT'
     ? t('Requesting a quote from the seller…')
-    : t('Placing your order…');
+    : status === 'AWAITING_PAYMENT'
+      ? t('Redirecting you to payment…')
+      : t('Placing your order…');
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-3 sm:p-4">
@@ -604,6 +636,21 @@ function ProductModal({ product, transaction, onClose, onSelect, onInit, onConfi
             </div>
           )}
 
+          {/* Returned from DOKU without finishing payment (or a prior
+              attempt's session was abandoned/expired): let the buyer retry */}
+          {status === 'AWAITING_PAYMENT' && !placing && (
+            <div className="space-y-3">
+              <div className="flex items-start gap-2 text-sm rounded-xl px-4 py-3 border text-amber-200 bg-amber-500/10 border-amber-500/25">
+                <Info className="w-4 h-4 shrink-0 mt-0.5 text-amber-400" />
+                <span>{t('A payment was started for this order but never finished. Try again to pay and confirm it.')}</span>
+              </div>
+              <button onClick={onConfirm} disabled={isLoading}
+                className="w-full flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-white py-3.5 rounded-2xl font-bold text-sm transition-all active:scale-[0.98] shadow-lg shadow-amber-500/30">
+                {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <><ShieldCheck className="w-4 h-4" />{t('Pay & Place Order')}</>}
+              </button>
+            </div>
+          )}
+
           {/* Confirmed */}
           {status === 'CONFIRMED' && (
             <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
@@ -675,6 +722,7 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
     QUOTE_RECEIVED: 1,
     INIT_SENT: 1,
     INIT_RECEIVED: 1,
+    AWAITING_PAYMENT: 1,
     CONFIRM_SENT: 1,
     CONFIRMED: 2,
     STATUS_SENT: 2,
@@ -684,7 +732,7 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
     SUPPORT_SENT: 2,
   }[status] ?? 0;
   const placing = status === 'INIT_SENT' || status === 'CONFIRM_SENT' ||
-    (status === 'INIT_RECEIVED' && transaction?.placing);
+    ((status === 'INIT_RECEIVED' || status === 'AWAITING_PAYMENT') && transaction?.placing);
 
   return (
     <div className="flex flex-col flex-grow overflow-hidden">
@@ -897,7 +945,9 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
               <div className="absolute inset-0 rounded-full border-2 border-emerald-500/20 border-t-emerald-400 animate-spin" />
               <ShieldCheck className="absolute inset-0 m-auto w-5 h-5 text-emerald-400" />
             </div>
-            <p className="text-sm text-slate-300">{t('Placing your order…')}</p>
+            <p className="text-sm text-slate-300">
+              {status === 'AWAITING_PAYMENT' ? t('Redirecting you to payment…') : t('Placing your order…')}
+            </p>
           </div>
         )}
 
@@ -911,6 +961,19 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
               <p><span className="text-slate-400">{t('Phone:')}</span> {billing.phone || '—'}</p>
               {billing.email && <p><span className="text-slate-400">{t('Email:')}</span> {billing.email}</p>}
               <p><span className="text-slate-400">{t('Address:')}</span> {[billing.streetAddress, billing.addressLocality, billing.addressRegion, billing.postalCode].filter(Boolean).join(', ') || '—'}</p>
+            </div>
+          </motion.div>
+        )}
+
+        {/* ── Step: Awaiting payment, but not actively redirecting ──────
+             (returned from DOKU without finishing payment, or a prior
+             attempt's DOKU session was abandoned/expired) ───────────── */}
+        {status === 'AWAITING_PAYMENT' && !placing && (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+            className="space-y-2">
+            <div className="flex items-start gap-2 text-sm rounded-xl px-4 py-3 border text-amber-200 bg-amber-500/10 border-amber-500/25">
+              <Info className="w-4 h-4 shrink-0 mt-0.5 text-amber-400" />
+              <span>{t('A payment was started for this order but never finished. Try again to pay and confirm it.')}</span>
             </div>
           </motion.div>
         )}
@@ -1052,7 +1115,7 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
       </div>
 
       {/* ── Sticky action footer ────────────────────────────────────── */}
-      {((status === 'QUOTE_RECEIVED' && !blocked) || (status === 'INIT_RECEIVED' && !placing)) && (
+      {((status === 'QUOTE_RECEIVED' && !blocked) || (status === 'INIT_RECEIVED' && !placing) || (status === 'AWAITING_PAYMENT' && !placing)) && (
         <div className="px-5 py-4 border-t border-white/[0.07] shrink-0">
           {status === 'QUOTE_RECEIVED' && (
             <button onClick={onInit} disabled={isLoading} data-tour="init"
@@ -1067,6 +1130,14 @@ function CheckoutFlow({ cart, cartTotal, transaction, billing, setBilling, isLoa
               className="w-full bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-white py-3.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all active:scale-[0.98] shadow-lg shadow-amber-500/30">
               {isLoading
                 ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('Confirming…')}</>
+                : <><ShieldCheck className="w-4 h-4" /> {t('Pay & Place Order')}</>}
+            </button>
+          )}
+          {status === 'AWAITING_PAYMENT' && (
+            <button onClick={onConfirm} disabled={isLoading}
+              className="w-full bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-white py-3.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all active:scale-[0.98] shadow-lg shadow-amber-500/30">
+              {isLoading
+                ? <><Loader2 className="w-4 h-4 animate-spin" /> {t('Redirecting…')}</>
                 : <><ShieldCheck className="w-4 h-4" /> {t('Pay & Place Order')}</>}
             </button>
           )}
@@ -1120,6 +1191,7 @@ const STATUS_COLORS = {
   INIT_SENT: { bg: 'bg-blue-500/10', text: 'text-blue-400', border: 'border-blue-500/20' },
   CONFIRM_SENT: { bg: 'bg-amber-500/10', text: 'text-amber-400', border: 'border-amber-500/20' },
   INIT_RECEIVED: { bg: 'bg-emerald-500/10', text: 'text-emerald-300', border: 'border-emerald-500/20' },
+  AWAITING_PAYMENT: { bg: 'bg-emerald-500/10', text: 'text-emerald-300', border: 'border-emerald-500/20' },
   CANCEL_SENT: { bg: 'bg-rose-500/10', text: 'text-rose-400', border: 'border-rose-500/20' },
   UPDATE_SENT: { bg: 'bg-purple-500/10', text: 'text-purple-400', border: 'border-purple-500/20' },
   Return_Initiated: { bg: 'bg-yellow-500/10', text: 'text-yellow-400', border: 'border-yellow-500/20' },
@@ -1130,7 +1202,8 @@ const STATUS_COLORS = {
 // A transaction's status as shown to the buyer (codes from the BAP's
 // transactions table); unknown codes are shown as they are.
 const TXN_STATUS_LABELS = {
-  SELECT_SENT: 'Getting quote', QUOTE_RECEIVED: 'Quote received', INIT_SENT: 'Processing', INIT_RECEIVED: 'Awaiting payment',
+  SELECT_SENT: 'Getting quote', QUOTE_RECEIVED: 'Quote received', INIT_SENT: 'Processing', INIT_RECEIVED: 'Preparing payment',
+  AWAITING_PAYMENT: 'Awaiting payment',
   CONFIRM_SENT: 'Confirming', CONFIRMED: 'Confirmed', STATUS_SENT: 'Checking status', CANCEL_SENT: 'Cancelling',
   CANCELLED: 'Cancelled', UPDATE_SENT: 'Updating', COMPLETE: 'Completed', RATE_SENT: 'Rating sent', SUPPORT_SENT: 'Support requested',
   Return_Initiated: 'Return requested', Return_Approved: 'Return approved', Return_Rejected: 'Return rejected',
@@ -1665,18 +1738,17 @@ function OrderDetailPanel({ txnId, onBack }) {
 
   const fmt = fmtIDR;
 
-  // Pay & Confirm an order left at INIT_RECEIVED (the seller's on_init terms
-  // were received but checkout was never completed) -- same /confirm call as
-  // the checkout; the detail re-fetches until on_confirm lands.
-  const handleConfirm = async () => {
+  // Pay an order left at INIT_RECEIVED (the seller's on_init terms were
+  // received but checkout was never started) or AWAITING_PAYMENT (a DOKU
+  // checkout session was created but the buyer never finished paying, or
+  // closed the tab) -- same DOKU redirect as the normal checkout flow; the
+  // browser navigates away, so there's no local state to update on success.
+  const handleRetryPayment = async () => {
     setConfirming(true);
     try {
-      const r = await apiFetch('/confirm', { method: 'POST', body: JSON.stringify({ transaction_id: txnId }) });
-      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
-      setReloadKey(k => k + 1);
+      await goToDokuCheckout(txnId);
     } catch (e) {
       alert(t('Confirm failed: {error}', { error: e.message }));
-    } finally {
       setConfirming(false);
     }
   };
@@ -1706,16 +1778,20 @@ function OrderDetailPanel({ txnId, onBack }) {
         </div>
       </div>
 
-      {detail.status === 'INIT_RECEIVED' && (
+      {(detail.status === 'INIT_RECEIVED' || detail.status === 'AWAITING_PAYMENT') && (
         <div className="rounded-xl border border-emerald-500/20 px-4 py-3 bg-emerald-500/5 flex items-center justify-between gap-3">
           <div>
             <p className="text-xs font-bold text-emerald-300">{t('Awaiting payment')}</p>
-            <p className="text-[10px] text-emerald-400/70 mt-0.5">{t('The seller has accepted your order. Pay to confirm it.')}</p>
+            <p className="text-[10px] text-emerald-400/70 mt-0.5">
+              {detail.status === 'AWAITING_PAYMENT'
+                ? t('A payment was started for this order but never finished. Try again to pay and confirm it.')
+                : t('The seller has accepted your order. Pay to confirm it.')}
+            </p>
           </div>
-          <button disabled={confirming} onClick={handleConfirm}
+          <button disabled={confirming} onClick={handleRetryPayment}
             className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition-colors disabled:opacity-50">
             {confirming ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ShieldCheck className="w-3.5 h-3.5" />}
-            {confirming ? t('Confirming…') : t('Pay & Confirm')}
+            {confirming ? t('Redirecting…') : t('Pay & Confirm')}
           </button>
         </div>
       )}
@@ -2358,6 +2434,35 @@ export default function App() {
       return;
     }
     setAuthReady(true);
+
+    // Resuming after a DOKU Checkout redirect: DOKU's order.callback_url
+    // (see goToDokuCheckout) sends the browser back here once the buyer is
+    // done on DOKU's hosted page. Landing on the domain root with a query
+    // param, not a nested path/route -- a full top-level navigation to a
+    // nested path (e.g. /payment/return) would resolve this build's
+    // relative vite asset base against that nested path and never load the
+    // app at all (see service.go's returnURL comment). A full top-level
+    // navigation away and back loses all React state, so pick the
+    // checkout/polling UI back up on the pending transaction instead of
+    // showing the normal landing screen. The real payment outcome comes
+    // from DOKU's notification webhook (bap-application), not this
+    // redirect -- this only restores the UI; the transaction-status poll
+    // below takes it from here.
+    if (new URLSearchParams(window.location.search).get('doku_return') === '1') {
+      let txnId = null;
+      try { txnId = localStorage.getItem(PENDING_PAYMENT_TXN_KEY); } catch { /* storage blocked */ }
+      if (!txnId) txnId = new URLSearchParams(window.location.search).get('transaction_id');
+      if (txnId) {
+        // placing: false -- this is a resume, not an active in-flight
+        // redirect, so if payment was never actually completed the buyer
+        // should see a retry button (below), not a permanent spinner.
+        setTransaction({ id: txnId, status: 'AWAITING_PAYMENT', placing: false });
+        setCartCheckout(true);
+        setIsCartOpen(true);
+      }
+      try { localStorage.removeItem(PENDING_PAYMENT_TXN_KEY); } catch { /* storage blocked */ }
+      window.history.replaceState(null, '', basePath || '/');
+    }
   }, []);
 
   /* ── Discover ─────────────────────────────────────────────────────────── */
@@ -2594,28 +2699,32 @@ export default function App() {
     finally { setIsLoading(false); }
   };
 
-  /* ── Beckn: Confirm ──────────────────────────────────────────────────── */
-  const handleConfirm = async () => {
+  /* ── DOKU Checkout: create a payment session and redirect ────────────── */
+  // Replaces the old direct Confirm call: payment is now a real, asynchronous
+  // gateway flow (buyer leaves the site, pays on DOKU's hosted page, DOKU
+  // notifies bap-application later), so this can only start that flow, not
+  // complete it. The real Beckn confirm fires server-side, from
+  // internal/dokunotifysvc, once DOKU's notification reports the payment
+  // paid -- see goToDokuCheckout.
+  const handleInitiatePayment = async () => {
     if (!transaction) return;
     setIsLoading(true);
     try {
-      const r = await apiFetch(`/confirm`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transaction_id: transaction.id }),
-      });
-      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
-      setTransaction(p => ({ ...p, status: 'CONFIRM_SENT', placing: false }));
+      setTransaction(p => ({ ...p, status: 'AWAITING_PAYMENT', placing: true }));
+      await goToDokuCheckout(transaction.id);
+      // No further state update on success -- the browser is navigating
+      // away to DOKU's page right now.
     } catch (e) {
       // Stop placing; the buyer can try again with Pay & Place Order.
-      setTransaction(p => ({ ...p, placing: false }));
+      setTransaction(p => ({ ...p, status: 'INIT_RECEIVED', placing: false }));
       alert(t('Confirm failed: {error}', { error: e.message }));
+      setIsLoading(false);
     }
-    finally { setIsLoading(false); }
   };
 
-  /* ── Placing: confirm once on_init is in ─────────────────────────────── */
-  // The seller's on_init states the final terms. Confirm follows at once
-  // unless its total differs from the quote the buyer saw; then the buyer
+  /* ── Placing: start DOKU Checkout once on_init is in ──────────────────── */
+  // The seller's on_init states the final terms. Payment starts at once
+  // unless the total differs from the quote the buyer saw; then the buyer
   // decides (PlacingStoppedNote).
   const confirmedFor = useRef(null);
   useEffect(() => {
@@ -2629,7 +2738,7 @@ export default function App() {
       setTransaction(p => ({ ...p, placing: false, priceChanged: { from: quoted, to: total } }));
       return;
     }
-    handleConfirm();
+    handleInitiatePayment();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [transaction?.status, transaction?.placing, transaction?.id]);
 
@@ -3095,7 +3204,7 @@ export default function App() {
             onClose={() => setSelectedProduct(null)}
             onSelect={handleSelectProduct}
             onInit={handleInit}
-            onConfirm={handleConfirm}
+            onConfirm={handleInitiatePayment}
             isLoading={isLoading}
           />
         )}
@@ -3258,7 +3367,7 @@ export default function App() {
                   billing={billing} setBilling={setBilling}
                   isLoading={isLoading}
                   onInit={handleInit}
-                  onConfirm={handleConfirm}
+                  onConfirm={handleInitiatePayment}
                   onDone={resetCart}
                   onStatusChange={handleStatusChange}
                   onRate={handleRate}

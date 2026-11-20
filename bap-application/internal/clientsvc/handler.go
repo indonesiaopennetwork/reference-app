@@ -103,9 +103,9 @@ func (h *ClientHandler) HandleInit(c *gin.Context) {
 
 // HandleConfirm triggers a Beckn confirm request.
 //
-//	@Summary		Pay and confirm (Beckn confirm)
+//	@Summary		Confirm a paid order (Beckn confirm)
 //	@ID				confirm
-//	@Description	Loads the latest (on_init) contract snapshot, records a mock payment on its settlement (status PAID, paidAt, a generated gatewayRef; there is no real payment gateway), sets the status to CONFIRM_SENT and sends Beckn confirm via onix-bap. The confirmation arrives later via /api/webhook/on_confirm (status CONFIRMED). The bearer token is optional: without one the request is served anonymously; one that fails verification is rejected with 401.
+//	@Description	Loads the latest (on_init) contract snapshot and the transaction's completed DOKU Checkout payment (payment_sessions, status PAID), attaches it to the settlement (status PAID, paidAt, gatewayRef from DOKU), sets the status to CONFIRM_SENT and sends Beckn confirm via onix-bap. Fails if no PAID payment session exists for this transaction -- the normal path to one is POST /api/v1/payment/checkout, not calling this endpoint directly; in practice it's internal/dokunotifysvc that calls this, once DOKU's notification confirms payment. The confirmation arrives later via /api/webhook/on_confirm (status CONFIRMED). The bearer token is optional: without one the request is served anonymously; one that fails verification is rejected with 401.
 //	@Tags			orders
 //	@Accept			json
 //	@Produce		json
@@ -113,7 +113,7 @@ func (h *ClientHandler) HandleInit(c *gin.Context) {
 //	@Success		200 {object} ActionStatusResponse "Confirm sent (status CONFIRM_SENT)."
 //	@Failure		400 {object} ErrorResponse "Request body missing, not JSON, or missing a required field."
 //	@Failure		401 {object} ErrorResponse "A bearer token was sent but failed verification (no token is fine)."
-//	@Failure		500 {object} ErrorResponse "Transaction or snapshot not found, database error, or the adapter call failed / returned non-200 (the error text says which)."
+//	@Failure		500 {object} ErrorResponse "Transaction or snapshot not found, no PAID payment session for this transaction, database error, or the adapter call failed / returned non-200 (the error text says which)."
 //	@Security		BearerAuth
 //	@Router			/api/v1/confirm [post]
 func (h *ClientHandler) HandleConfirm(c *gin.Context) {
@@ -130,6 +130,40 @@ func (h *ClientHandler) HandleConfirm(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"status": "CONFIRM_SENT"})
+}
+
+// HandleInitiatePayment creates a DOKU Checkout session for a transaction
+// whose quote has been received, and returns the URL the frontend must
+// redirect the buyer's browser to.
+//
+//	@Summary		Start DOKU Checkout payment
+//	@ID				initiatePayment
+//	@Description	Loads the latest (on_init) contract snapshot's quoted amount, creates a DOKU Checkout session (https://developers.doku.com/accept-payments/doku-checkout) for it, records a PENDING payment_sessions row keyed by this transaction id, sets the transaction status to AWAITING_PAYMENT, and returns DOKU's hosted checkout page URL. The actual Beckn confirm does not happen here -- it fires later, from /api/webhook/doku-notification, once DOKU reports the payment as paid. The bearer token is optional: without one the request is served anonymously; one that fails verification is rejected with 401.
+//	@Tags			orders
+//	@Accept			json
+//	@Produce		json
+//	@Param			request body ClientInitiatePaymentRequest true "Request body"
+//	@Success		200 {object} InitiatePaymentResult "DOKU checkout session created; redirect the buyer to payment_url."
+//	@Failure		400 {object} ErrorResponse "Request body missing, not JSON, or missing a required field."
+//	@Failure		401 {object} ErrorResponse "A bearer token was sent but failed verification (no token is fine)."
+//	@Failure		500 {object} ErrorResponse "Transaction or snapshot not found, the contract has no consideration to settle, or the DOKU API call failed (the error text says which)."
+//	@Security		BearerAuth
+//	@Router			/api/v1/payment/checkout [post]
+func (h *ClientHandler) HandleInitiatePayment(c *gin.Context) {
+	var req ClientInitiatePaymentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	result, err := h.svc.InitiatePayment(c.Request.Context(), req.TransactionID)
+	if err != nil {
+		h.lh.WithModule("client_handler").Err().Error(err).Log("initiate payment failed")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
 }
 
 // HandleStatus returns the transaction lifecycle state.

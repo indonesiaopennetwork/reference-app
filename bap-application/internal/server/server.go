@@ -11,6 +11,7 @@ import (
 	"github.com/ion/winroom/bap/internal/clientsvc"
 	"github.com/ion/winroom/bap/internal/config"
 	"github.com/ion/winroom/bap/internal/discoverwait"
+	"github.com/ion/winroom/bap/internal/dokunotifysvc"
 	oncancelsvc "github.com/ion/winroom/bap/internal/on_cancel_svc"
 	onconfirmsvc "github.com/ion/winroom/bap/internal/on_confirm_svc"
 	ondiscoversvc "github.com/ion/winroom/bap/internal/on_discover_svc"
@@ -86,6 +87,14 @@ func RegisterRoutes(r *gin.Engine, pool *pgxpool.Pool, cfg *config.Config, lh *l
 		reconcileH := reconcilesvc.NewHandler(pool, cfg, lh)
 		webhook.POST("/reconcile", reconcileH.Handle)
 		webhook.POST("/on_reconcile", reconcileH.HandleOnReconcile)
+
+		// DOKU Checkout's payment notification -- not a Beckn callback
+		// (different signature scheme, different ack contract), but the
+		// one point where a real Confirm fires: see
+		// internal/dokunotifysvc's package doc.
+		confirmSvc := clientsvc.NewClientService(pool, cfg, lh, discoverRegistry)
+		dokuNotifyH := dokunotifysvc.NewHandler(pool, cfg, lh, confirmSvc)
+		webhook.POST("/doku-notification", dokuNotifyH.Handle)
 	}
 
 	// Settlement reconciliation (the /reconciliation page) -- open, no login
@@ -109,6 +118,7 @@ func RegisterRoutes(r *gin.Engine, pool *pgxpool.Pool, cfg *config.Config, lh *l
 		v1.GET("/discover", clientH.HandleDiscover)
 		v1.POST("/select", clientH.HandleSelect)
 		v1.POST("/init", clientH.HandleInit)
+		v1.POST("/payment/checkout", clientH.HandleInitiatePayment)
 		v1.POST("/confirm", clientH.HandleConfirm)
 		v1.GET("/status/:id", clientH.HandleStatus)
 		v1.POST("/request-status", clientH.HandleRequestStatus)

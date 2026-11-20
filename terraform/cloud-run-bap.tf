@@ -171,6 +171,40 @@ resource "google_cloud_run_v2_service" "bap" {
           }
         }
       }
+      # DOKU Checkout (see variables.tf's doku_base_url/doku_notification_path
+      # and secrets.tf's doku-client-id/doku-secret-key). DOKU_CALLBACK_BASE_URL
+      # is bap-frontend's own public domain -- the buyer's browser is
+      # redirected there by DOKU, not this Cloud Run service.
+      env {
+        name  = "DOKU_BASE_URL"
+        value = var.doku_base_url
+      }
+      env {
+        name  = "DOKU_NOTIFICATION_PATH"
+        value = var.doku_notification_path
+      }
+      env {
+        name  = "DOKU_CALLBACK_BASE_URL"
+        value = "https://${var.bap_frontend_domain}"
+      }
+      env {
+        name = "DOKU_CLIENT_ID"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.this["doku-client-id"].secret_id
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name = "DOKU_SECRET_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.this["doku-secret-key"].secret_id
+            version = "latest"
+          }
+        }
+      }
       # Bootstrap placeholders, patched to the real value post-apply by
       # cloud-run-wiring.tf. NOT blank: bap-application's config.go
       # validate() rejects an empty BAP_URI/BAP_CALLER_URL and os.Exit(1)s,
