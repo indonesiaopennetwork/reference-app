@@ -72,9 +72,9 @@ modules:
           config:
             networkParticipant: pn.bpp.ion.remiges.tech
             keyId: pn-ion-ref-app-remiges-tech
-            signingPrivateKey: REMOVED
+            signingPrivateKey: ${BPP_ONIX_SIGNING_PRIVATE_KEY}
             signingPublicKey: nNrqM6oH1Hhvq8c8D9I40Zd3aPNmLqx8+CYiAlTbhoY=
-            encrPrivateKey: REMOVED
+            encrPrivateKey: ${BPP_ONIX_ENCR_PRIVATE_KEY}
             encrPublicKey: nNrqM6oH1Hhvq8c8D9I40Zd3aPNmLqx8+CYiAlTbhoY=
         schemaValidator:
           id: schemav2validator
@@ -146,9 +146,9 @@ modules:
           config:
             networkParticipant: pn.bpp.ion.remiges.tech
             keyId: pn-ion-ref-app-remiges-tech
-            signingPrivateKey: REMOVED
+            signingPrivateKey: ${BPP_ONIX_SIGNING_PRIVATE_KEY}
             signingPublicKey: nNrqM6oH1Hhvq8c8D9I40Zd3aPNmLqx8+CYiAlTbhoY=
-            encrPrivateKey: REMOVED
+            encrPrivateKey: ${BPP_ONIX_ENCR_PRIVATE_KEY}
             encrPublicKey: nNrqM6oH1Hhvq8c8D9I40Zd3aPNmLqx8+CYiAlTbhoY=
         schemaValidator:
           id: schemav2validator

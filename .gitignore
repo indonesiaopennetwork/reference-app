@@ -4,6 +4,8 @@ bap-application/cmd/server/.env
 bpp-application/cmd/server/.env
 dedi-onboarding-files/.env.local
 scripts/seed-secrets.env
+# Personal VS Code debug config; copy .vscode/launch.json.example
+.vscode/launch.json
 .zitadel-machinekey/
 
 # Terraform local state/cache/vars — state lives in GCS, not here.

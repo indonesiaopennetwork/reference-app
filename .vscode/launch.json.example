@@ -1,4 +1,14 @@
 {
+  // VS Code debug configurations for the BAP and BPP Go backends.
+  //
+  // Copy this file to .vscode/launch.json (gitignored) to use it:
+  //   cp .vscode/launch.json.example .vscode/launch.json
+  //
+  // Keys, subscriber IDs and the database password are read from the repo
+  // root .env (also gitignored). "env" only overrides the values that differ
+  // when the backend runs on your machine instead of inside Docker: ports,
+  // the database host, and localhost URLs for the onix adapters.
+  // Never put private keys or passwords in this file.
   "version": "0.2.0",
   "configurations": [
     {
@@ -8,25 +18,19 @@
       "mode": "auto",
       "program": "${workspaceFolder}/bap-application/cmd/server/main.go",
       "cwd": "${workspaceFolder}/bap-application",
+      "envFile": "${workspaceFolder}/.env",
       "env": {
         "APP_PORT": "8083",
         "APP_ENV": "development",
         "DB_HOST": "127.0.0.1",
         "DB_PORT": "5435",
         "DB_NAME": "bap",
-        "DB_USER": "postgres",
-        "DB_PASSWORD": "postgres",
         "DB_SSLMODE": "disable",
         "LOG_LEVEL": "debug",
-        "BAP_ID": "onix-bap-x7m2wmy7nq-et.a.run.app",
         "BAP_URI": "http://localhost:8081",
-        "NETWORK_ID": "ion.id/ion-launch",
-        "BPP_ID": "onix-bpp-x7m2wmy7nq-et.a.run.app",
         "BPP_URI": "http://localhost:8082",
         "BAP_CALLER_URL": "http://localhost:8081/bap/caller",
-        "CDS_DISCOVER_URL": "",
-        "BAP_PRIVATE_KEY": "REMOVED",
-        "BAP_KEY_ID": "onix-bap-x7m2wmy7nq-et.a.run.app|key1|ed25519"
+        "CDS_DISCOVER_URL": ""
       }
     },
     {
@@ -36,23 +40,18 @@
       "mode": "auto",
       "program": "${workspaceFolder}/bpp-application/cmd/server/main.go",
       "cwd": "${workspaceFolder}/bpp-application",
+      "envFile": "${workspaceFolder}/.env",
       "env": {
         "APP_PORT": "8080",
         "APP_ENV": "development",
         "DB_HOST": "127.0.0.1",
         "DB_PORT": "5435",
         "DB_NAME": "bpp",
-        "DB_USER": "postgres",
-        "DB_PASSWORD": "postgres",
         "DB_SSLMODE": "disable",
         "LOG_LEVEL": "debug",
-        "BPP_ID": "onix-bpp-x7m2wmy7nq-et.a.run.app",
         "BPP_URI": "http://localhost:8082",
-        "NETWORK_ID": "ion.id/ion-launch",
         "BPP_CALLER_URL": "http://localhost:8082/bpp/caller",
-        "CDS_PUBLISH_URL": "http://localhost:8085/catalog/publish",
-        "BPP_PRIVATE_KEY": "REMOVED",
-        "BPP_KEY_ID": "onix-bpp-x7m2wmy7nq-et.a.run.app|key1|ed25519"
+        "CDS_PUBLISH_URL": "http://localhost:8085/catalog/publish"
       }
     }
   ]
