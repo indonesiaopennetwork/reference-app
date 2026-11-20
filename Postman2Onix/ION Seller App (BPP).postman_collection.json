@@ -8,7 +8,63 @@
 	},
 	"item": [
 		{
-			"name": "1 — Transaction",
+			"name": "1 — Catalog Publishing",
+			"item": [
+				{
+					"name": "publish",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"pm.test('Status code is 200', function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"pm.test('Every catalog was accepted', function () {",
+									"    const json = pm.response.json();",
+									"    pm.expect(json.status).to.eql('COMPLETED');",
+									"    (json.results || []).forEach(function (r) { pm.expect(r.status, r.catalogId + ': ' + (r.reason || '')).to.eql('ACCEPTED'); });",
+									"});"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"context\": {\n    \"action\": \"catalog/publish\",\n    \"version\": \"2.0.0\",\n    \"networkId\": \"{{networkId}}\",\n    \"bppId\": \"{{bpp_id}}\",\n    \"bppUri\": \"{{bpp_uri}}\",\n    \"transactionId\": \"{{$guid}}\",\n    \"messageId\": \"{{$guid}}\",\n    \"timestamp\": \"{{$isoTimestamp}}\"\n  },\n  \"message\": {\n    \"catalogs\": [\n      {\n        \"id\": \"{{bpp_id}}/catalog-batik-pesisir\",\n        \"bppId\": \"{{bpp_id}}\",\n        \"bppUri\": \"{{bpp_uri}}\",\n        \"isActive\": true,\n        \"descriptor\": {\n          \"name\": \"Toko Batik Pesisir\",\n          \"shortDesc\": \"Batik tulis dan cap asli Pekalongan\"\n        },\n        \"provider\": {\n          \"id\": \"provider-toko-batik-pesisir\",\n          \"descriptor\": {\n            \"name\": \"Toko Batik Pesisir\"\n          }\n        },\n        \"validity\": {\n          \"startDate\": \"2026-11-19T00:00:00Z\",\n          \"endDate\": \"2027-11-19T00:00:00Z\"\n        },\n        \"resources\": [\n          {\n            \"id\": \"res-kemeja-batik-parang\",\n            \"descriptor\": {\n              \"name\": \"Kemeja Batik Tulis Parang Pria Lengan Panjang\",\n              \"shortDesc\": \"Batik tulis Pekalongan motif Parang, katun primissima, furing katun\",\n              \"longDesc\": \"Kemeja pria dari kain batik tulis asli Pekalongan dengan motif Parang Rusak, diwarnai pewarna alam.\",\n              \"mediaFile\": [\n                {\n                  \"uri\": \"https://upload.wikimedia.org/wikipedia/commons/4/4e/Kemeja_batik_Tiga_Negeri.jpg\",\n                  \"mimeType\": \"image/jpeg\"\n                }\n              ]\n            },\n            \"provider\": {\n              \"id\": \"provider-toko-batik-pesisir\",\n              \"descriptor\": {\n                \"name\": \"Toko Batik Pesisir\"\n              }\n            },\n            \"resourceAttributes\": {\n              \"@context\": \"https://schema.ion.id/release1/schema/extension/trade/TradeResource/v1/context.jsonld\",\n              \"@type\": \"ion:IONTradeResource\",\n              \"crc\": \"TRC-fashion\",\n              \"identity\": {\n                \"brand\": \"Batik Pesisir\",\n                \"originCountry\": \"ID\"\n              },\n              \"physical\": {\n                \"weight\": {\n                  \"unitCode\": \"G\",\n                  \"unitQuantity\": 300\n                },\n                \"appearance\": {\n                  \"color\": \"Cokelat Soga\",\n                  \"material\": \"Katun Primissima\",\n                  \"finish\": \"Matte\"\n                }\n              },\n              \"availability\": {\n                \"status\": \"IN_STOCK\"\n              },\n              \"fashion\": {\n                \"garmentType\": \"SHIRT\",\n                \"gender\": \"MALE\",\n                \"size\": \"L\",\n                \"fit\": \"REGULAR\",\n                \"sleeveLength\": \"LONG\",\n                \"textileType\": \"BATIK\",\n                \"productionTechnique\": \"BATIK_TULIS\",\n                \"motif\": \"Parang Rusak\",\n                \"fabric\": \"Katun Primissima\",\n                \"fabricComposition\": \"100% Katun\",\n                \"dyeType\": \"NATURAL\",\n                \"handmade\": true,\n                \"occasion\": [\n                  \"OFFICE\",\n                  \"FORMAL\",\n                  \"WEDDING\"\n                ],\n                \"careInstructions\": [\n                  \"HAND_WASH\",\n                  \"DRY_IN_SHADE\",\n                  \"DO_NOT_BLEACH\",\n                  \"IRON_LOW\"\n                ]\n              },\n              \"packagedGoodsDeclaration\": {\n                \"netQuantity\": {\n                  \"unitCode\": \"PCS\",\n                  \"unitQuantity\": 1\n                },\n                \"commonOrGenericName\": \"Kemeja Batik Pria\",\n                \"manufacturerOrPacker\": {\n                  \"name\": \"Batik Pesisir Kauman\",\n                  \"type\": \"MANUFACTURER\",\n                  \"address\": \"Kauman, Pekalongan, Jawa Tengah, ID\"\n                }\n              }\n            }\n          }\n        ],\n        \"offers\": [\n          {\n            \"id\": \"offer-kemeja-batik-parang\",\n            \"descriptor\": {\n              \"name\": \"Kemeja Batik Tulis Parang\"\n            },\n            \"resourceIds\": [\n              \"res-kemeja-batik-parang\"\n            ],\n            \"validity\": {\n              \"startDate\": \"2026-11-19T00:00:00Z\",\n              \"endDate\": \"2027-11-19T00:00:00Z\"\n            },\n            \"considerations\": [\n              {\n                \"id\": \"offer-kemeja-batik-parang-price\",\n                \"status\": {\n                  \"code\": \"ACTIVE\",\n                  \"name\": \"ACTIVE\"\n                },\n                \"considerationAttributes\": {\n                  \"@context\": \"https://schema.ion.id/release1/schema/extension/trade/TradeConsideration/v1/context.jsonld\",\n                  \"@type\": \"ion:IONTradeConsideration\",\n                  \"currency\": \"IDR\",\n                  \"breakup\": [\n                    {\n                      \"type\": \"BASE_PRICE\",\n                      \"title\": \"Kemeja Batik Tulis Parang\",\n                      \"amount\": 225000\n                    },\n                    {\n                      \"type\": \"TAX\",\n                      \"title\": \"PPN 12%\",\n                      \"amount\": 24750,\n                      \"taxDetail\": {\n                        \"rate\": 0.12,\n                        \"included\": false,\n                        \"taxRegime\": \"PPN\",\n                        \"taxCategory\": \"BKP\",\n                        \"taxableBase\": 206250\n                      }\n                    }\n                  ],\n                  \"totalAmount\": 249750,\n                  \"deliveryFee\": {\n                    \"amount\": 10000\n                  },\n                  \"buyerFinderFee\": {\n                    \"feeType\": \"PERCENT\",\n                    \"feeValue\": 3,\n                    \"appliesTo\": \"ITEM_TOTAL\"\n                  },\n                  \"paymentMethods\": [\n                    \"PREPAID\",\n                    \"COD\",\n                    \"DIGITAL_WALLET\"\n                  ]\n                }\n              }\n            ],\n            \"offerAttributes\": {\n              \"@context\": \"https://schema.ion.id/release1/schema/extension/trade/TradeOffer/v1/context.jsonld\",\n              \"@type\": \"ion:IONTradeOffer\",\n              \"policies\": {\n                \"returns\": {\n                  \"allowed\": true,\n                  \"window\": \"P7D\",\n                  \"method\": \"SELLER_PICKUP\",\n                  \"restockingFee\": {\n                    \"type\": \"PERCENTAGE\",\n                    \"value\": 10\n                  }\n                },\n                \"cancellation\": {\n                  \"allowed\": true,\n                  \"window\": \"PT2H\",\n                  \"cutoffEvent\": \"BEFORE_PACKING\"\n                },\n                \"replacement\": {\n                  \"allowed\": false\n                },\n                \"settlement\": {\n                  \"settlementBasis\": \"AFTER_DELIVERY\",\n                  \"settlementWindow\": \"P3D\"\n                }\n              },\n              \"serviceability\": {\n                \"distanceConstraint\": {\n                  \"maxDistance\": 20,\n                  \"unit\": \"KM\"\n                }\n              },\n              \"paymentConstraints\": {\n                \"codAvailable\": true\n              }\n            }\n          }\n        ]\n      }\n    ],\n    \"publishDirectives\": [\n      {\n        \"catalogId\": \"{{bpp_id}}/catalog-batik-pesisir\",\n        \"visibleTo\": [\n          \"{{networkId}}\"\n        ],\n        \"catalogType\": \"REGULAR\"\n      }\n    ]\n  }\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{catalog_publish_url}}/catalog/publish",
+							"host": [
+								"{{catalog_publish_url}}"
+							],
+							"path": [
+								"catalog",
+								"publish"
+							]
+						},
+						"description": "Sent by the BPP to the catalog publisher (onix-catalog-publish, CDS_PUBLISH_URL), not through the BPP adapter. Envelope is beckn.yaml's CatalogPublishAction: message.catalogs[] and message.publishDirectives[] (visibleTo = network ids). Every offer carries its consideration (price breakup with PPN, deliveryFee, buyerFinderFee, paymentMethods) and offerAttributes.policies (returns, cancellation, replacement, settlement terms).\n\nResponse: {status: COMPLETED, results: [{catalogId, status: ACCEPTED|REJECTED, version, reason}]}."
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "2 — Transaction",
 			"item": [
 				{
 					"name": "on_select",
@@ -158,66 +214,42 @@
 		{
 			"key": "bap_id",
 			"value": "",
-			"description": {
-				"content": "BAP subscriber ID (BAP_ID in .env)",
-				"type": "text/plain"
-			}
+			"description": "BAP subscriber ID (BAP_ID in .env)"
 		},
 		{
 			"key": "bap_uri",
 			"value": "http://onix-bap:8081/bap/receiver",
-			"description": {
-				"content": "BAP receiver URI as registered (BAP_URI)",
-				"type": "text/plain"
-			}
+			"description": "BAP receiver URI as registered (BAP_URI)"
 		},
 		{
 			"key": "bpp_id",
 			"value": "",
-			"description": {
-				"content": "BPP subscriber ID (BPP_ID in .env)",
-				"type": "text/plain"
-			}
+			"description": "BPP subscriber ID (BPP_ID in .env)"
 		},
 		{
 			"key": "bpp_uri",
 			"value": "http://onix-bpp:8082/bpp/receiver",
-			"description": {
-				"content": "BPP receiver URI as registered (BPP_URI)",
-				"type": "text/plain"
-			}
+			"description": "BPP receiver URI as registered (BPP_URI)"
 		},
 		{
 			"key": "networkId",
 			"value": "ion.id/ion-launch",
-			"description": {
-				"content": "NETWORK_ID in .env",
-				"type": "text/plain"
-			}
+			"description": "NETWORK_ID in .env"
 		},
 		{
 			"key": "transaction_id",
 			"value": "",
-			"description": {
-				"content": "UUID; filled by the pre-request script when empty",
-				"type": "text/plain"
-			}
+			"description": "UUID; filled by the pre-request script when empty"
 		},
 		{
 			"key": "contract_id",
 			"value": "",
-			"description": {
-				"content": "UUID the BPP assigns at on_init; filled by the pre-request script when empty",
-				"type": "text/plain"
-			}
+			"description": "UUID the BPP assigns at on_init; filled by the pre-request script when empty"
 		},
 		{
 			"key": "recon_transaction_id",
 			"value": "",
-			"description": {
-				"content": "UUID of a reconciliation exchange; filled by the pre-request script when empty",
-				"type": "text/plain"
-			}
+			"description": "UUID of a reconciliation exchange; filled by the pre-request script when empty"
 		}
 	]
 }
