@@ -1,0 +1,61 @@
+# Fails a push or pull request whose new commits add a secret.
+#
+# Scans only the commits a push or PR introduces, not the whole history, so
+# secrets that are already in history don't fail every run. Uses the
+# gitleaks CLI image directly: gitleaks-action needs a paid license for
+# organization-owned repositories.
+#
+# Rules and allowlists: .gitleaks.toml. The same check runs locally as a
+# pre-commit hook (.githooks/pre-commit, enabled with `task hooks:install`).
+
+name: Secret scan
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  gitleaks:
+    name: gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Work out which commits to scan
+        id: range
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.sha }}
+        run: |
+          if [ "$EVENT" = "pull_request" ]; then
+            range="$PR_BASE..$PR_HEAD"
+          elif [ -n "$PUSH_BEFORE" ] && [ "$PUSH_BEFORE" != "0000000000000000000000000000000000000000" ] \
+               && git cat-file -e "$PUSH_BEFORE^{commit}" 2>/dev/null; then
+            range="$PUSH_BEFORE..$PUSH_AFTER"
+          else
+            # New branch or force-push: scan only the commits not already on main.
+            base="$(git merge-base origin/main "$PUSH_AFTER" 2>/dev/null || true)"
+            if [ -n "$base" ] && [ "$base" != "$PUSH_AFTER" ]; then
+              range="$base..$PUSH_AFTER"
+            else
+              range="-1 $PUSH_AFTER"
+            fi
+          fi
+          echo "Scanning: $range"
+          echo "log_opts=$range" >> "$GITHUB_OUTPUT"
+
+      - name: Run gitleaks
+        env:
+          LOG_OPTS: ${{ steps.range.outputs.log_opts }}
+        run: |
+          docker run --rm -v "$GITHUB_WORKSPACE":/repo zricethezav/gitleaks:v8.21.2 \
+            git /repo --config /repo/.gitleaks.toml --log-opts="$LOG_OPTS" \
+            --redact --no-banner --verbose

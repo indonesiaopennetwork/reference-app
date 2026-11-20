@@ -11,6 +11,12 @@ vars:
   NEXT_UPDATE_TTL_SECONDS: 31536000
 
 tasks:
+  hooks:install:
+    desc: Enable the repo's git hooks (gitleaks secret scan before every commit).
+    cmds:
+      - git config core.hooksPath .githooks
+      - echo "Git hooks enabled. Commits containing secrets will now be blocked."
+
   sign-dedi-files:
     desc: >-
       Re-sign the DeDi registry file, update its digest in the index file,

@@ -1,0 +1,18 @@
+# gitleaks configuration: the default rule set, plus allowlists for values
+# that look random but are not secrets.
+#
+# Used by the pre-commit hook (.githooks/pre-commit) and the Secret scan
+# workflow (.github/workflows/gitleaks.yml).
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Public identifiers that are not secrets"
+regexTarget = "match"
+regexes = [
+  # Beckn/onix key IDs (keyId, BAP_ONIX_KEY_ID, ...) identify a public key.
+  # They appear in configs, .env files and every signature block of the
+  # catalog index files.
+  '''(?i)key_?id["']?\s*[:=]''',
+]

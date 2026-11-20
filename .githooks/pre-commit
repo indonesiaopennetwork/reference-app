@@ -1,0 +1,33 @@
+#!/bin/sh
+# Blocks a commit when its staged changes contain a secret (private keys,
+# tokens, passwords). Runs gitleaks with the repo's .gitleaks.toml.
+#
+# Enable once per clone:   task hooks:install
+#                     or:  git config core.hooksPath .githooks
+# Skip in an emergency:    git commit --no-verify
+
+set -eu
+
+GITLEAKS_IMAGE="zricethezav/gitleaks:v8.21.2"
+ROOT="$(git rev-parse --show-toplevel)"
+
+if command -v gitleaks >/dev/null 2>&1; then
+  gitleaks git --pre-commit --staged --redact --no-banner --verbose \
+    --config "$ROOT/.gitleaks.toml" "$ROOT" && exit 0
+elif command -v docker >/dev/null 2>&1; then
+  # Mount the work tree and the shared .git directory at their real paths,
+  # so this also works in a git worktree (where .git is only a pointer file).
+  GIT_COMMON="$(cd "$ROOT" && cd "$(git rev-parse --git-common-dir)" && pwd)"
+  docker run --rm -v "$ROOT":"$ROOT" -v "$GIT_COMMON":"$GIT_COMMON" "$GITLEAKS_IMAGE" \
+    git --pre-commit --staged --redact --no-banner --verbose \
+    --config "$ROOT/.gitleaks.toml" "$ROOT" && exit 0
+else
+  echo "pre-commit: gitleaks is not installed and Docker is not available." >&2
+  echo "Install gitleaks (https://github.com/gitleaks/gitleaks#installing) or Docker, then commit again." >&2
+  exit 1
+fi
+
+echo >&2
+echo "pre-commit: commit blocked because gitleaks found a secret in the staged changes (listed above)." >&2
+echo "Move the value to .env (gitignored) and reference it instead, then commit again." >&2
+exit 1
