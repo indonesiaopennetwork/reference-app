@@ -1,7 +1,9 @@
 # GCP deployment (Cloud Run, scale-to-zero)
 
-Deploys beckn-app's six services (bap, bpp, bap-frontend, bpp-frontend,
-onix-bap, onix-bpp) to Cloud Run in a single GCP project (`ion-sandbox-001`
+Deploys beckn-app's services (bap, bpp, onix-bap, onix-bpp, ...) to Cloud
+Run, and its two SPAs (bap-frontend, bpp-frontend) as static files in a GCS
+bucket served by ion-landing-page at `/tsp/remiges/cn/` and
+`/tsp/remiges/pn/` (see `gcs-frontends.tf`), in a single GCP project (`ion-sandbox-001`
 by default), along with a dedicated Cloud SQL Postgres instance and a
 dedicated Memorystore Redis instance created inside that same project.
 Everything lives in one project — no Shared VPC, no cross-project reuse.
@@ -156,10 +158,10 @@ Zitadel as fatal). The minimum-steps path:
 5. `task deploy:phase2 PROJECT_ID=<YOUR_PROJECT_ID> REGION=<YOUR_REGION>` —
    confirms Zitadel's domain is actually live (polls up to ~60 min, since
    the managed SSL cert can lag even after DNS resolves), then continues on
-   its own through Zitadel's OIDC setup, migrations, the final apply, and
-   bringing up `dedi-static-server`, then prints the DNS records for the 6
-   remaining domains (`bap`, `bap-frontend`, `bpp-frontend`,
-   `landing-page`, plus the DeDi pair) — **create these at your registrar
+   its own through Zitadel's OIDC setup, migrations, the final apply,
+   uploading the two SPAs to the frontends bucket, and bringing up
+   `dedi-static-server`, then prints the DNS records for the 4 remaining
+   domains (`bap`, `landing-page`, plus the DeDi pair) — **create these at your registrar
    too**; none of them block the deployment itself, but without them those
    URLs won't resolve. If `phase2` is interrupted during the wait, just
    re-run it — every step both phases chain is idempotent, aside from
@@ -238,8 +240,6 @@ zitadel_admin_email    = "<your email>"
 bpp_domain             = "<your bpp/dedi-discovery domain>"
 bpp_domain_www         = "<the www variant of the domain above>"
 bap_domain             = "<your bap backend domain>"
-bap_frontend_domain    = "<your buyer-app domain>"
-bpp_frontend_domain    = "<your seller-app domain>"
 landing_page_domain    = "<your landing-page domain>"
 zitadel_domain         = "<your zitadel domain>"
 ```
@@ -561,18 +561,26 @@ participants POST callbacks to `{bapUri}/<action>` directly, and
 `/bpp/receiver/` (see `../config/local-simple-bap.yaml`/`local-simple-bpp.yaml`)
 — a bare `bapUri` with no path would misroute every inbound callback.
 
-## Custom domains for bap, bap-frontend, bpp-frontend, landing page, and Zitadel (required)
+## Custom domains for bap, landing page, and Zitadel (required)
 
 `domain-mapping.tf` also maps `bap` (`var.bap_domain`),
-`bap-frontend` (`var.bap_frontend_domain`), `bpp-frontend`
-(`var.bpp_frontend_domain`), `landing-page` (`var.landing_page_domain`), and
+`landing-page` (`var.landing_page_domain`), and
 `zitadel` (`var.zitadel_domain`) to their own subdomains — same
 `google_cloud_run_domain_mapping` pattern, Search Console verification
-prerequisite, and **no-default treatment** as `bpp_domain` above: all five
-are required, `terraform plan` fails without them (unlike the other four,
-`zitadel_domain` isn't really "optional" in practice — see step 6b above,
-`bpp` won't start without a working Zitadel). Set all five in
-`terraform.tfvars` to subdomains you control before applying.
+prerequisite, and **no-default treatment** as `bpp_domain` above: all three
+are required, `terraform plan` fails without them (`zitadel_domain` isn't
+really "optional" in practice — see step 6b above, `bpp` won't start
+without a working Zitadel). Set all three in `terraform.tfvars` to
+subdomains you control before applying.
+
+The buyer and seller apps (bap-frontend, bpp-frontend) have **no domain of
+their own**: they're static files in the `<project>-frontends-static`
+bucket (`gcs-frontends.tf`), served only at
+`https://<ion_landing_page_domain>/tsp/remiges/cn/` and `/pn/` by
+ion-landing-page's nginx, which also forwards each app's `/api/` calls
+straight to `bap` / `bpp` and generates each app's `env-config.js` (see
+`ion-landing-page/nginx.conf.template` and `env.sh`). Keeping them on that
+one origin is deliberate — login tokens live in its `localStorage`.
 
 `bpp` intentionally does **not** get its own separate domain — it shares
 `dedi-static-server`'s domain instead, via one more `location` block in
@@ -583,25 +591,15 @@ provider-facing API, using the same envsubst'd-hostname proxy pattern as the
 Run URL (`BPP_URL`, set by `cloud-run-wiring.tf`) and is deliberately not
 exposed on any public domain.
 
-`bap_frontend_domain`/`bpp_frontend_domain` do double duty beyond domain
-mapping: `cloud-run-bap-frontend.tf` also injects
-`bap_frontend_domain` into `bap-frontend`'s own container as `BPP_ADMIN_URL`,
-and `cloud-run-bpp-frontend.tf` injects `bpp_frontend_domain` into
-`bpp-frontend`'s container as `BAP_URL` — these back the "BPP APP" /
-"Go to BAP APP" cross-navigation buttons in each frontend's UI (locally,
+The "BPP APP" / "Go to BAP APP" cross-navigation buttons in each app's UI
+read `window.__env__.BPP_ADMIN_URL` / `BAP_URL` from that env-config.js,
+filled from `local.bpp_frontend_url` / `local.bap_frontend_url` (locally,
 the same values come from `VITE_BPP_ADMIN_URL`/`VITE_BAP_URL` in `.env`).
-Note that `BAP_URL` as a container env var name is overloaded: on
-`bap-frontend` it's a *different* var pointing at the bap backend (nginx's
-reverse-proxy target, `var.bap_domain`), while on `bpp-frontend` it points at
-bap-frontend's own URL for the button — same name, different meaning
-depending on which service reads it.
 
-After applying, get the DNS records for the five new domains the same way as
+After applying, get the DNS records for these domains the same way as
 `bpp_domain`:
 ```sh
 terraform output bap_domain_dns_records
-terraform output bap_frontend_domain_dns_records
-terraform output bpp_frontend_domain_dns_records
 terraform output landing_page_domain_dns_records
 terraform output zitadel_domain_dns_records
 ```
@@ -635,8 +633,8 @@ that one field — which is exactly what the per-service Task commands below
 do, so you never need to touch `image_tag` at all:
 
 ```sh
-task redeploy:bap-frontend   # only rebuilds/redeploys bap-frontend
 task redeploy:bpp            # only rebuilds/redeploys bpp
+task redeploy:bap-frontend   # rebuilds bap-frontend and uploads it to the frontends bucket (no Cloud Run service)
 task redeploy:all            # rebuilds/redeploys every service (not the migrate jobs)
 ```
 
@@ -722,8 +720,8 @@ full mapping.
    `cloudsql-proxy` sidecar). Omitting it is either ambiguous or targets the
    wrong container depending on gcloud version.
 5. **Cloud Run rejects `memory < 512Mi` when CPU is "always allocated"**
-   (the default). The frontend nginx containers hit this at 256Mi even
-   though nginx barely needs it — bumped to 512Mi.
+   (the default). The (since removed) frontend nginx containers hit this
+   at 256Mi even though nginx barely needs it — bumped to 512Mi.
 6. **First `terraform apply` will fail on `bap`/`bpp` even with everything
    else correct**, because the databases have no schema yet and both apps
    `os.Exit(1)` if a required startup query fails against a table that

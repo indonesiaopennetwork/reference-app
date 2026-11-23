@@ -43,15 +43,12 @@ network_id = "ion.id/ion-launch"
 # — see README.md "Custom domain for DeDi discovery files" and the section
 # right after it.
 #
-# bap_frontend_domain/bpp_frontend_domain are also injected as the
-# BPP_ADMIN_URL/BAP_URL container env vars powering the cross-navigation
-# buttons in the sibling frontend's UI — see README.md "Custom domains for
-# bap, bap-frontend, bpp-frontend, and the landing page".
+# The buyer and seller apps have no domain of their own: they're served at
+# https://<ion_landing_page_domain>/tsp/remiges/cn/ and /pn/ from the
+# frontends GCS bucket (see gcs-frontends.tf).
 bpp_domain              = "your-domain.example"
 bpp_domain_www          = "www.your-domain.example"
 bap_domain              = "bap.your-domain.example"
-bap_frontend_domain     = "shop.your-domain.example"
-bpp_frontend_domain     = "seller.your-domain.example"
 landing_page_domain     = "home.your-domain.example"
 ion_landing_page_domain = "demo.your-domain.example"
 zitadel_domain          = "auth.your-domain.example"

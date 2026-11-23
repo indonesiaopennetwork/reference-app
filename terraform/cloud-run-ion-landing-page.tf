@@ -3,6 +3,11 @@
 # (https://storage.googleapis.com/<bucket>/...) -- see
 # ion-landing-page/nginx.conf.template. Domain-mapped to the custom domain
 # -- see domain-mapping.tf.
+#
+# Also the only server for the buyer (/tsp/remiges/cn/) and seller
+# (/tsp/remiges/pn/) apps: their files come from the frontends bucket
+# (gcs-frontends.tf), their /api/ calls are forwarded straight to bap / bpp,
+# and their env-config.js is generated here at startup (env.sh).
 
 resource "google_cloud_run_v2_service" "ion_landing_page" {
   name                = "ion-landing-page"
@@ -10,7 +15,7 @@ resource "google_cloud_run_v2_service" "ion_landing_page" {
   location            = var.region
   ingress             = "INGRESS_TRAFFIC_ALL"
   deletion_protection = false
-  depends_on          = [google_project_service.apis, google_storage_bucket_iam_member.ion_landing_page_public_read]
+  depends_on          = [google_project_service.apis, google_storage_bucket_iam_member.ion_landing_page_public_read, google_storage_bucket_iam_member.frontends_public_read]
 
   template {
     service_account       = google_service_account.cloud_run_sa.email
@@ -36,19 +41,41 @@ resource "google_cloud_run_v2_service" "ion_landing_page" {
         value = local.landing_page_url
       }
 
-      # nginx.conf.template proxies /tsp/remiges/, /tsp/remiges/cn/ and
-      # /tsp/remiges/pn/ to these hosts -- see local.landing_page_url.
+      # nginx.conf.template proxies /tsp/remiges/ to this host -- see
+      # local.landing_page_url.
       env {
         name  = "LANDING_PAGE_UPSTREAM"
         value = trimprefix(google_cloud_run_v2_service.landing_page.uri, "https://")
       }
+
+      # nginx.conf.template forwards /tsp/remiges/cn/api/ and
+      # /tsp/remiges/pn/api/ to these hosts (the job each app's own nginx
+      # did before the apps moved to the frontends bucket).
       env {
-        name  = "BAP_FRONTEND_UPSTREAM"
-        value = trimprefix(google_cloud_run_v2_service.bap_frontend.uri, "https://")
+        name  = "BAP_UPSTREAM"
+        value = trimprefix(google_cloud_run_v2_service.bap.uri, "https://")
       }
       env {
-        name  = "BPP_FRONTEND_UPSTREAM"
-        value = trimprefix(google_cloud_run_v2_service.bpp_frontend.uri, "https://")
+        name  = "BPP_UPSTREAM"
+        value = trimprefix(google_cloud_run_v2_service.bpp.uri, "https://")
+      }
+
+      # nginx.conf.template serves the cn/ and pn/ apps' static files from
+      # this bucket's public URL -- see gcs-frontends.tf.
+      env {
+        name  = "FRONTENDS_BUCKET"
+        value = google_storage_bucket.frontends_static.name
+      }
+
+      # Written into the apps' env-config.js by env.sh -- the cross-links
+      # between the buyer and seller apps (BPP_ADMIN_URL / BAP_URL there).
+      env {
+        name  = "BAP_FRONTEND_URL"
+        value = local.bap_frontend_url
+      }
+      env {
+        name  = "BPP_FRONTEND_URL"
+        value = local.bpp_frontend_url
       }
 
       # nginx.conf.template proxy_pass's to this bucket's public URL
@@ -68,6 +95,7 @@ resource "google_cloud_run_v2_service" "ion_landing_page" {
           cpu    = "1"
           memory = "512Mi"
         }
+        cpu_idle = true # request-based billing
       }
     }
   }
@@ -76,4 +104,3 @@ resource "google_cloud_run_v2_service" "ion_landing_page" {
     ignore_changes = [template[0].containers[0].image]
   }
 }
-        cpu_idle = true # request-based billing

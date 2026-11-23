@@ -6,6 +6,9 @@
 # changes on purpose -- see terraform/README.md "Code change in any service").
 #   - A change under <app>/db/migrations runs that app's migration job first.
 #   - A change to ion-landing-page/index.html uploads it to its GCS bucket.
+#   - A change under bap-frontend/ or bpp-frontend/ builds that app and
+#     uploads it to the frontends GCS bucket (cn/ or pn/) -- they have no
+#     Cloud Run service of their own; ion-landing-page serves them.
 # Run it by hand from the Actions tab to redeploy everything.
 #
 # One-time setup -- repository variables (Settings -> Secrets and variables
@@ -62,14 +65,16 @@ env:
 jobs:
   changes:
     name: What changed
-    # Skipped on an "Apply app settings only" run. migrate, deploy and
-    # landing-files all need this job's success, so they are skipped too.
+    # Skipped on an "Apply app settings only" run. migrate, deploy,
+    # landing-files and frontend-files all need this job's success, so they
+    # are skipped too.
     if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.apply_app_settings_only) }}
     runs-on: ubuntu-latest
     outputs:
       services: ${{ steps.plan.outputs.services }}
       migrations: ${{ steps.plan.outputs.migrations }}
       landing_files: ${{ steps.plan.outputs.landing_files }}
+      frontends: ${{ steps.plan.outputs.frontends }}
       tag: ${{ steps.plan.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
@@ -103,8 +108,6 @@ jobs:
           catalog='
           bap|bap-application|Dockerfile|bap-application|bap:bap
           bpp|bpp-application|Dockerfile|bpp-application|bpp:bpp
-          bap-frontend|bap-frontend|Dockerfile|bap-frontend|bap-frontend:bap-frontend
-          bpp-frontend|bpp-frontend|Dockerfile|bpp-frontend|bpp-frontend:bpp-frontend
           onix-bap|onix-bap|Dockerfile|onix-bap|beckn-onix-bap:onix-bap
           onix-bpp|onix-bpp|Dockerfile|onix-bpp|beckn-onix-bpp:onix-bpp
           onix-catalog-publish|onix-catalog-publish|Dockerfile|onix-catalog-publish|onix-catalog-publish:onix-catalog-publish
@@ -150,15 +153,26 @@ jobs:
           landing_files=false
           touched '^ion-landing-page/index\.html$' && landing_files=true
 
+          # The two SPAs: source dir -> folder in the frontends bucket.
+          frontends="[]"
+          for app in bap-frontend:cn bpp-frontend:pn; do
+            dir="${app%%:*}"; prefix="${app##*:}"
+            if touched "^${dir}/"; then
+              frontends="$(jq -c --arg dir "$dir" --arg prefix "$prefix" '. + [{dir: $dir, prefix: $prefix}]' <<<"$frontends")"
+            fi
+          done
+
           echo "services=$services" >> "$GITHUB_OUTPUT"
           echo "migrations=$migrations" >> "$GITHUB_OUTPUT"
           echo "landing_files=$landing_files" >> "$GITHUB_OUTPUT"
+          echo "frontends=$frontends" >> "$GITHUB_OUTPUT"
           echo "tag=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
           {
             echo "### Deploy plan for \`$(git rev-parse --short HEAD)\`"
             echo "- Services: $(jq -r 'map(.id) | if length == 0 then "none" else join(", ") end' <<<"$services")"
             echo "- Migrations: $(jq -r 'if length == 0 then "none" else map("migrate-" + .) | join(", ") end' <<<"$migrations")"
             echo "- Landing page files: $landing_files"
+            echo "- Frontend files: $(jq -r 'map(.dir) | if length == 0 then "none" else join(", ") end' <<<"$frontends")"
           } >> "$GITHUB_STEP_SUMMARY"
 
   migrate:
@@ -241,6 +255,52 @@ jobs:
       - uses: google-github-actions/setup-gcloud@v2
       - name: Upload index.html
         run: gcloud storage cp ion-landing-page/index.html "gs://$PROJECT_ID-ion-landing-page-static/index.html"
+
+  frontend-files:
+    name: Upload ${{ matrix.app.dir }} files
+    needs: changes
+    if: needs.changes.result == 'success' && needs.changes.outputs.frontends != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app: ${{ fromJSON(needs.changes.outputs.frontends) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ${{ matrix.app.dir }}/package-lock.json
+      - name: Build
+        working-directory: ${{ matrix.app.dir }}
+        run: |
+          npm ci
+          npm run build
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+      # Served by ion-landing-page at /tsp/remiges/<prefix>/ (see
+      # ion-landing-page/nginx.conf.template). Order matters:
+      #   1. assets/ first, cached for a year -- vite puts a content hash in
+      #      every file name, so a changed file always gets a new name.
+      #      Old ones are kept (no --delete-unmatched-destination-objects):
+      #      a tab still open on the previous index.html may yet load them.
+      #   2. index.html (and the other root files) last, never cached --
+      #      so no browser gets an index.html pointing at assets that are not
+      #      uploaded yet, and every page load picks up the latest deploy.
+      # env-config.js is not uploaded: ion-landing-page generates it.
+      - name: Upload to gs://${{ env.PROJECT_ID }}-frontends-static/${{ matrix.app.prefix }}/
+        working-directory: ${{ matrix.app.dir }}/dist
+        run: |
+          set -euo pipefail
+          dest="gs://$PROJECT_ID-frontends-static/${{ matrix.app.prefix }}"
+          gcloud storage rsync --recursive assets "$dest/assets" \
+            --cache-control="public, max-age=31536000, immutable"
+          find . -maxdepth 1 -type f ! -name env-config.js -print0 |
+            xargs -0 -I{} gcloud storage cp {} "$dest/" --cache-control="no-cache"
 
   app-settings:
     name: App settings

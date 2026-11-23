@@ -6,7 +6,8 @@ pushed or merged to `main`. It redeploys only what changed, the same way
 
 | Change under | What happens |
 |---|---|
-| `bap-application/`, `bpp-application/`, `bap-frontend/`, `bpp-frontend/`, `onix-bap/`, `onix-bpp/`, `onix-catalog-publish/`, `dedi-static-server/`, `landing-page/`, `discovery-service/` | That service is rebuilt, pushed and rolled out |
+| `bap-application/`, `bpp-application/`, `onix-bap/`, `onix-bpp/`, `onix-catalog-publish/`, `dedi-static-server/`, `landing-page/`, `discovery-service/` | That service is rebuilt, pushed and rolled out |
+| `bap-frontend/`, `bpp-frontend/` | That app is built (`npm run build`) and uploaded to the `<project>-frontends-static` bucket (`cn/` / `pn/`); no Cloud Run service, ion-landing-page serves it |
 | `otel-collector/` | The collector sidecar is updated in `beckn-onix-bap` and `beckn-onix-bpp` |
 | `bap-application/db/migrations/`, `bpp-application/db/migrations/` | `migrate-bap` / `migrate-bpp` runs first; services roll out only if it succeeds |
 | `ion-landing-page/Dockerfile.cloud`, `nginx.conf.template`, `env.sh` | The `ion-landing-page` image is rolled out |
@@ -50,6 +51,9 @@ gcloud iam service-accounts add-iam-policy-binding \
   "beckn-app-run-sa@$PROJECT_ID.iam.gserviceaccount.com" --project="$PROJECT_ID" \
   --member="serviceAccount:$DEPLOY_SA" --role=roles/iam.serviceAccountUser
 gcloud storage buckets add-iam-policy-binding "gs://$PROJECT_ID-ion-landing-page-static" \
+  --member="serviceAccount:$DEPLOY_SA" --role=roles/storage.objectAdmin
+# The buyer (cn/) and seller (pn/) apps' built files (frontend-files job).
+gcloud storage buckets add-iam-policy-binding "gs://$PROJECT_ID-frontends-static" \
   --member="serviceAccount:$DEPLOY_SA" --role=roles/storage.objectAdmin
 
 # 3. Let GitHub Actions runs from this repository's main branch use it.

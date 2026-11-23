@@ -235,16 +235,6 @@ variable "bap_domain" {
   type        = string
 }
 
-variable "bap_frontend_domain" {
-  description = "Custom domain for the bap-frontend (buyer) app."
-  type        = string
-}
-
-variable "bpp_frontend_domain" {
-  description = "Custom domain for the bpp-frontend (seller) app."
-  type        = string
-}
-
 variable "landing_page_domain" {
   description = "Custom domain for the landing page."
   type        = string

@@ -25,29 +25,121 @@ server {
         proxy_set_header Host ${LANDING_PAGE_UPSTREAM};
     }
 
-    # bap-frontend (buyer app) and bpp-frontend (seller app), mounted the
-    # same way. Longest prefix wins, so these take precedence over
-    # /tsp/remiges/ above. Each app's own nginx still proxies its /api/.
+    # bap-frontend (buyer app, /cn/) and bpp-frontend (seller app, /pn/).
+    # No Cloud Run service of their own any more: their built files live in
+    # the frontends GCS bucket (cn/ and pn/ -- see
+    # terraform/gcs-frontends.tf), and this server does the three jobs each
+    # app's own nginx used to do:
+    #   1. /api/           -> forwarded straight to bap / bpp
+    #   2. /env-config.js  -> generated locally at startup (see env.sh)
+    #   3. everything else -> fetched from the bucket, falling back to the
+    #                         app's index.html (SPA client-side routes)
+    # Longest prefix wins, so these all take precedence over /tsp/remiges/
+    # above, and .../api/ over the app's own /tsp/remiges/<app>/.
+
+    # ---- bap-frontend (buyer app) ----
     location = /tsp/remiges/cn {
         absolute_redirect off;
         return 301 /tsp/remiges/cn/;
     }
 
-    location /tsp/remiges/cn/ {
-        proxy_pass https://${BAP_FRONTEND_UPSTREAM}/;
+    # The trailing /api/ on proxy_pass strips /tsp/remiges/cn, so bap sees
+    # the same /api/v1/... path the old bap-frontend nginx forwarded.
+    location /tsp/remiges/cn/api/ {
+        proxy_pass https://${BAP_UPSTREAM}/api/;
         proxy_ssl_server_name on;
-        proxy_set_header Host ${BAP_FRONTEND_UPSTREAM};
+        proxy_http_version 1.1;
+        # Cloud Run routes by Host at its edge -- must be bap's own host.
+        proxy_set_header Host              ${BAP_UPSTREAM};
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        # Matches bap-application's own client timeout -- select/init/confirm
+        # go through two cold-Extended-Schema-cache-prone hops before
+        # bpp-application is even reached; a shorter timeout here would cut
+        # the connection first and cancel bap's in-flight call to onix-bap.
+        proxy_read_timeout 90s;
     }
 
+    location = /tsp/remiges/cn/env-config.js {
+        alias /usr/share/nginx/env-config-out/cn/env-config.js;
+        add_header Cache-Control "no-cache";
+    }
+
+    # Query strings are dropped before going to GCS: the login redirect
+    # lands on /tsp/remiges/cn/?token=..., and the token has no business in
+    # a storage request (the SPA reads it from the address bar, not from the
+    # response).
+    location = /tsp/remiges/cn/ {
+        set $args "";
+        proxy_pass https://storage.googleapis.com/${FRONTENDS_BUCKET}/cn/index.html;
+        proxy_ssl_server_name on;
+        proxy_set_header Host storage.googleapis.com;
+    }
+
+    location /tsp/remiges/cn/ {
+        set $args "";
+        proxy_pass https://storage.googleapis.com/${FRONTENDS_BUCKET}/cn/;
+        proxy_ssl_server_name on;
+        proxy_set_header Host storage.googleapis.com;
+        proxy_intercept_errors on;
+        error_page 404 = /__cn_index_fallback;
+    }
+
+    location = /__cn_index_fallback {
+        internal;
+        set $args "";
+        proxy_pass https://storage.googleapis.com/${FRONTENDS_BUCKET}/cn/index.html;
+        proxy_ssl_server_name on;
+        proxy_set_header Host storage.googleapis.com;
+    }
+
+    # ---- bpp-frontend (seller app) -- same layout as cn/ above ----
     location = /tsp/remiges/pn {
         absolute_redirect off;
         return 301 /tsp/remiges/pn/;
     }
 
-    location /tsp/remiges/pn/ {
-        proxy_pass https://${BPP_FRONTEND_UPSTREAM}/;
+    location /tsp/remiges/pn/api/ {
+        proxy_pass https://${BPP_UPSTREAM}/api/;
         proxy_ssl_server_name on;
-        proxy_set_header Host ${BPP_FRONTEND_UPSTREAM};
+        proxy_http_version 1.1;
+        proxy_set_header Host              ${BPP_UPSTREAM};
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        # Same reasoning as the cn/ api block: any synchronous action going
+        # through onix-bpp can hit the cold-Extended-Schema-cache delay.
+        proxy_read_timeout 90s;
+    }
+
+    location = /tsp/remiges/pn/env-config.js {
+        alias /usr/share/nginx/env-config-out/pn/env-config.js;
+        add_header Cache-Control "no-cache";
+    }
+
+    location = /tsp/remiges/pn/ {
+        set $args "";
+        proxy_pass https://storage.googleapis.com/${FRONTENDS_BUCKET}/pn/index.html;
+        proxy_ssl_server_name on;
+        proxy_set_header Host storage.googleapis.com;
+    }
+
+    location /tsp/remiges/pn/ {
+        set $args "";
+        proxy_pass https://storage.googleapis.com/${FRONTENDS_BUCKET}/pn/;
+        proxy_ssl_server_name on;
+        proxy_set_header Host storage.googleapis.com;
+        proxy_intercept_errors on;
+        error_page 404 = /__pn_index_fallback;
+    }
+
+    location = /__pn_index_fallback {
+        internal;
+        set $args "";
+        proxy_pass https://storage.googleapis.com/${FRONTENDS_BUCKET}/pn/index.html;
+        proxy_ssl_server_name on;
+        proxy_set_header Host storage.googleapis.com;
     }
 
     # GCS has no real "index" concept for a bare bucket-root request --

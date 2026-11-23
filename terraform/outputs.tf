@@ -9,13 +9,18 @@ output "region" {
 }
 
 output "bap_frontend_url" {
-  value       = google_cloud_run_v2_service.bap_frontend.uri
-  description = "Public URL — open this to use the BAP (buyer) app."
+  value       = local.bap_frontend_url
+  description = "Public URL — open this to use the BAP (buyer) app. Served by ion-landing-page from the frontends bucket (cn/)."
 }
 
 output "bpp_frontend_url" {
-  value       = google_cloud_run_v2_service.bpp_frontend.uri
-  description = "Public URL — open this to use the BPP (seller/admin) app."
+  value       = local.bpp_frontend_url
+  description = "Public URL — open this to use the BPP (seller/admin) app. Served by ion-landing-page from the frontends bucket (pn/)."
+}
+
+output "frontends_bucket" {
+  value       = google_storage_bucket.frontends_static.name
+  description = "GCS bucket holding the buyer (cn/) and seller (pn/) apps' built files -- upload with `task deploy-frontend-files`."
 }
 
 output "bap_url" {
@@ -80,16 +85,6 @@ output "bap_domain_url" {
   description = "Custom domain URL for the bap backend."
 }
 
-output "bap_frontend_domain_url" {
-  value       = "https://${var.bap_frontend_domain}"
-  description = "Custom domain URL for the bap-frontend (buyer) app."
-}
-
-output "bpp_frontend_domain_url" {
-  value       = "https://${var.bpp_frontend_domain}"
-  description = "Custom domain URL for the bpp-frontend (seller) app."
-}
-
 output "landing_page_domain_url" {
   value       = "https://${var.landing_page_domain}"
   description = "Custom domain URL for the landing page."
@@ -123,16 +118,6 @@ output "bpp_domain_www_dns_records" {
 output "bap_domain_dns_records" {
   value       = google_cloud_run_domain_mapping.bap.status[0].resource_records
   description = "DNS records to create at your registrar for var.bap_domain."
-}
-
-output "bap_frontend_domain_dns_records" {
-  value       = google_cloud_run_domain_mapping.bap_frontend.status[0].resource_records
-  description = "DNS records to create at your registrar for var.bap_frontend_domain."
-}
-
-output "bpp_frontend_domain_dns_records" {
-  value       = google_cloud_run_domain_mapping.bpp_frontend.status[0].resource_records
-  description = "DNS records to create at your registrar for var.bpp_frontend_domain."
 }
 
 output "landing_page_domain_dns_records" {

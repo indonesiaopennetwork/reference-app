@@ -30,8 +30,8 @@ build_and_push bap-application         "${ROOT}/bap-application"
 build_and_push bap-application-migrate "${ROOT}/bap-application" Dockerfile.migrate
 build_and_push bpp-application         "${ROOT}/bpp-application"
 build_and_push bpp-application-migrate "${ROOT}/bpp-application" Dockerfile.migrate
-build_and_push bap-frontend            "${ROOT}/bap-frontend"
-build_and_push bpp-frontend            "${ROOT}/bpp-frontend"
+# bap-frontend / bpp-frontend: no image -- built and uploaded to the
+# frontends GCS bucket instead (task deploy-frontend-files).
 build_and_push onix-bap                "${ROOT}/onix-bap"
 build_and_push onix-bpp                "${ROOT}/onix-bpp"
 build_and_push onix-catalog-publish    "${ROOT}/onix-catalog-publish"

@@ -7,11 +7,13 @@
 # templating pattern).
 
 # Canonical public URLs of landing-page, bap-frontend and bpp-frontend:
-# mounted under ion-landing-page's domain via its nginx proxy (see
-# ion-landing-page/nginx.conf.template). Their own custom domains stay
-# mapped too, but every link and the bpp CORS origin point here -- login
-# tokens live in this origin's localStorage, so links must all agree on one
-# URL or logout won't clear them.
+# mounted under ion-landing-page's domain via its nginx (see
+# ion-landing-page/nginx.conf.template). bap-frontend and bpp-frontend have
+# no other URL at all -- their files live in the frontends bucket
+# (gcs-frontends.tf). landing-page's own custom domain stays mapped, but
+# every link and the bpp CORS origin point here -- login tokens live in
+# this origin's localStorage, so links must all agree on one URL or logout
+# won't clear them.
 locals {
   landing_page_url    = "https://${var.ion_landing_page_domain}/tsp/remiges"
   landing_page_origin = "https://${var.ion_landing_page_domain}"
@@ -53,9 +55,9 @@ resource "google_cloud_run_v2_service" "landing_page" {
           cpu    = "1"
           memory = "512Mi"
         }
+        cpu_idle = true # request-based billing
       }
 
-        cpu_idle = true # request-based billing
       env {
         name  = "BAP_URL"
         value = local.bap_frontend_url

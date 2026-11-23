@@ -68,6 +68,34 @@ tasks:
     cmds:
       - gsutil cp ion-landing-page/index.html "gs://{{.ION_LANDING_PAGE_BUCKET}}/index.html"
 
+  deploy-frontend-files:
+    desc: >-
+      Build bap-frontend and bpp-frontend and upload them to the frontends
+      GCS bucket (cn/ and pn/), where ion-landing-page serves them at
+      /tsp/remiges/cn/ and /tsp/remiges/pn/. Same steps as the deploy
+      workflow's frontend-files job.
+    cmds:
+      - task: _upload-frontend
+        vars: {DIR: bap-frontend, PREFIX: cn}
+      - task: _upload-frontend
+        vars: {DIR: bpp-frontend, PREFIX: pn}
+
+  # assets/ first with a long cache (vite content-hashes every file name),
+  # then index.html and the other root files uncached -- see the comment on
+  # the upload step in .github/workflows/deploy.yml for why the order
+  # matters. env-config.js is never uploaded: ion-landing-page generates it.
+  _upload-frontend:
+    internal: true
+    vars:
+      FRONTENDS_BUCKET:
+        sh: cd "{{.ROOT_DIR}}/terraform" && terraform output -raw frontends_bucket
+    dir: '{{.DIR}}'
+    cmds:
+      - npm ci
+      - npm run build
+      - gcloud storage rsync --recursive dist/assets "gs://{{.FRONTENDS_BUCKET}}/{{.PREFIX}}/assets" --cache-control="public, max-age=31536000, immutable"
+      - find dist -maxdepth 1 -type f ! -name env-config.js -print0 | xargs -0 -I{} gcloud storage cp {} "gs://{{.FRONTENDS_BUCKET}}/{{.PREFIX}}/" --cache-control="no-cache"
+
   _ensure-future-next-update:
     internal: true
     cmds:
@@ -384,14 +412,13 @@ tasks:
       - task: deploy:wait-zitadel-dns
       - task: deploy:setup-zitadel
       - task: deploy:full-apply-and-migrate
+      - task: deploy-frontend-files
       - task: deploy:dedi-server
       - |
         cd terraform
         echo ""
         echo "Deployment complete. Also create these DNS records at your registrar (not required for the deployment itself, but these URLs won't resolve without them):"
         terraform output bap_domain_dns_records
-        terraform output bap_frontend_domain_dns_records
-        terraform output bpp_frontend_domain_dns_records
         terraform output landing_page_domain_dns_records
         terraform output bpp_domain_dns_records
         terraform output bpp_domain_www_dns_records
@@ -476,17 +503,19 @@ tasks:
       - task: _redeploy-service
         vars: {CONTEXT_DIR: bpp-application, IMAGE: bpp-application, SERVICE: bpp, CONTAINER: bpp}
 
+  # No Cloud Run service or image for the two SPAs -- a "redeploy" is a
+  # rebuild + upload to the frontends bucket (see deploy-frontend-files).
   redeploy:bap-frontend:
-    desc: Rebuild, push, and redeploy ONLY bap-frontend.
+    desc: Rebuild bap-frontend and upload it to the frontends bucket (cn/).
     cmds:
-      - task: _redeploy-service
-        vars: {CONTEXT_DIR: bap-frontend, IMAGE: bap-frontend, SERVICE: bap-frontend, CONTAINER: bap-frontend}
+      - task: _upload-frontend
+        vars: {DIR: bap-frontend, PREFIX: cn}
 
   redeploy:bpp-frontend:
-    desc: Rebuild, push, and redeploy ONLY bpp-frontend.
+    desc: Rebuild bpp-frontend and upload it to the frontends bucket (pn/).
     cmds:
-      - task: _redeploy-service
-        vars: {CONTEXT_DIR: bpp-frontend, IMAGE: bpp-frontend, SERVICE: bpp-frontend, CONTAINER: bpp-frontend}
+      - task: _upload-frontend
+        vars: {DIR: bpp-frontend, PREFIX: pn}
 
   redeploy:onix-bap:
     desc: Rebuild, push, and redeploy ONLY onix-bap (Cloud Run service name is beckn-onix-bap).

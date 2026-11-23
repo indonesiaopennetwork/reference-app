@@ -38,22 +38,6 @@ resource "google_cloud_run_v2_service_iam_member" "bpp_public_invoker" {
   member   = "allUsers"
 }
 
-resource "google_cloud_run_v2_service_iam_member" "bap_frontend_public_invoker" {
-  project  = var.project_id
-  location = var.region
-  name     = google_cloud_run_v2_service.bap_frontend.name
-  role     = "roles/run.invoker"
-  member   = "allUsers"
-}
-
-resource "google_cloud_run_v2_service_iam_member" "bpp_frontend_public_invoker" {
-  project  = var.project_id
-  location = var.region
-  name     = google_cloud_run_v2_service.bpp_frontend.name
-  role     = "roles/run.invoker"
-  member   = "allUsers"
-}
-
 resource "google_cloud_run_v2_service_iam_member" "onix_bap_public_invoker" {
   project  = var.project_id
   location = var.region
@@ -131,18 +115,8 @@ resource "google_cloud_run_v2_service_iam_member" "dedi_static_public_invoker" {
 # exactly bug #2 above), so they have nothing to move -- they're just
 # created fresh under the new addresses.
 moved {
-  from = google_cloud_run_v2_service_iam_member.public_invoker["bap_frontend"]
-  to   = google_cloud_run_v2_service_iam_member.bap_frontend_public_invoker
-}
-
-moved {
   from = google_cloud_run_v2_service_iam_member.public_invoker["bpp"]
   to   = google_cloud_run_v2_service_iam_member.bpp_public_invoker
-}
-
-moved {
-  from = google_cloud_run_v2_service_iam_member.public_invoker["bpp_frontend"]
-  to   = google_cloud_run_v2_service_iam_member.bpp_frontend_public_invoker
 }
 
 moved {
