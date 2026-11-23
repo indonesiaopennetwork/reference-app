@@ -17,10 +17,12 @@ resource "google_cloud_run_v2_service" "ion_landing_page" {
     execution_environment = "EXECUTION_ENVIRONMENT_GEN2"
 
     scaling {
-      # 1, not 0: this is the outer proxy every request goes through
-      # (demo.ion.id/tsp/remiges/...) -- see the scaling comment on
-      # bap/onix-bap for why 0 is risky here too.
-      min_instance_count = 1
+      # 0: scale to zero when idle, so nothing is billed without traffic.
+      # Trade-off: the first request after an idle period pays a cold start
+      # (container boot plus any in-process cache warm-up -- measured at
+      # 10-35s+ for the onix modules), which a flaky client network can abort
+      # (net::ERR_NETWORK_CHANGED). Raise to 1 to keep an instance warm.
+      min_instance_count = 0
       max_instance_count = 3
     }
 
@@ -74,3 +76,4 @@ resource "google_cloud_run_v2_service" "ion_landing_page" {
     ignore_changes = [template[0].containers[0].image]
   }
 }
+        cpu_idle = true # request-based billing

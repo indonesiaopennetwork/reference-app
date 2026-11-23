@@ -25,12 +25,12 @@ resource "google_cloud_run_v2_service" "bap" {
     service_account = google_service_account.cloud_run_sa.email
 
     scaling {
-      # 1, not 0: at 0, the first request after any idle period pays a
-      # Cloud Run cold start plus onix's own cold-cache tax (extended
-      # schema / DeDi registry lookups, measured at 10-35s+ elsewhere in
-      # this project) -- long enough for a transient local network hiccup
-      # to abort the in-flight request client-side (net::ERR_NETWORK_CHANGED).
-      min_instance_count = 1
+      # 0: scale to zero when idle, so nothing is billed without traffic.
+      # Trade-off: the first request after an idle period pays a cold start
+      # (container boot plus any in-process cache warm-up -- measured at
+      # 10-35s+ for the onix modules), which a flaky client network can abort
+      # (net::ERR_NETWORK_CHANGED). Raise to 1 to keep an instance warm.
+      min_instance_count = 0
       max_instance_count = 3
     }
 
@@ -57,6 +57,7 @@ resource "google_cloud_run_v2_service" "bap" {
           cpu    = "1"
           memory = "512Mi"
         }
+        cpu_idle = true # request-based billing
       }
 
       env {
@@ -208,6 +209,7 @@ resource "google_cloud_run_v2_service" "bap" {
           cpu    = "1"
           memory = "512Mi"
         }
+        cpu_idle = true # request-based billing
       }
     }
   }

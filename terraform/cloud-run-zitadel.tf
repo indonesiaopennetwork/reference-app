@@ -67,13 +67,12 @@ resource "google_cloud_run_v2_service" "zitadel" {
     execution_environment = "EXECUTION_ENVIRONMENT_GEN2"
 
     scaling {
-      # 1, not 0: every login (via landing-page's OIDC flow) hits zitadel.
-      # At 0, the first login after any idle period pays a cold start on
-      # top of zitadel's own slow-to-initialize startup (DB connection via
-      # cloudsql-proxy), long enough for a transient local network hiccup
-      # to abort the in-flight request client-side (net::ERR_NETWORK_CHANGED),
-      # which then looks fine again on the next click once it's warm.
-      min_instance_count = 1
+      # 0: scale to zero when idle, so nothing is billed without traffic.
+      # Trade-off: the first request after an idle period pays a cold start
+      # (container boot plus any in-process cache warm-up -- measured at
+      # 10-35s+ for the onix modules), which a flaky client network can abort
+      # (net::ERR_NETWORK_CHANGED). Raise to 1 to keep an instance warm.
+      min_instance_count = 0
       max_instance_count = 3
     }
 
@@ -109,6 +108,7 @@ resource "google_cloud_run_v2_service" "zitadel" {
           cpu    = "1"
           memory = "1Gi"
         }
+        cpu_idle = true # request-based billing
       }
 
       volume_mounts {
@@ -276,6 +276,7 @@ resource "google_cloud_run_v2_service" "zitadel" {
           cpu    = "1"
           memory = "512Mi"
         }
+        cpu_idle = true # request-based billing
       }
     }
   }

@@ -23,9 +23,12 @@ resource "google_cloud_run_v2_service" "onix_catalog_publish" {
     execution_environment = "EXECUTION_ENVIRONMENT_GEN2"
 
     scaling {
-      # 1, not 0: see the scaling comment on bap/onix-bap -- avoids a cold
-      # start on the first catalog publish after idle too.
-      min_instance_count = 1
+      # 0: scale to zero when idle, so nothing is billed without traffic.
+      # Trade-off: the first request after an idle period pays a cold start
+      # (container boot plus any in-process cache warm-up -- measured at
+      # 10-35s+ for the onix modules), which a flaky client network can abort
+      # (net::ERR_NETWORK_CHANGED). Raise to 1 to keep an instance warm.
+      min_instance_count = 0
       max_instance_count = 3
     }
 
@@ -58,6 +61,7 @@ resource "google_cloud_run_v2_service" "onix_catalog_publish" {
           cpu    = "1"
           memory = "512Mi"
         }
+        cpu_idle = true # request-based billing
       }
 
       volume_mounts {

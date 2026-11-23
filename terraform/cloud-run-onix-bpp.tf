@@ -13,12 +13,12 @@ resource "google_cloud_run_v2_service" "onix_bpp" {
     service_account = google_service_account.cloud_run_sa.email
 
     scaling {
-      # 1, not 0: at 0, this module's own extended-schema and DeDi-registry
-      # caches (in-process, per instance) start empty on every cold start,
-      # measured at 10-35s+ to re-warm elsewhere in this project -- long
-      # enough for a transient local network hiccup to abort the in-flight
-      # request client-side (net::ERR_NETWORK_CHANGED).
-      min_instance_count = 1
+      # 0: scale to zero when idle, so nothing is billed without traffic.
+      # Trade-off: the first request after an idle period pays a cold start
+      # (container boot plus any in-process cache warm-up -- measured at
+      # 10-35s+ for the onix modules), which a flaky client network can abort
+      # (net::ERR_NETWORK_CHANGED). Raise to 1 to keep an instance warm.
+      min_instance_count = 0
       max_instance_count = 3
     }
 
@@ -45,10 +45,10 @@ resource "google_cloud_run_v2_service" "onix_bpp" {
           cpu    = "1"
           memory = "512Mi"
         }
-        # CPU stays allocated between requests, so the otel-collector
-        # sidecar can flush its batches (up to 10s after a request) instead
-        # of being throttled until the next request arrives.
-        cpu_idle = false
+        # Request-based billing: CPU is only allocated while a request is
+        # being served. Trade-off: the otel-collector sidecar's batch flush
+        # (up to 10s after a request) may be throttled until the next request.
+        cpu_idle = true
       }
 
       env {
@@ -154,7 +154,7 @@ resource "google_cloud_run_v2_service" "onix_bpp" {
           cpu    = "1"
           memory = "512Mi"
         }
-        cpu_idle = false
+        cpu_idle = true
       }
     }
   }
