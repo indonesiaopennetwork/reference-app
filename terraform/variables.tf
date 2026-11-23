@@ -57,9 +57,9 @@ variable "sql_instance_name" {
 }
 
 variable "sql_tier" {
-  description = "Cloud SQL machine tier. db-f1-micro/db-g1-small are MySQL-only and rejected for Postgres — db-custom-1-3840 (1 vCPU/3.75GB) is the cheapest valid Postgres tier."
+  description = "Cloud SQL machine tier. db-g1-small (shared vCPU, 1.7GB) is the sandbox default; db-f1-micro (0.6GB, 25 connections) is too small for bap+bpp+zitadel; db-custom-1-3840 (1 dedicated vCPU, 3.75GB) is the next step up if the shared CPU gets slow. Shared-core tiers need the ENTERPRISE edition (set in sql.tf) and carry no SLA."
   type        = string
-  default     = "db-custom-1-3840"
+  default     = "db-g1-small"
 }
 
 variable "sql_disk_size_gb" {
@@ -71,12 +71,6 @@ variable "sql_disk_type" {
   description = "PD_HDD is cheaper than PD_SSD; fine for a sandbox workload."
   type        = string
   default     = "PD_HDD"
-}
-
-variable "sql_availability_type" {
-  description = "ZONAL (no HA, cheaper) or REGIONAL. Sandbox default is ZONAL."
-  type        = string
-  default     = "ZONAL"
 }
 
 variable "sql_backup_enabled" {

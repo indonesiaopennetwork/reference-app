@@ -9,10 +9,26 @@ resource "google_sql_database_instance" "postgres" {
   deletion_protection = false
 
   settings {
-    tier              = var.sql_tier
-    availability_type = var.sql_availability_type
+    # ENTERPRISE, not ENTERPRISE_PLUS: the shared-core tiers (db-f1-micro,
+    # db-g1-small -- see var.sql_tier) only exist on this edition.
+    edition = "ENTERPRISE"
+    tier    = var.sql_tier
+    # Single zone, no standby replica -- half the cost of REGIONAL (HA).
+    # Trade-off: a zone outage or maintenance restart takes the DB down
+    # until it's back. Fine for a sandbox; switch to REGIONAL for prod.
+    availability_type = "ZONAL"
     disk_type         = var.sql_disk_type
     disk_size         = var.sql_disk_size_gb
+
+    # db-g1-small defaults to 50 connections. bap and bpp (pgxpool, 4 per
+    # instance) and zitadel (~15 per instance) can each scale to 3
+    # instances -- up to ~70 at once -- so keep the 100 the previous
+    # db-custom-1-3840 tier had. Idle connections are cheap; this
+    # workload's are almost all idle.
+    database_flags {
+      name  = "max_connections"
+      value = "100"
+    }
 
     ip_configuration {
       ipv4_enabled                                  = false
