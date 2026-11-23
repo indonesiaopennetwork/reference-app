@@ -12,7 +12,7 @@ published Release 1 (`location`, and `auxiliaryTypes: "url"` /
 `auxiliaryLocations`, in the ONIX configs):
 
 ```text
-https://schema.ion.id/release1/schema/vendored/beckn/api/v2.0.0/beckn.yaml
+https://schema.ion.id/release1/schema/core/api/v2.0.0/ion-beckn.yaml
 https://schema.ion.id/release1/schema/core/api/v2.0.0/ion-additional.yaml
 ```
 

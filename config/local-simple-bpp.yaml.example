@@ -82,7 +82,7 @@ modules:
             type: url
             # Release 1's Beckn core contract (ion-specs vendored/beckn, identical to
             # upstream core-v2.0.0-lts), as ion-additional.yaml references it.
-            location: https://schema.ion.id/release1/schema/vendored/beckn/api/v2.0.0/beckn.yaml
+            location: https://schema.ion.id/release1/schema/core/api/v2.0.0/ion-beckn.yaml
             cacheTTL: "3600"
             extendedSchema_enabled: "true"
             extendedSchema_cacheTTL: "86400"
@@ -156,7 +156,7 @@ modules:
             type: url
             # Release 1's Beckn core contract (ion-specs vendored/beckn, identical to
             # upstream core-v2.0.0-lts), as ion-additional.yaml references it.
-            location: https://schema.ion.id/release1/schema/vendored/beckn/api/v2.0.0/beckn.yaml
+            location: https://schema.ion.id/release1/schema/core/api/v2.0.0/ion-beckn.yaml
             cacheTTL: "3600"
             extendedSchema_enabled: "true"
             extendedSchema_cacheTTL: "86400"
