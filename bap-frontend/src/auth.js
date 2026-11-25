@@ -10,7 +10,14 @@ const ID_TOKEN_KEY = 'bap.idToken'
 // domain root, '/tsp/remiges/cn/' behind ion-landing-page's proxy. Derived
 // from where the bundle itself was loaded from (<base>assets/index-*.js in a
 // build, /src/auth.js under `npm run dev`), so no per-mount config needed.
-export const basePath = new URL('..', import.meta.url).pathname
+// Resolved through a variable on purpose: Vite rewrites the literal
+// `new URL('<path>', import.meta.url)` form as a static asset reference,
+// and under `npm run dev` that turned '..' into '/@fs/<abs path to this
+// app>' (no trailing slash), so every API call went to a broken
+// '/@fs/.../<app>api/v1/...' path. Via a variable it stays a plain runtime
+// resolution -- the same result a production build gets.
+const moduleUrl = import.meta.url
+export const basePath = new URL('..', moduleUrl).pathname
 
 // Reads ?token= from the URL (if present), stores it, and strips it from
 // the URL bar via history.replaceState so it doesn't linger in the
