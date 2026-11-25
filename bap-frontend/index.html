@@ -2,6 +2,20 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <script>
+      // The build uses relative URLs (vite base './') so it also works behind
+      // ion-landing-page's path prefix. On an in-app deep link such as
+      // /qr/<id> or /qr-admin/<id>/simulate those would resolve under that
+      // path, so point <base> at the app's root (the part before the route).
+      (function () {
+        var m = /^(.*?\/)(?:qr-admin|qr|reconciliation|logout)(?:\/.*)?$/.exec(location.pathname);
+        if (m) {
+          var b = document.createElement('base');
+          b.href = m[1];
+          document.head.appendChild(b);
+        }
+      })();
+    </script>
     <link rel="icon" type="image/svg+xml" href="favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Remiges Retail — Beckn Marketplace</title>

@@ -9,12 +9,17 @@ import {
   User, Phone, Home, ChevronLeft, Banknote,
   Ban, MessageSquare, RefreshCw, ThumbsUp,
   History, Wand2, ExternalLink, ChevronDown,
-  Compass, AlertCircle, Copy, Images,
+  Compass, AlertCircle, Copy, Images, QrCode,
 } from 'lucide-react';
 import Tour from './Tour.jsx';
 import { useI18n, rich, LanguageToggle, tNow, localeNow } from './i18n.jsx';
 import { captureTokenFromUrl, getToken, getIdToken, getProviderId, clearToken, redirectToLogin, basePath } from './auth.js';
 import UserProfileMenu from './UserProfileMenu.jsx';
+import QrAdminPanel from './qr/QrAdmin.jsx';
+
+// The shop has two views under one header: the catalog (/) and the QR packet
+// console (/qr-admin/*, see src/qr/QrAdmin.jsx).
+const isQrAdminPath = () => window.location.pathname.startsWith(`${basePath}qr-admin`);
 
 // BPP target, network ID, and BAP identity are all server-side config (BAP .env).
 // The frontend only needs the API base path.
@@ -2429,6 +2434,21 @@ export default function App() {
   const debounceRef = useRef(null);
   const [authReady, setAuthReady] = useState(false);
   const [tourOpen, setTourOpen] = useState(false);
+  const [view, setView] = useState(() => (isQrAdminPath() ? 'qr' : 'shop'));
+  const [qrKey, setQrKey] = useState(0); // remounts the console to its packet list
+
+  // Back/forward between the two views.
+  useEffect(() => {
+    const onPop = () => setView(isQrAdminPath() ? 'qr' : 'shop');
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+  const openView = useCallback(next => {
+    window.history.pushState({}, '', next === 'qr' ? `${basePath}qr-admin` : basePath);
+    if (next === 'qr') setQrKey(k => k + 1);
+    setView(next);
+    window.scrollTo(0, 0);
+  }, []);
 
   // Gate on a token before rendering anything real. There's no login UI
   // here at all -- landing-page is the single entry point (see
@@ -2489,17 +2509,23 @@ export default function App() {
       });
   }, []);
 
-  useEffect(() => { if (authReady) discover(); }, [authReady, discover]);
+  // First search when the catalog is first shown (not while on the QR console).
+  const discoveredRef = useRef(false);
+  useEffect(() => {
+    if (!authReady || view !== 'shop' || discoveredRef.current) return;
+    discoveredRef.current = true;
+    discover();
+  }, [authReady, view, discover]);
 
   /* ── Guided tour ──────────────────────────────────────────────────────── */
   // Opens by itself on a buyer's first visit; "Tour" in the header reruns it.
   // First visit: the tour starts once a language has been picked.
   useEffect(() => {
-    if (!authReady || !langChosen) return;
+    if (!authReady || !langChosen || view !== 'shop') return;
     let done = false;
     try { done = localStorage.getItem(TOUR_DONE_KEY) === '1'; } catch { /* storage blocked */ }
     if (!done) setTourOpen(true);
-  }, [authReady, langChosen]);
+  }, [authReady, langChosen, view]);
   const closeTour = useCallback(() => {
     setTourOpen(false);
     try { localStorage.setItem(TOUR_DONE_KEY, '1'); } catch { /* storage blocked */ }
@@ -2509,6 +2535,7 @@ export default function App() {
   }, []);
 
   const handleSearchChange = e => {
+    if (view !== 'shop') openView('shop');
     const v = e.target.value;
     setSearchQuery(v);
     clearTimeout(debounceRef.current);
@@ -2516,6 +2543,7 @@ export default function App() {
   };
 
   const handleProviderChange = e => {
+    if (view !== 'shop') openView('shop');
     const v = e.target.value;
     setProviderQuery(v);
     clearTimeout(debounceRef.current);
@@ -2830,7 +2858,9 @@ export default function App() {
     <div className="min-h-screen">
 
       {/* ── Nav ──────────────────────────────────────────────────────────── */}
-      <header className="sticky top-0 z-30 glass border-b border-white/[0.06]">
+      {/* Own backdrop colour: the glass blur alone leaves it see-through where
+          backdrop-filter does not apply, and scrolled content shows through. */}
+      <header className="sticky top-0 z-30 glass border-b border-white/[0.06] print:hidden" style={{ backgroundColor: 'rgba(8,13,30,0.92)' }}>
         {/* Phones: the search box gets its own row under the logo and buttons.
             Button labels show from xl up; below that the buttons are icons. */}
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-2.5 sm:py-0 sm:h-16 flex flex-wrap sm:flex-nowrap items-center gap-2 sm:gap-4">
@@ -2842,7 +2872,7 @@ export default function App() {
 
           {/* Phones: the language switch sits beside the search box. */}
           <div className="order-last sm:order-none basis-full sm:basis-auto flex-1 max-w-2xl mx-auto flex items-center gap-2">
-          <form data-tour="search" onSubmit={e => { e.preventDefault(); clearTimeout(debounceRef.current); discover(searchQuery, providerQuery); }} className="flex-1 min-w-0 flex gap-2">
+          <form data-tour="search" onSubmit={e => { e.preventDefault(); clearTimeout(debounceRef.current); if (view !== 'shop') openView('shop'); discover(searchQuery, providerQuery); }} className="flex-1 min-w-0 flex gap-2">
             <div className="search-glow relative flex-1 flex items-center bg-white/[0.06] border border-white/10 rounded-xl transition-all duration-300">
               {isSearching
                 ? <Loader2 className="absolute left-3 w-4 h-4 text-emerald-400 animate-spin" />
@@ -2888,6 +2918,20 @@ export default function App() {
             <span className="hidden xl:block">{t('BPP APP')}</span>
           </a>
 
+          {/* QR packet console (src/qr/QrAdmin.jsx): same origin, so the
+              login in localStorage carries over. */}
+          <a
+            href={`${basePath}qr-admin`} title={t('QR Packets')}
+            onClick={e => { if (e.metaKey || e.ctrlKey) return; e.preventDefault(); openView('qr'); }}
+            aria-current={view === 'qr' ? 'page' : undefined}
+            className={`shrink-0 flex items-center gap-2 px-3 py-2 rounded-xl transition-all text-sm font-medium border ${view === 'qr'
+              ? 'text-white border-violet-400/60 bg-violet-500/30'
+              : 'text-violet-300 hover:text-violet-200 border-violet-500/20 hover:border-violet-500/40 bg-violet-500/10'}`}
+          >
+            <QrCode className="w-4 h-4" />
+            <span className="hidden xl:block">{t('QR Packets')}</span>
+          </a>
+
           <button
             onClick={() => setTourOpen(true)} data-tour="tour-button" title={t('Take the tour')}
             className="shrink-0 flex items-center gap-2 px-3 py-2 rounded-xl transition-all text-sm font-medium text-cyan-300 hover:text-cyan-200 border border-cyan-500/20 hover:border-cyan-500/40 bg-cyan-500/10"
@@ -2924,10 +2968,15 @@ export default function App() {
         </div>
       </header>
 
-      <div className="bg-orange-500 text-white text-xs sm:text-sm text-center py-1.5 px-4">
+      <div className="bg-orange-500 text-white text-xs sm:text-sm text-center py-1.5 px-4 print:hidden">
         {t('[FOR DEMO PURPOSE ONLY] - This is a sample application for reference and testing')}
       </div>
 
+      {view === 'qr' ? (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-8 pb-36">
+          <QrAdminPanel key={qrKey} onExit={() => openView('shop')} />
+        </div>
+      ) : (<>
       {/* ── Category chips + sort ─────────────────────────────────────────── */}
       {catalog.length > 0 && (
         <div className="sticky top-[6.75rem] sm:top-16 z-20 bg-[#080d1e]/90 backdrop-blur border-b border-white/[0.05]" data-tour="filters">
@@ -3158,6 +3207,7 @@ export default function App() {
           </div>
         ))}
       </main>
+      </>)}
 
       {/* ── Sticky cart footer (Swiggy-style) ────────────────────────────── */}
       <AnimatePresence>

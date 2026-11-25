@@ -105,6 +105,48 @@ type Config struct {
 	SettlementBankCode      string
 	SettlementAccountNumber string
 	SettlementAccountName   string
+
+	// QR packet checkout (internal/qrsvc). A buyer scans a packet QR printed
+	// by ion-qr-code's qr-service and lands on bap-frontend with
+	// ?packet_id=&scan_id=; this BAP reads the packet from qr-service,
+	// finds a nearby merchant through discover, and runs the normal
+	// select → init → confirm flow (payment is not part of it yet).
+	//
+	// QRServiceURL is qr-service's base URL (e.g. http://qr-service:8088).
+	// Blank disables every /api/v1/qr route (503 QR_NOT_CONFIGURED).
+	// Env: QR_SERVICE_URL.
+	QRServiceURL string
+	// QRServiceKey is this BAP's X-Service-Key for qr-service's
+	// GET /api/v1/packets/:id (one of qr-service's SERVICE_API_KEYS).
+	// Env: QR_SERVICE_KEY.
+	QRServiceKey string
+	// QRAdminToken, when set, is the bearer token this BAP sends to
+	// qr-service's admin APIs on behalf of the packet console
+	// (/qr-admin). Blank forwards the caller's own bearer token instead,
+	// which then needs qr-service's ion_admin role. Env: QR_ADMIN_TOKEN.
+	QRAdminToken string
+	// QRAllowUnlocatedMerchants lets merchants whose catalog states no
+	// provider location (availableAt geo) serve a packet, ranked after the
+	// located ones with an unknown distance. Default true, since
+	// bpp-frontend's publish doesn't send a location yet. Env:
+	// QR_ALLOW_UNLOCATED_MERCHANTS=false to require one.
+	QRAllowUnlocatedMerchants bool
+	// QRDemoEnabled lets a QR scan ask for a demo scenario (the scan
+	// simulator's "Demo" options): this BAP then plays the merchants itself,
+	// with no discover / select / init / confirm, so the buyer flow can be
+	// tried without a working Beckn network. Off unless QR_DEMO_ENABLED=true.
+	QRDemoEnabled bool
+	// QRDiscoverMethod is how QR resolve (and the coverage check it answers
+	// for qr-service) runs discover. "POST" (the default) is the Beckn
+	// discover -> on_discover exchange through onix-bap, like every other
+	// action. "GET" is the direct, adapter-less shortcut the shop can use
+	// (see DiscoverMethod); for local testing only. Env: QR_DISCOVER_METHOD.
+	QRDiscoverMethod string
+	// QRCoverageKey authenticates qr-service's merchant coverage check
+	// (POST /api/v1/qr/coverage, header X-Service-Key): qr-service is not a
+	// network participant, so it asks this BAP, which runs the Beckn discover.
+	// Blank turns the endpoint off. Env: QR_COVERAGE_KEY.
+	QRCoverageKey string
 }
 
 // Load reads all config values from the environment and returns a validated Config.
@@ -143,6 +185,14 @@ func Load() (*Config, error) {
 		SettlementBankCode:      getEnv("SETTLEMENT_BANK_CODE", "MANDIRI"),
 		SettlementAccountNumber: getEnv("SETTLEMENT_ACCOUNT_NUMBER", "1370000000001"),
 		SettlementAccountName:   os.Getenv("SETTLEMENT_ACCOUNT_NAME"),
+
+		QRServiceURL:              strings.TrimRight(os.Getenv("QR_SERVICE_URL"), "/"),
+		QRServiceKey:              os.Getenv("QR_SERVICE_KEY"),
+		QRAdminToken:              os.Getenv("QR_ADMIN_TOKEN"),
+		QRAllowUnlocatedMerchants: !strings.EqualFold(os.Getenv("QR_ALLOW_UNLOCATED_MERCHANTS"), "false"),
+		QRDemoEnabled:             strings.EqualFold(os.Getenv("QR_DEMO_ENABLED"), "true"),
+		QRDiscoverMethod:          strings.ToUpper(getEnv("QR_DISCOVER_METHOD", DiscoverMethodPost)),
+		QRCoverageKey:             os.Getenv("QR_COVERAGE_KEY"),
 	}
 
 	if cfg.SettlementAccountName == "" {
@@ -206,6 +256,9 @@ func (c *Config) validate() error {
 	}
 	if c.DiscoverMethod != DiscoverMethodGet && c.DiscoverMethod != DiscoverMethodPost {
 		return fmt.Errorf("DISCOVER_METHOD must be %q or %q, got %q", DiscoverMethodGet, DiscoverMethodPost, c.DiscoverMethod)
+	}
+	if c.QRDiscoverMethod != DiscoverMethodGet && c.QRDiscoverMethod != DiscoverMethodPost {
+		return fmt.Errorf("QR_DISCOVER_METHOD must be %q or %q, got %q", DiscoverMethodGet, DiscoverMethodPost, c.QRDiscoverMethod)
 	}
 	return nil
 }

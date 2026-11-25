@@ -20,6 +20,7 @@ import (
 	onstatussvc "github.com/ion/winroom/bap/internal/on_status_svc"
 	onsupportsvc "github.com/ion/winroom/bap/internal/on_support_svc"
 	onupdatesvc "github.com/ion/winroom/bap/internal/on_update_svc"
+	"github.com/ion/winroom/bap/internal/qrsvc"
 	reconcilesvc "github.com/ion/winroom/bap/internal/reconcile_svc"
 )
 
@@ -121,5 +122,9 @@ func RegisterRoutes(r *gin.Engine, pool *pgxpool.Pool, cfg *config.Config, lh *l
 		v1.GET("/orders", clientH.HandleListOrders)
 		v1.GET("/orders/:id", clientH.HandleGetOrder)
 		v1.GET("/messages", clientH.HandleListMessages)
+
+		// QR packet checkout (scan → nearest merchant → order) and
+		// the packet console's proxy to qr-service -- see internal/qrsvc.
+		qrsvc.NewHandler(qrsvc.NewService(pool, cfg, lh, discoverRegistry)).Register(v1)
 	}
 }

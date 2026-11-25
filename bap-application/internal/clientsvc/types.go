@@ -85,6 +85,10 @@ type BecknContext struct {
 type ClientDiscoverRequest struct {
 	TextSearch   string // maps to intent.textSearch in the outbound Beckn request
 	ProviderName string // maps to intent.provider.descriptor.name
+	// Spatial is an optional list of Beckn spatial constraints (e.g. an
+	// S_DWITHIN around a QR packet's node), sent as intent.spatial. Never
+	// set by the browser-facing GET /api/v1/discover.
+	Spatial []map[string]any
 	// BuyerSubject is the logged-in buyer, recorded against the discover's
 	// transactionId for their message log; nil for an anonymous search.
 	BuyerSubject *string

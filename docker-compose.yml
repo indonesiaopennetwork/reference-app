@@ -584,6 +584,31 @@ services:
       # identity resolution (see internal/auth.OptionalAuth).
       ZITADEL_ISSUER: http://localhost:8090
       ZITADEL_INTERNAL_URL: http://zitadel:8080
+
+      # QR packet checkout (internal/qrsvc) and the /qr-admin packet console.
+      # qr-service runs from the ion-qr-code repo (its own compose, port
+      # 8088 on the host); the defaults match that compose's dev keys.
+      # Leave QR_SERVICE_URL empty to switch the QR routes off.
+      QR_SERVICE_URL: ${QR_SERVICE_URL-http://host.docker.internal:8088}
+      QR_SERVICE_KEY: ${QR_SERVICE_KEY:-dev-service-key-bap-application-0001}
+      # Bearer token for qr-service's admin APIs; blank forwards the
+      # logged-in user's own token (needs qr-service's ion_admin role).
+      QR_ADMIN_TOKEN: ${QR_ADMIN_TOKEN-dev-admin-token}
+      QR_ALLOW_UNLOCATED_MERCHANTS: ${QR_ALLOW_UNLOCATED_MERCHANTS:-true}
+      # Scan simulator demo scenarios (fast checkout / several merchants /
+      # changed price) played by the BAP itself, no Beckn calls. Local dev only;
+      # the BAP default is off.
+      QR_DEMO_ENABLED: ${QR_DEMO_ENABLED:-true}
+      # QR resolve and the coverage check run the Beckn discover -> on_discover
+      # exchange through onix-bap (POST). GET is the adapter-less shortcut,
+      # for local testing only.
+      QR_DISCOVER_METHOD: ${QR_DISCOVER_METHOD:-POST}
+      # qr-service asks this BAP for merchant coverage (it has no Beckn
+      # identity of its own): its COVERAGE_BAP_KEY must equal this.
+      QR_COVERAGE_KEY: ${QR_COVERAGE_KEY:-dev-service-key-qr-service-0001}
+    extra_hosts:
+      # Lets QR_SERVICE_URL reach qr-service published on the host.
+      - "host.docker.internal:host-gateway"
     ports:
       - "8083:8083"
     networks:

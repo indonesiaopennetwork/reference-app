@@ -236,6 +236,8 @@ export default {
   'Reference App': 'Aplikasi Referensi',
   'Search products on the ION network…': 'Cari produk di jaringan ION…',
   'BPP APP': 'APLIKASI BPP',
+  'QR Packets': 'Paket QR',
+  'Back to shop': 'Kembali ke toko',
   'Take the tour': 'Ikuti tur',
   'Log out': 'Keluar',
   'Cart': 'Keranjang',

@@ -103,6 +103,10 @@ h1,h2,h3,h4 {
 .pulse-dot { animation: pulse-dot 1.8s ease-in-out infinite; }
 
 button { cursor: pointer; border: none; background: none; font-family: inherit; }
+/* The reset above is unlayered, so it beats Tailwind's bg-/border- utilities
+   on every <button>. The QR pages (src/qr) style buttons with utilities:
+   hand those two properties back to them there. */
+.qr-scope button { background: revert-layer; border: revert-layer; }
 img    { max-width: 100%; display: block; }
 
 /* ── Utilities ───────────────────────────────────────── */

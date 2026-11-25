@@ -93,6 +93,9 @@ func (s *ClientService) Discover(ctx context.Context, req *ClientDiscoverRequest
 	intent := map[string]any{
 		"textSearch": strings.TrimSpace(textQuery),
 	}
+	if len(req.Spatial) > 0 {
+		intent["spatial"] = req.Spatial
+	}
 
 	msgJSON, _ := json.Marshal(map[string]any{
 		"intent": intent,
@@ -161,6 +164,9 @@ func (s *ClientService) DiscoverSync(ctx context.Context, req *ClientDiscoverReq
 	}
 	intent := map[string]any{
 		"textSearch": strings.TrimSpace(textQuery),
+	}
+	if len(req.Spatial) > 0 {
+		intent["spatial"] = req.Spatial
 	}
 
 	becknReq := map[string]any{
@@ -1303,6 +1309,17 @@ func stageRank(code string) int {
 // any chosen commitment's offer policies.cancellation.cutoffEvent (e.g.
 // BEFORE_PACKING and the order is already Packed). The BPP enforces the same
 // rule; checking here gives the buyer the reason before anything is sent.
+// ErrCancelNotAllowed matches (errors.Is) every refusal from
+// checkCancellationCutoff: the offer forbids cancelling, or its cutoff passed.
+var ErrCancelNotAllowed = errors.New("cancellation not allowed")
+
+// cancelRefusal is a checkCancellationCutoff refusal: its own message, and
+// errors.Is(err, ErrCancelNotAllowed).
+type cancelRefusal struct{ msg string }
+
+func (e cancelRefusal) Error() string        { return e.msg }
+func (e cancelRefusal) Is(target error) bool { return target == ErrCancelNotAllowed }
+
 func checkCancellationCutoff(contract map[string]interface{}, commitmentIDs []string) error {
 	stage, stageName := stagePending, "PENDING"
 	for _, p := range asSlice(contract["performance"]) {
@@ -1322,10 +1339,10 @@ func checkCancellationCutoff(contract map[string]interface{}, commitmentIDs []st
 		}
 		pol := asObj(asObj(asObj(asObj(cm["offer"])["offerAttributes"])["policies"])["cancellation"])
 		if allowed, ok := pol["allowed"].(bool); ok && !allowed {
-			return fmt.Errorf("this item's offer does not allow cancellation")
+			return cancelRefusal{"this item's offer does not allow cancellation"}
 		}
 		if stage >= stageDelivered {
-			return fmt.Errorf("the order is already %s: a delivered item is returned, not cancelled", stageName)
+			return cancelRefusal{fmt.Sprintf("the order is already %s: a delivered item is returned, not cancelled", stageName)}
 		}
 		cutoff := asStr(pol["cutoffEvent"])
 		passed := false
@@ -1338,8 +1355,8 @@ func checkCancellationCutoff(contract map[string]interface{}, commitmentIDs []st
 			passed = stage >= stageShipped
 		}
 		if passed {
-			return fmt.Errorf("cancellation is no longer possible: the offer allows it only %s and the order is %s",
-				strings.ToLower(strings.ReplaceAll(cutoff, "_", " ")), stageName)
+			return cancelRefusal{fmt.Sprintf("cancellation is no longer possible: the offer allows it only %s and the order is %s",
+				strings.ToLower(strings.ReplaceAll(cutoff, "_", " ")), stageName)}
 		}
 	}
 	return nil
