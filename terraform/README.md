@@ -198,6 +198,11 @@ task deploy:state-bucket PROJECT_ID=<YOUR_PROJECT_ID> REGION=<YOUR_REGION>
 
 ### 2. Create `terraform/terraform.tfvars`
 
+> **Joining a deployment that already exists?** Don't write this file —
+> run `task tfvars:pull` to get the team's copy (see
+> [Working as a team](#working-as-a-team)). Once you've created it for a new
+> deployment, share it with `task tfvars:push`.
+
 Not committed (already git-ignored). Override `project_id` and supply the
 identity variables that have no default, the Zitadel admin account,
 **and all seven domain variables** — set everything now, not later.
@@ -603,6 +608,44 @@ terraform output bap_domain_dns_records
 terraform output landing_page_domain_dns_records
 terraform output zitadel_domain_dns_records
 ```
+
+## Working as a team
+
+Two things must be the same for everyone who runs Terraform against a
+deployment:
+
+| What | Where it lives | How it's shared |
+|---|---|---|
+| **State** — what Terraform has created | `gs://<bucket>/<prefix>/default.tfstate` (`backend.tf`) | automatically, with locking: two people can't apply at once |
+| **`terraform.tfvars`** — the deployment's settings (project, domains, IDs, `sql_backup_enabled`, …) | `gs://<bucket>/<prefix>/terraform.tfvars`, next to the state | `task tfvars:pull` / `task tfvars:push` |
+
+The state bucket has object versioning on, so every pushed version of either
+file can be restored (`gcloud storage ls -a gs://<bucket>/<prefix>/`).
+
+**Getting started** (new teammate, or a new machine):
+```sh
+gcloud auth login && gcloud auth application-default login
+cd terraform && terraform init && cd ..
+task tfvars:pull
+```
+
+**Changing a setting:**
+```sh
+task tfvars:pull          # start from the latest shared copy
+$EDITOR terraform/terraform.tfvars
+task tfvars:push          # shows the diff, then uploads
+```
+`tfvars:push` refuses if someone else pushed since your last pull, so a
+teammate's change is never overwritten silently: pull (your copy is backed
+up as `terraform.tfvars.bak.<time>`), redo your change, push again.
+
+**Safety check:** every `task deploy:*` that runs `terraform plan`/`apply`
+first runs `task tfvars:check`, which stops if your local file differs from
+the shared one. Run it yourself before a plain `terraform plan`.
+
+**Saved plans (`*.tfplan`)** contain every value Terraform knows, secrets
+included, in plain text. They are git-ignored, never shared, and the `deploy:*`
+tasks delete each one right after applying it — do the same with your own.
 
 ## Redeploying after a code change
 

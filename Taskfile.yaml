@@ -9,6 +9,13 @@ vars:
   REGISTRY_FILE: 'dedi-onboarding-files/remiges-identity-files/ion-reference-app-registry.json'
   INDEX_FILE: 'dedi-onboarding-files/remiges-identity-files/dedi.index.json'
   NEXT_UPDATE_TTL_SECONDS: 31536000
+  # terraform.tfvars is shared through the state bucket, next to the state
+  # itself (gs://<bucket>/<prefix>/terraform.tfvars, read from backend.tf) --
+  # see the tfvars:* tasks and terraform/README.md "Working as a team".
+  TFVARS_FILE: terraform/terraform.tfvars
+  TFVARS_GEN_FILE: terraform/.terraform.tfvars.generation
+  TFVARS_REMOTE:
+    sh: awk -F'"' '/^ *bucket *=/{b=$2} /^ *prefix *=/{p=$2} END{print "gs://" b "/" p "/terraform.tfvars"}' terraform/backend.tf
 
 tasks:
   hooks:install:
@@ -95,6 +102,89 @@ tasks:
       - npm run build
       - gcloud storage rsync --recursive dist/assets "gs://{{.FRONTENDS_BUCKET}}/{{.PREFIX}}/assets" --cache-control="public, max-age=31536000, immutable"
       - find dist -maxdepth 1 -type f ! -name env-config.js -print0 | xargs -0 -I{} gcloud storage cp {} "gs://{{.FRONTENDS_BUCKET}}/{{.PREFIX}}/" --cache-control="no-cache"
+
+  # ── Shared terraform.tfvars ─────────────────────────────────────────────
+  # One copy for the whole team, in the state bucket. Each pull records the
+  # object's GCS generation in TFVARS_GEN_FILE; a push only succeeds if the
+  # shared copy is still at that generation (--if-generation-match), so a
+  # teammate's newer version is never silently overwritten. The bucket has
+  # object versioning on, so every pushed version can be restored.
+
+  tfvars:pull:
+    desc: Download the team's shared terraform/terraform.tfvars (backs up a differing local copy first).
+    silent: true
+    cmds:
+      - |
+        set -eu
+        remote="{{.TFVARS_REMOTE}}"; file="{{.TFVARS_FILE}}"
+        gen=$(gcloud storage objects describe "$remote" --format='value(generation)')
+        tmp=$(mktemp)
+        gcloud storage cp --quiet "$remote#$gen" "$tmp"
+        if [ -f "$file" ] && ! cmp -s "$tmp" "$file"; then
+          bak="$file.bak.$(date +%Y%m%d-%H%M%S)"
+          cp "$file" "$bak"
+          echo "Your local copy differed from the shared one; saved it as $bak"
+        fi
+        mv "$tmp" "$file"
+        echo "$gen" > "{{.TFVARS_GEN_FILE}}"
+        echo "Pulled $remote (generation $gen) -> $file"
+
+  tfvars:push:
+    desc: Upload your terraform/terraform.tfvars as the team's shared copy (refuses if someone pushed since your last pull).
+    silent: true
+    cmds:
+      - |
+        set -eu
+        remote="{{.TFVARS_REMOTE}}"; file="{{.TFVARS_FILE}}"; genfile="{{.TFVARS_GEN_FILE}}"
+        [ -f "$file" ] || { echo "No $file to push." >&2; exit 1; }
+        if cur=$(gcloud storage objects describe "$remote" --format='value(generation)' 2>/tmp/tfvars-describe.err); then
+          base=$(cat "$genfile" 2>/dev/null || true)
+          if [ -z "$base" ]; then
+            echo "Run 'task tfvars:pull' first: there is already a shared copy and you have not pulled it." >&2; exit 1
+          fi
+          if [ "$cur" != "$base" ]; then
+            echo "Someone pushed a newer shared copy (generation $cur) since your pull ($base)." >&2
+            echo "Run 'task tfvars:pull' (your copy is backed up), redo your change, then push again." >&2
+            exit 1
+          fi
+          tmp=$(mktemp); gcloud storage cp --quiet "$remote#$cur" "$tmp"
+          if cmp -s "$tmp" "$file"; then rm -f "$tmp"; echo "Nothing to push: identical to the shared copy."; exit 0; fi
+          echo "Changes being pushed:"; diff -u "$tmp" "$file" || true; rm -f "$tmp"
+          gcloud storage cp --quiet --if-generation-match="$cur" "$file" "$remote"
+        elif grep -qiE "not found|404|No URLs matched" /tmp/tfvars-describe.err; then
+          gcloud storage cp --quiet --if-generation-match=0 "$file" "$remote"   # first upload
+        else
+          cat /tmp/tfvars-describe.err >&2; exit 1   # e.g. expired login
+        fi
+        new=$(gcloud storage objects describe "$remote" --format='value(generation)')
+        echo "$new" > "$genfile"
+        echo "Pushed $file -> $remote (generation $new)"
+
+  tfvars:check:
+    desc: Fail if your terraform/terraform.tfvars differs from the team's shared copy (run before every terraform plan/apply task).
+    silent: true
+    cmds:
+      - |
+        set -eu
+        remote="{{.TFVARS_REMOTE}}"; file="{{.TFVARS_FILE}}"
+        if ! gcloud storage objects describe "$remote" --format='value(generation)' >/dev/null 2>/tmp/tfvars-describe.err; then
+          if grep -qiE "not found|404|No URLs matched" /tmp/tfvars-describe.err; then
+            echo "Note: no shared terraform.tfvars at $remote yet -- run 'task tfvars:push' to share yours."
+            exit 0
+          fi
+          cat /tmp/tfvars-describe.err >&2; exit 1   # e.g. expired login
+        fi
+        [ -f "$file" ] || { echo "No local $file -- run 'task tfvars:pull' first." >&2; exit 1; }
+        tmp=$(mktemp); gcloud storage cp --quiet "$remote" "$tmp"
+        if ! cmp -s "$tmp" "$file"; then
+          echo "Your $file differs from the team's shared copy:" >&2
+          diff -u "$tmp" "$file" >&2 || true
+          rm -f "$tmp"
+          echo "Run 'task tfvars:pull' to take the shared copy, or 'task tfvars:push' to share yours, then retry." >&2
+          exit 1
+        fi
+        rm -f "$tmp"
+        echo "terraform.tfvars matches the shared copy."
 
   _ensure-future-next-update:
     internal: true
@@ -229,9 +319,11 @@ tasks:
     desc: "Step 3: bootstrap APIs, Artifact Registry, and empty secret containers."
     dir: terraform
     cmds:
+      - task: tfvars:check
       - terraform init
       - terraform plan -target=google_project_service.apis -target=google_artifact_registry_repository.repo -target=google_secret_manager_secret.this -out=bootstrap1.tfplan
       - terraform apply bootstrap1.tfplan
+      - rm -f bootstrap1.tfplan  # saved plans hold secrets in plain text
 
   deploy:seed-secrets:
     desc: >-
@@ -256,15 +348,19 @@ tasks:
     desc: "Step 6: create the network, Cloud SQL, and Redis (slow — budget 5-10 min)."
     dir: terraform
     cmds:
+      - task: tfvars:check
       - terraform plan -target=google_compute_network.vpc -target=google_compute_subnetwork.subnet -target=google_compute_global_address.psa_range -target=google_service_networking_connection.psa -target=google_sql_database_instance.postgres -target=google_redis_instance.redis -target=google_compute_subnetwork_iam_member.network_user -target=google_project_iam_member.cloud_sql_client -out=bootstrap2.tfplan
       - terraform apply bootstrap2.tfplan
+      - rm -f bootstrap2.tfplan  # saved plans hold secrets in plain text
 
   deploy:zitadel-infra:
     desc: "Step 6b.1: apply Zitadel — service, domain mapping, and IAM invoker binding together (the binding is easy to miss and Zitadel is unreachable without it)."
     dir: terraform
     cmds:
+      - task: tfvars:check
       - terraform plan -target=google_cloud_run_v2_service.zitadel -target=google_cloud_run_domain_mapping.zitadel -target='google_cloud_run_v2_service_iam_member.public_invoker["zitadel"]' -out=zitadel.tfplan
       - terraform apply zitadel.tfplan
+      - rm -f zitadel.tfplan  # saved plans hold secrets in plain text
 
   deploy:wait-zitadel-dns:
     desc: >-
@@ -304,6 +400,7 @@ tasks:
       PROJECT_ID:
         sh: cd terraform && terraform output -raw project_id
     cmds:
+      - task: tfvars:check
       - |
         set -euo pipefail
         OUTPUT="$(PROJECT_ID={{.PROJECT_ID}} ./scripts/setup-zitadel-cloud.sh)"
@@ -319,7 +416,9 @@ tasks:
           printf '\n%s\n' "$CLIENT_ID" >> terraform/terraform.tfvars
         fi
         echo "Patched terraform/terraform.tfvars with: $CLIENT_ID"
-      - cd terraform && terraform plan -target=google_cloud_run_v2_service.landing_page -out=zitadel-client.tfplan && terraform apply zitadel-client.tfplan
+      # Share the new client id, so teammates' next plan doesn't revert it.
+      - task: tfvars:push
+      - cd terraform && terraform plan -target=google_cloud_run_v2_service.landing_page -out=zitadel-client.tfplan && terraform apply zitadel-client.tfplan && rm -f zitadel-client.tfplan
 
   deploy:full-apply-and-migrate:
     desc: >-
@@ -338,8 +437,10 @@ tasks:
       onix-bpp, so this can run as early as right after bootstrap-apis.
     dir: terraform
     cmds:
+      - task: tfvars:check
       - terraform plan -target=google_storage_bucket.dedi_static -target=google_storage_bucket_iam_member.dedi_static_public_read -target=google_storage_bucket_iam_member.dedi_static_writer -out=dedi-bucket.tfplan
       - terraform apply dedi-bucket.tfplan
+      - rm -f dedi-bucket.tfplan  # saved plans hold secrets in plain text
 
   deploy:dedi-server:
     desc: >-
@@ -350,8 +451,10 @@ tasks:
       see deploy:dedi-bucket -- and can run much earlier.)
     dir: terraform
     cmds:
+      - task: tfvars:check
       - terraform plan -target=google_cloud_run_v2_service.dedi_static -target=google_cloud_run_v2_service_iam_member.dedi_static_public_invoker -target=google_cloud_run_domain_mapping.dedi_apex -target=google_cloud_run_domain_mapping.dedi_www -out=dedi-server.tfplan
       - terraform apply dedi-server.tfplan
+      - rm -f dedi-server.tfplan  # saved plans hold secrets in plain text
 
   deploy:ion-landing-page-bucket:
     desc: >-
@@ -359,8 +462,10 @@ tasks:
       binding only -- no dependency on any other service, can run any time.
     dir: terraform
     cmds:
+      - task: tfvars:check
       - terraform plan -target=google_storage_bucket.ion_landing_page_static -target=google_storage_bucket_iam_member.ion_landing_page_public_read -out=ion-landing-page-bucket.tfplan
       - terraform apply ion-landing-page-bucket.tfplan
+      - rm -f ion-landing-page-bucket.tfplan  # saved plans hold secrets in plain text
 
   deploy:ion-landing-page-server:
     desc: >-
@@ -369,8 +474,10 @@ tasks:
       and task deploy-ion-landing-page-files have succeeded.
     dir: terraform
     cmds:
+      - task: tfvars:check
       - terraform plan -target=google_cloud_run_v2_service.ion_landing_page -target=google_cloud_run_v2_service_iam_member.ion_landing_page_public_invoker -target=google_cloud_run_domain_mapping.ion_landing_page -out=ion-landing-page-server.tfplan
       - terraform apply ion-landing-page-server.tfplan
+      - rm -f ion-landing-page-server.tfplan  # saved plans hold secrets in plain text
 
   deploy:phase1:
     desc: >-
@@ -427,8 +534,10 @@ tasks:
     desc: "Steps 7 & 9: full terraform apply. Run this task twice — the first run is expected to fail on bap/bpp (no DB schema yet); run deploy:migrate in between."
     dir: terraform
     cmds:
+      - task: tfvars:check
       - terraform plan -out=full.tfplan
       - terraform apply full.tfplan
+      - rm -f full.tfplan  # saved plans hold secrets in plain text
 
   deploy:migrate:
     desc: "Step 8: run both migration jobs (self-derives PROJECT_ID/REGION — by this point terraform apply has run)."

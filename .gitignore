@@ -18,7 +18,11 @@ config/catalog-publish.yaml
 terraform/.terraform/
 terraform/terraform.tfstate
 terraform/terraform.tfstate.backup
+# terraform.tfvars is shared through the state bucket instead (task tfvars:pull
+# / tfvars:push); the generation file and .bak copies are those tasks' own.
 terraform/terraform.tfvars
+terraform/terraform.tfvars.bak.*
+terraform/.terraform.tfvars.generation
 terraform/*.tfplan
 
 # Node
