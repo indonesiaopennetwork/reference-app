@@ -227,6 +227,7 @@ export default {
   'Select failed: {error}': 'Gagal memilih barang: {error}',
   'Init failed: {error}': 'Gagal memproses pesanan: {error}',
   'Status request failed: {error}': 'Gagal meminta status: {error}',
+  'No reply from the seller yet. It may still arrive: check Orders before trying again.': 'Belum ada balasan dari penjual. Balasan mungkin masih akan datang: periksa Pesanan sebelum mencoba lagi.',
   'Rating submission failed': 'Penilaian gagal dikirim',
   'Rating failed: {error}': 'Penilaian gagal: {error}',
   'Support ticket created! The seller will get back to you.': 'Tiket bantuan dibuat! Penjual akan segera menghubungi Anda.',

@@ -2276,6 +2276,15 @@ function OrderHistoryDrawer({ open, onClose }) {
 const TOUR_DONE_KEY = 'bap.tourDone';
 const statusIn = (...list) => ({ status }) => list.includes(status);
 const PLACED = ['CONFIRMED', 'COMPLETE', 'STATUS_SENT', 'CANCEL_SENT', 'CANCELLED', 'RATE_SENT', 'SUPPORT_SENT'];
+
+// Statuses where a request is out and the seller's on_* answer will move the
+// order on -- the only time the checkout polls bap (see "Transaction
+// polling"). RATE_SENT / SUPPORT_SENT are left out on purpose: on_rate and
+// on_support don't change the status, so waiting on them would never end.
+const WAITING_STATUSES = ['SELECT_SENT', 'INIT_SENT', 'CONFIRM_SENT', 'STATUS_SENT', 'CANCEL_SENT', 'UPDATE_SENT'];
+// Longer than any normal round trip, including onix's cold-cache delays
+// (10-35s+) and the 90s proxy timeout on the request that started it.
+const POLL_TIMEOUT_MS = 120_000;
 const tourSteps = t => [
   { eyebrow: t('Welcome'), title: t('Shop the ION network'),
     body: <p>{t("This buyer app shows products from every seller on the ION network in one place. This tour shows how it works, and you'll place a sample order along the way. It takes about two minutes.")}</p> },
@@ -2478,27 +2487,41 @@ export default function App() {
   // from zero each time. That silently doubled the worst-case wait: a
   // status landing just after a tick found nothing new had to wait a full
   // fresh interval again instead of the remainder of the original one.
-  // Since this effect no longer re-runs when the status changes, it must
-  // stop itself explicitly once a terminal status is reached.
+  //
+  // Polls ONLY while a request is out and the seller's on_* answer is still
+  // pending (waitingFor below) -- never while the buyer is reading a quote,
+  // filling the billing form, or has walked away from an open cart. bap
+  // writes the *_SENT status before it sends the request, so a poll can't
+  // read an older status and stop early. The effect re-runs only when
+  // waitingFor changes (a new request goes out, or the answer lands), not on
+  // every tick, since the status stays the same while waiting.
+  const waitingFor = WAITING_STATUSES.includes(transaction?.status) ? transaction.status : null;
   useEffect(() => {
-    const terminalStatuses = ['CONFIRMED', 'CANCELLED', 'COMPLETE'];
-    if (!transaction || terminalStatuses.includes(transaction.status)) return;
+    if (!transaction || !waitingFor) return;
+    const startedAt = Date.now();
     const id = setInterval(() => {
+      // A lost callback must not poll forever (and keep bap from scaling to
+      // zero): give up after POLL_TIMEOUT_MS and tell the buyer.
+      if (Date.now() - startedAt > POLL_TIMEOUT_MS) {
+        clearInterval(id);
+        setTransaction(p => (p ? { ...p, placing: false } : p));
+        alert(t('No reply from the seller yet. It may still arrive: check Orders before trying again.'));
+        return;
+      }
       apiFetch(`/status/${transaction.id}`)
         .then(r => r.json())
         .then(d => {
-          setTransaction(p => {
-            // Don't revert CANCEL_SENT back to CONFIRMED — the cancel is still
-            // in-flight. Only advance to CANCELLED or later states.
-            if (p.status === 'CANCEL_SENT' && d.status === 'CONFIRMED') return p;
-            return { ...p, ...d };
-          });
-          if (terminalStatuses.includes(d.status)) clearInterval(id);
+          // Don't revert CANCEL_SENT back to CONFIRMED -- the cancel is still
+          // in-flight. Only advance to CANCELLED or later states.
+          if (waitingFor === 'CANCEL_SENT' && d.status === 'CONFIRMED') return;
+          setTransaction(p => (p ? { ...p, ...d } : p));
+          if (d.status !== waitingFor) clearInterval(id); // answer arrived
         })
         .catch(() => { });
     }, 500);
     return () => clearInterval(id);
-  }, [transaction?.id]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transaction?.id, waitingFor]);
 
   /* ── Beckn: Select (single product from modal) ───────────────────────── */
   const handleSelectProduct = async (product) => {
