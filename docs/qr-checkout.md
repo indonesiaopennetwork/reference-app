@@ -77,7 +77,7 @@ The swag annotations on `internal/qrsvc/handler.go` hold the full contract
 
 ## Matching rules
 
-- `TEXT_QUERY`: every word appears in the product's name or descriptions. Discover also matches provider names, but a packet item has to name the product itself.
+- `TEXT_QUERY`: every word of one of its names appears in the product's name or descriptions. Alternative names are separated by `|` (`indomie goreng|mie sedaap goreng`): any one matching is enough, and each name runs its own discover. Discover also matches provider names, but a packet item has to name the product itself.
 - `GTIN`: the resource id or descriptor code is the barcode, or any string value in `resourceAttributes` equals it.
 - `ION_SKU`: the resource id, descriptor code or offer id.
 - Each merchant uses its cheapest priced offer per item. Merchants must stock every item of the packet and sit within the packet's radius. The minimum basket applies to what the buyer chooses, at quote.
@@ -109,4 +109,5 @@ The swag annotations on `internal/qrsvc/handler.go` hold the full contract
 - **Seller locations.** bpp-frontend's catalog publish sends no `availableAt` geo, so distances show as unknown and the radius can't exclude those merchants (see `QR_ALLOW_UNLOCATED_MERCHANTS`).
 - **Self pickup** goes to the seller as a delivery whose address reads "Self pickup at …". The select message only offers the `DELIVERY` performance mode.
 - **Timing.** Quote and checkout wait for on_select / on_init for up to 60s inside one request, which fits nginx's 90s proxy timeout only when the adapters are warm.
-- `DISCOVER_METHOD=POST` uses the async discover through onix-bap, once per packet item.
+- `DISCOVER_METHOD=POST` uses the async discover through onix-bap, once per packet item (once per name for items with alternative names).
+- **Map picker services.** The console's location picker (`bap-frontend/src/qr/LocationPicker.jsx`) calls public, key-less services straight from the browser: OpenStreetMap tiles (`tile.openstreetmap.org`) and Photon search / reverse geocoding (`photon.komoot.io`). Both are fair-use only; production traffic needs a paid or self-hosted provider (change `TILES` / `PHOTON` there).

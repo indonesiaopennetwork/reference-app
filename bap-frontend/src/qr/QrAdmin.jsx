@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { QrCode, Plus, RefreshCw, ExternalLink, Printer, Download, Copy, ArrowLeft, Pencil, Trash2, Smartphone, RotateCcw, CheckCircle2, Search, MapPin, Wand2, ChevronDown, Package, X } from 'lucide-react';
 import { basePath } from '../auth.js';
 import { adminApi, AdminError, qrApi } from './api.js';
@@ -15,6 +15,9 @@ import { cx, inputClass } from './styles.js';
 // (internal/qrsvc HandleAdmin) and lists the orders each packet produced.
 
 const ROOT = `${basePath}qr-admin`;
+
+// The map (Leaflet) loads only when the packet form opens.
+const LocationPicker = lazy(() => import('./LocationPicker.jsx'));
 
 /* ─────────────────────────── tiny router ─────────────────────────────────── */
 
@@ -377,14 +380,12 @@ function PacketsList({ navigate, query, onExit }) {
 
 /* ─────────────────────────── basket: product search + rows ───────────────── */
 
-// matchSummary says in plain words how a packet item finds products at a merchant.
-function matchSummary(it) {
-  const v = it.match_value.trim();
-  if (!v) return 'No matching rule yet';
-  if (it.match_type === 'GTIN') return `Barcode ${v}`;
-  if (it.match_type === 'ION_SKU') return `Exact product id ${v}`;
-  return `Name contains "${v}"`;
-}
+// A TEXT_QUERY item may list alternative names, stored as "a|b|c"; a
+// merchant's product matches when its name has every word of any one of them
+// (bap-application qrsvc textAlternatives).
+const ALT_SEP = '|';
+const MAX_NAMES = 5;
+const splitNames = v => v.split(ALT_SEP).map(s => s.trim()).filter(Boolean);
 
 // ProductSearch searches the network (a Beckn discover through the BAP) for
 // products to add to the basket (the whole network: the radius only matters at scan time).
@@ -395,7 +396,8 @@ function ProductSearch({ items, onAdd }) {
   const [q, setQ] = useState('');
   const [state, setState] = useState({ loading: false, error: null, data: null, query: '' });
   const ctrlRef = useRef(null);
-  const inBasket = pr => items.some(it => it.match_type === pr.suggested_match.match_type && it.match_value.trim().toLowerCase() === pr.suggested_match.match_value.toLowerCase());
+  const inBasket = pr => items.some(it => it.match_type === pr.suggested_match.match_type
+    && splitNames(it.match_value).some(n => n.toLowerCase() === pr.suggested_match.match_value.toLowerCase()));
 
   // Runs one search, cancelling the one before; a stale answer is dropped.
   const runSearch = useCallback(async raw => {
@@ -482,18 +484,64 @@ function Thumb({ src, size = 'h-10 w-10' }) {
     : <div className={cx(size, 'grid shrink-0 place-items-center rounded-lg bg-white/[0.06]')}><Package className="w-4 h-4 text-slate-500" /></div>;
 }
 
-// BasketRow is one packet item, added from search. The buyer chooses which
-// items to order and how many after scanning, so there is no quantity here;
-// how it is matched comes from the picked product.
-function BasketItem({ it, i, err, remove }) {
+// BasketItem is one packet item, added from search. The buyer chooses which
+// items to order and how many after scanning, so there is no quantity here.
+// It shows how the item is found at a merchant when the QR is scanned: by
+// barcode, or by name, where more names can be added (any one may match).
+function BasketItem({ it, i, err, remove, update }) {
+  const [adding, setAdding] = useState(false);
+  const [draft, setDraft] = useState('');
   const itemErr = err(`items.${i}.match_value`) || err(`items.${i}.display_name`);
+  const byName = it.match_type === 'TEXT_QUERY';
+  const names = byName ? splitNames(it.match_value) : [];
+
+  const setNames = list => update(i, { match_value: list.join(ALT_SEP) });
+  const addName = () => {
+    const n = draft.replace(/\|/g, ' ').trim().toLowerCase();
+    if (n && !names.includes(n) && [...names, n].join(ALT_SEP).length <= 200) setNames([...names, n]);
+    setDraft(''); setAdding(false);
+  };
+
   return (
-    <li className={cx('group flex items-center gap-3 rounded-xl border p-2.5', itemErr ? 'border-rose-400/40 bg-rose-500/5' : 'border-white/10 bg-white/[0.03]')}>
+    <li className={cx('flex gap-3 rounded-xl border p-3', itemErr ? 'border-rose-400/40 bg-rose-500/5' : 'border-white/10 bg-white/[0.03]')}>
       <Thumb src={it._image} />
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-semibold text-white" title={it.display_name}>{it.display_name}</p>
-        <p className="truncate text-xs text-slate-500" title={matchSummary(it)}>{it._seller ? `Found at ${it._seller}` : matchSummary(it)}</p>
-        {itemErr && <p className="mt-0.5 text-xs font-semibold text-rose-300">{itemErr}: remove it and add it again from search.</p>}
+        {byName ? (
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            <span className="text-xs text-slate-500">Matches names with:</span>
+            {names.map((n, k) => (
+              <span key={n} title={k === 0 ? 'Original name from the picked product' : undefined}
+                className={cx('inline-flex items-center gap-1 rounded-md bg-brand/10 py-0.5 text-xs font-semibold text-brand', k === 0 ? 'px-2' : 'pl-2 pr-1')}>
+                {n}
+                {/* The first name comes from the picked product and stays; only added names can be removed. */}
+                {k > 0 && (
+                  <button type="button" onClick={() => setNames(names.filter((_, j) => j !== k))} aria-label={`Remove name ${n}`}
+                    className="grid h-4 w-4 place-items-center rounded hover:bg-brand/20"><X className="w-3 h-3" /></button>
+                )}
+              </span>
+            ))}
+            {adding ? (
+              <input autoFocus value={draft} onChange={e => setDraft(e.target.value)} onBlur={addName}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') { e.preventDefault(); addName(); }
+                  if (e.key === 'Escape') { setDraft(''); setAdding(false); }
+                }}
+                placeholder="another name, e.g. keripik balado" aria-label="Another name"
+                className="w-48 rounded-md border border-brand/40 bg-white/[0.06] px-2 py-0.5 text-xs text-white outline-none placeholder:text-slate-500" />
+            ) : names.length < MAX_NAMES && (
+              <button type="button" onClick={() => setAdding(true)}
+                className="inline-flex items-center gap-0.5 rounded-md border border-dashed border-white/20 px-2 py-0.5 text-xs font-semibold text-slate-300 hover:border-brand/50 hover:text-brand">
+                <Plus className="w-3 h-3" /> Add name
+              </button>
+            )}
+          </div>
+        ) : (
+          <p className="mt-1 text-xs text-slate-500">
+            Matches by {it.match_type === 'GTIN' ? 'barcode' : 'product id'} <span className="font-mono text-slate-300">{it.match_value}</span>
+          </p>
+        )}
+        {itemErr && <p className="mt-1 text-xs font-semibold text-rose-300">{itemErr}: remove it and add it again from search.</p>}
       </div>
       <button type="button" onClick={() => remove(i)} aria-label={`Remove ${it.display_name}`} title="Remove"
         className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-slate-500 transition-colors hover:bg-rose-500/15 hover:text-rose-300">
@@ -528,7 +576,7 @@ const fromPacket = p => ({
   title: p.title, format_type: p.format_type, allow_node_as_delivery: p.allow_node_as_delivery,
   location_label: p.location_label, lat: String(p.lat), lon: String(p.lon), radius_meters: p.radius_meters,
   min_basket_value: p.min_basket_value,
-  items: (p.items || []).map(({ match_type, match_value, display_name }) => ({ match_type, match_value, display_name })),
+  items: (p.items || []).map(({ id, match_type, match_value, display_name }, i) => ({ match_type, match_value, display_name, _key: id || `saved-${i}` })),
 });
 
 const toInput = f => ({
@@ -568,7 +616,7 @@ function PacketForm({ id, navigate }) {
     const item = {
       match_type: pr.suggested_match.match_type, match_value: pr.suggested_match.match_value,
       display_name: pr.display_name,
-      _image: pr.image, _seller: pr.provider_name,
+      _image: pr.image, _key: `${pr.bpp_id}|${pr.resource_id}|${Date.now()}`,
     };
     const blank = it => !it.match_value.trim() && !it.display_name.trim();
     const items = f.items.length === 1 && blank(f.items[0]) ? [item] : [...f.items, item];
@@ -597,6 +645,8 @@ function PacketForm({ id, navigate }) {
   if (editing && !packet) return <div className="flex justify-center py-16 text-slate-400"><Spinner className="w-6 h-6" /></div>;
   const err = k => errors[k];
 
+  const submitLabel = editing ? 'Save changes' : 'Create as DRAFT';
+
   return (
     <form onSubmit={submit} noValidate className="space-y-5">
       <header className="flex flex-wrap items-end justify-between gap-3">
@@ -607,7 +657,7 @@ function PacketForm({ id, navigate }) {
         </div>
         <div className="flex gap-2">
           <Button variant="secondary" onClick={() => window.history.back()}>Cancel</Button>
-          <Button type="submit" busy={saving}>{editing ? 'Save changes' : 'Create as DRAFT'}</Button>
+          <Button type="submit" busy={saving}>{submitLabel}</Button>
         </div>
       </header>
 
@@ -617,87 +667,74 @@ function PacketForm({ id, navigate }) {
       <ErrorNote error={submitError} title="Save failed" onClose={() => setSubmitError(null)} />
       {Object.keys(errors).length > 0 && !submitError && <Alert tone="error" title="Fix the highlighted fields." />}
 
-      <div className="grid items-start gap-5 lg:grid-cols-3">
-        <div className="space-y-5 lg:col-span-2">
+      <div className="grid items-start gap-5 lg:grid-cols-2">
+        <div className="min-w-0 space-y-5">
           <Card title="Details" actions={<PrefillMenu label="Packet presets" options={PACKET_PRESETS} onPick={prefillPacket} />}>
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Title" htmlFor="title" error={err('title')} className="sm:col-span-2">
-                <input id="title" className={inputClass(err('title'))} value={form.title} maxLength={120} onChange={e => set('title', e.target.value)} placeholder="Kos Melati - Paket Malam" />
+                <input id="title" className={inputClass(err('title'))} value={form.title} maxLength={120} onChange={e => set('title', e.target.value)} placeholder="e.g. Kos Melati - Paket Malam" />
               </Field>
-              <Field label="Minimum order" htmlFor="minb" error={err('min_basket_value')} hint="Items subtotal the buyer must reach (0 = none)">
+              <Field label="Minimum order" htmlFor="minb" error={err('min_basket_value')}>
                 <div className="relative">
                   <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-500">Rp</span>
                   <input id="minb" type="number" min="0" step="500" className={cx(inputClass(err('min_basket_value')), 'pl-10')} value={form.min_basket_value} onChange={e => set('min_basket_value', e.target.value)} />
                 </div>
               </Field>
-              <Field label="Type of spot" htmlFor="format" error={err('format_type')} hint="Optional label on the poster">
+              <Field label="Type of spot" htmlFor="format" error={err('format_type')}>
                 <select id="format" className={inputClass(err('format_type'))} value={form.format_type} onChange={e => set('format_type', e.target.value)}>
                   {FORMAT_TYPES.map(f => <option key={f.value} value={f.value} className="bg-slate-900">{f.label}</option>)}
                 </select>
               </Field>
-              <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-white/10 bg-white/[0.02] p-3 sm:col-span-2">
-                <input type="checkbox" className="mt-0.5 w-4 h-4 accent-cyan-400" checked={form.allow_node_as_delivery} onChange={e => set('allow_node_as_delivery', e.target.checked)} />
-                <span>
-                  <span className="block text-sm font-semibold text-slate-100">Deliver to this spot</span>
-                  <span className="block text-xs text-slate-500">Buyers can get the order delivered here. Self pickup is always offered.</span>
-                </span>
+              <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5 sm:col-span-2">
+                <input type="checkbox" className="w-4 h-4 accent-cyan-400" checked={form.allow_node_as_delivery} onChange={e => set('allow_node_as_delivery', e.target.checked)} />
+                <span className="text-sm text-slate-100">Deliver to this spot</span>
+                <span className="text-xs text-slate-500">(self pickup is always offered)</span>
               </label>
             </div>
           </Card>
 
-          <Card title={`Items${form.items.length ? ` · ${form.items.length}` : ''}`}>
+          <Card title={`Products${form.items.length ? ` · ${form.items.length}` : ''}`}>
             <ProductSearch items={form.items} onAdd={addProduct} />
             {err('items') && <p className="mt-3 text-sm font-semibold text-rose-300">{err('items')}</p>}
-            {form.items.length === 0 ? (
-              <div className="mt-4 flex flex-col items-center gap-1 rounded-xl border border-dashed border-white/15 px-4 py-8 text-center">
-                <Package className="w-6 h-6 text-slate-600" />
-                <p className="text-sm text-slate-300">No items yet</p>
-                <p className="text-xs text-slate-500">Search above to add products from the network.</p>
-              </div>
-            ) : (
-              <ul className="mt-4 grid gap-2 sm:grid-cols-2">
-                {form.items.map((it, i) => (
-                  <BasketItem key={`${it.match_type}|${it.match_value}`} it={it} i={i} err={err}
-                    remove={j => set('items', form.items.filter((_, k) => k !== j))} />
-                ))}
-              </ul>
+            {form.items.length > 0 && (
+              <>
+                <ul className="mt-4 space-y-2">
+                  {form.items.map((it, i) => (
+                    <BasketItem key={it._key} it={it} i={i} err={err}
+                      remove={j => set('items', form.items.filter((_, k) => k !== j))}
+                      update={(j, patch) => set('items', form.items.map((x, k) => (k === j ? { ...x, ...patch } : x)))} />
+                  ))}
+                </ul>
+                {form.items.some(it => it.match_type === 'TEXT_QUERY') && <p className="mt-3 text-xs text-slate-500">When the QR is scanned, a nearby shop&apos;s product counts if its name contains every word of one of these names.</p>}
+              </>
             )}
           </Card>
         </div>
 
-        <div className="space-y-5">
-          <Card title="Location" actions={<PrefillMenu label="Sample locations" options={LOCATION_PRESETS} onPick={prefillLocation} />}>
-            <div className="space-y-4">
-              <Field label="Address" htmlFor="loc" error={err('location_label')} hint="Buyers add their own room or unit">
-                <input id="loc" className={inputClass(err('location_label'))} value={form.location_label} onChange={e => set('location_label', e.target.value)} placeholder="Jl. Margonda Raya No. 12, Depok" />
-              </Field>
-              <div className="grid grid-cols-2 gap-3">
-                <Field label="Latitude" htmlFor="lat" error={err('lat')}><input id="lat" inputMode="decimal" className={cx(inputClass(err('lat')), 'font-mono')} value={form.lat} onChange={e => set('lat', e.target.value)} placeholder="-6.3625" /></Field>
-                <Field label="Longitude" htmlFor="lon" error={err('lon')}><input id="lon" inputMode="decimal" className={cx(inputClass(err('lon')), 'font-mono')} value={form.lon} onChange={e => set('lon', e.target.value)} placeholder="106.8295" /></Field>
-              </div>
-              <div>
-                <div className="mb-1 flex items-center justify-between">
-                  <label htmlFor="radius" className="text-xs font-semibold text-slate-400">Merchant radius</label>
-                  <span className="rounded-md bg-brand/10 px-2 py-0.5 text-xs font-semibold text-brand">{formatDistance(Number(form.radius_meters))}</span>
-                </div>
-                <input id="radius" type="range" min="100" max="25000" step="100" className="w-full accent-cyan-400" value={form.radius_meters} onChange={e => set('radius_meters', Number(e.target.value))} />
-                <div className="flex justify-between text-[11px] text-slate-600"><span>100 m</span><span>25 km</span></div>
-                {err('radius_meters') && <p className="mt-1 text-xs font-semibold text-rose-300">{err('radius_meters')}</p>}
-              </div>
-            </div>
-          </Card>
-
-          <section className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-4">
-            <h3 className="text-xs font-bold tracking-wide text-slate-400 uppercase" style={{ fontFamily: 'inherit' }}>When a buyer scans</h3>
-            <ol className="mt-2 space-y-1.5 text-xs text-slate-400">
-              <li><span className="font-semibold text-slate-200">1.</span> The nearest merchant within the radius that stocks every item is found.</li>
-              <li><span className="font-semibold text-slate-200">2.</span> The buyer picks which items and how many.</li>
-              <li><span className="font-semibold text-slate-200">3.</span> They pay once the minimum order is reached.</li>
-            </ol>
-          </section>
-        </div>
+        <Card title="Location" className="min-w-0" actions={<PrefillMenu label="Sample locations" options={LOCATION_PRESETS} onPick={prefillLocation} />}>
+          <Suspense fallback={<div className="grid h-64 place-items-center rounded-xl border border-white/10 bg-white/[0.03] text-slate-400"><Spinner className="w-5 h-5" /></div>}>
+            <LocationPicker label={form.location_label} lat={form.lat} lon={form.lon} radius={Number(form.radius_meters)}
+              onChange={patch => setForm(f => ({ ...f, ...patch }))}
+              labelError={err('location_label')} coordError={err('lat') || err('lon')}
+              aside={<RadiusControl value={Number(form.radius_meters)} error={err('radius_meters')} onChange={v => set('radius_meters', v)} />} />
+          </Suspense>
+        </Card>
       </div>
     </form>
+  );
+}
+
+// RadiusControl: how far from the spot a merchant may be (the circle on the map).
+function RadiusControl({ value, error, onChange }) {
+  return (
+    <div>
+      <div className="mb-2 flex items-center justify-between">
+        <label htmlFor="radius" className="text-xs font-semibold text-slate-400">Merchant radius</label>
+        <span className="text-sm font-semibold text-brand">{formatDistance(value)}</span>
+      </div>
+      <input id="radius" type="range" min="100" max="25000" step="100" className="w-full accent-cyan-400" value={value} onChange={e => onChange(Number(e.target.value))} />
+      {error && <p className="mt-1 text-xs font-semibold text-rose-300">{error}</p>}
+    </div>
   );
 }
 
@@ -863,7 +900,7 @@ function PacketDetail({ id, navigate }) {
                 {packet.items.map(it => (
                   <tr key={it.id}>
                     <td className="px-4 py-2 text-slate-100">{it.display_name}</td>
-                    <td className="px-4 py-2"><Tag>{it.match_type}</Tag> <span className="font-mono text-xs text-slate-400">{it.match_value}</span></td>
+                    <td className="px-4 py-2 text-xs text-slate-400">{it.match_type === 'TEXT_QUERY' ? `Name: ${splitNames(it.match_value).join(' or ')}` : <>{it.match_type === 'GTIN' ? 'Barcode' : 'Product id'} <span className="font-mono">{it.match_value}</span></>}</td>
                   </tr>
                 ))}
               </tbody>

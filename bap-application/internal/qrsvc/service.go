@@ -270,7 +270,10 @@ func (s *Service) match(ctx context.Context, p *Packet, buyerSubject *string) (*
 	var codeItems []int
 	for i, it := range p.Items {
 		if it.MatchType == "TEXT_QUERY" {
-			jobs = append(jobs, job{query: it.MatchValue, items: []int{i}})
+			// One discover per alternative name; offerFor keeps the cheapest hit.
+			for _, alt := range textAlternatives(it.MatchValue) {
+				jobs = append(jobs, job{query: alt, items: []int{i}})
+			}
 		} else {
 			codeItems = append(codeItems, i)
 		}

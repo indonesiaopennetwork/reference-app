@@ -181,6 +181,13 @@ func TestTextQueryNeedsEveryWordInTheProduct(t *testing.T) {
 	if resourceMatches(item, resource{Descriptor: descriptor{Name: "Ayam Goreng"}}) {
 		t.Error("must not match on one word")
 	}
+	alts := PacketItem{MatchType: "TEXT_QUERY", MatchValue: "indomie goreng | mie sedaap goreng"}
+	if !resourceMatches(alts, resource{Descriptor: descriptor{Name: "Mie Sedaap Goreng 90g"}}) {
+		t.Error("any alternative name should match")
+	}
+	if resourceMatches(alts, resource{Descriptor: descriptor{Name: "Indomie Soto"}}) {
+		t.Error("an alternative still needs every one of its words")
+	}
 	sku := PacketItem{MatchType: "ION_SKU", MatchValue: "res-biscuit-roma-kelapa-002"}
 	if !resourceMatches(sku, resource{ID: "res-biscuit-roma-kelapa-002"}) {
 		t.Error("ION_SKU should match the resource id")

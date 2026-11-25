@@ -43,7 +43,7 @@ export function validatePacketForm(f) {
   const e = {};
   if (!f.title.trim()) e.title = 'Title is required';
   else if (f.title.length > 120) e.title = 'Max 120 characters';
-  if (!f.location_label.trim()) e.location_label = 'Location label is required';
+  if (!f.location_label.trim()) e.location_label = 'Address is required: pick the spot on the map or type it';
   else if (f.location_label.length > 300) e.location_label = 'Max 300 characters';
   const lat = Number(f.lat);
   if (f.lat === '' || Number.isNaN(lat) || lat < -90 || lat > 90) e.lat = 'Latitude between -90 and 90';

@@ -348,10 +348,38 @@ func (m *matcher) summarize() summary {
 	return out
 }
 
+// textAltSep separates a TEXT_QUERY's alternative names ("indomie goreng|mie goreng").
+const textAltSep = "|"
+
+// textAlternatives splits a TEXT_QUERY into its alternative names.
+func textAlternatives(v string) []string {
+	var out []string
+	for _, a := range strings.Split(v, textAltSep) {
+		if a = strings.TrimSpace(a); a != "" {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+// containsEveryWord reports whether every word of query appears in hay (lowercased).
+func containsEveryWord(hay, query string) bool {
+	terms := strings.Fields(strings.ToLower(query))
+	if len(terms) == 0 {
+		return false
+	}
+	for _, t := range terms {
+		if !strings.Contains(hay, t) {
+			return false
+		}
+	}
+	return true
+}
+
 // resourceMatches decides whether res is the packet item.
-//   - TEXT_QUERY: every word of the query appears in the resource's name or
-//     descriptions (discover also matches the provider name; a packet item
-//     must name the product itself).
+//   - TEXT_QUERY: every word of one of its alternative names (split on "|")
+//     appears in the resource's name or descriptions (discover also matches
+//     the provider name; a packet item must name the product itself).
 //   - GTIN: the resource id or descriptor code is the GTIN, or any string
 //     value in resourceAttributes equals it (e.g. gtin, barcode, ean).
 //   - ION_SKU: the resource id or descriptor code is the SKU.
@@ -360,16 +388,12 @@ func resourceMatches(item PacketItem, res resource) bool {
 	switch item.MatchType {
 	case "TEXT_QUERY":
 		hay := strings.ToLower(res.Descriptor.Name + " " + res.Descriptor.ShortDesc + " " + res.Descriptor.LongDesc)
-		terms := strings.Fields(strings.ToLower(v))
-		if len(terms) == 0 {
-			return false
-		}
-		for _, t := range terms {
-			if !strings.Contains(hay, t) {
-				return false
+		for _, alt := range textAlternatives(v) {
+			if containsEveryWord(hay, alt) {
+				return true
 			}
 		}
-		return true
+		return false
 	case "GTIN":
 		if res.ID == v || res.Descriptor.Code == v {
 			return true
