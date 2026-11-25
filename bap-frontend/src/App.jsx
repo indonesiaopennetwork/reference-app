@@ -9,7 +9,7 @@ import {
   User, Phone, Home, ChevronLeft, Banknote,
   Ban, MessageSquare, RefreshCw, ThumbsUp,
   History, Wand2, ExternalLink, ChevronDown,
-  Compass, AlertCircle, Copy,
+  Compass, AlertCircle, Copy, Images,
 } from 'lucide-react';
 import Tour from './Tour.jsx';
 import { useI18n, rich, LanguageToggle, tNow, localeNow } from './i18n.jsx';
@@ -106,6 +106,13 @@ function parseCatalogs(data) {
       const bppUri = cat.bppUri || '';
       const dedupKey = `${bppId}::${res.id}`;
 
+      // Image URLs from descriptor.mediaFile, in the seller's order: images
+      // only (a missing mimeType is taken as an image), no duplicates.
+      const images = [...new Set((res.descriptor?.mediaFile || [])
+        .filter(m => m?.uri && (!m.mimeType || m.mimeType.startsWith('image/')))
+        .map(m => m.uri))];
+      if (!images.length) images.push(FALLBACK_IMG);
+
       seen.set(dedupKey, {
         id: res.id,
         name: res.descriptor?.name || tNow('Unknown Product'),
@@ -116,8 +123,10 @@ function parseCatalogs(data) {
         category: cat.descriptor?.name || tNow('Retail'),
         price,
         currency,
-        image: res.descriptor?.mediaFile?.[0]?.uri ||
-          'https://images.unsplash.com/photo-1542838132-92c53300491e?w=600&auto=format&fit=crop&q=70',
+        // Every photo the seller added (bpp-frontend lets a product carry
+        // several); image stays the first one for the card, cart and orders.
+        images,
+        image: images[0],
         offerId: offer.id || '',
         offerName: offer.descriptor?.name || offer.descriptor?.shortDesc || '',
         providerId: provider.id || '',
@@ -256,6 +265,71 @@ const itemCount = (t, n) => (n === 1 ? t('1 item') : t('{count} items', { count:
 const isoDays = w => (w || '').replace(/^P(\d+)D$/, '$1');
 
 const FALLBACK_IMG = 'https://images.unsplash.com/photo-1542838132-92c53300491e?w=600&auto=format&fit=crop&q=70';
+
+/* ─────────────────────────── Product gallery ────────────────────────────── */
+// The product's photos in ProductModal: the current one fills the hero, with
+// arrows, a counter and dots when there is more than one. index/onIndex are
+// held by the modal so GalleryThumbs below stays in step.
+function GalleryHero({ images, index, onIndex, alt }) {
+  const { t } = useI18n();
+  const n = images.length;
+  const go = d => e => { e.stopPropagation(); onIndex((index + d + n) % n); };
+  return (
+    <>
+      <img key={images[index]} src={images[index]} alt={alt}
+        className="w-full h-full object-cover opacity-90"
+        onError={e => { e.target.src = FALLBACK_IMG; }} />
+      {n > 1 && (
+        <>
+          {/* Colours sit on the inner span: index.css's global
+              `button { background: none }` is unlayered, so it beats
+              Tailwind's bg-* utilities on a <button> itself. */}
+          <button onClick={go(-1)} aria-label={t('Previous photo')}
+            className="group/nav absolute left-2 top-1/2 -translate-y-1/2 z-10">
+            <span className="w-8 h-8 flex items-center justify-center rounded-full bg-black/50 backdrop-blur text-white group-hover/nav:bg-black/70 transition-colors">
+              <ChevronLeft className="w-4 h-4" />
+            </span>
+          </button>
+          <button onClick={go(1)} aria-label={t('Next photo')}
+            className="group/nav absolute right-2 top-1/2 -translate-y-1/2 z-10">
+            <span className="w-8 h-8 flex items-center justify-center rounded-full bg-black/50 backdrop-blur text-white group-hover/nav:bg-black/70 transition-colors">
+              <ChevronRight className="w-4 h-4" />
+            </span>
+          </button>
+          <span className="absolute top-3 left-3 z-10 text-[10px] font-semibold text-white bg-black/50 backdrop-blur px-2 py-0.5 rounded-full">
+            {index + 1} / {n}
+          </span>
+          <div className="absolute bottom-4 right-4 z-10 flex gap-1.5">
+            {images.map((src, i) => (
+              <button key={src} onClick={e => { e.stopPropagation(); onIndex(i); }}
+                aria-label={t('Photo {n}', { n: i + 1 })} className="group/dot py-1">
+                <span className={`block h-1.5 rounded-full transition-all ${i === index ? 'w-4 bg-white' : 'w-1.5 bg-white/50 group-hover/dot:bg-white/80'}`} />
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
+// Clickable thumbnails under the hero -- only when there is more than one.
+function GalleryThumbs({ images, index, onIndex, alt }) {
+  if (images.length < 2) return null;
+  return (
+    <div className="flex gap-2 overflow-x-auto pb-1">
+      {images.map((src, i) => (
+        <button key={src} onClick={() => onIndex(i)} className="shrink-0">
+          {/* Border on the inner span, not the <button>: see GalleryHero. */}
+          <span className={`block w-14 h-14 rounded-lg overflow-hidden border-2 transition-all ${i === index ? 'border-emerald-400' : 'border-transparent opacity-60 hover:opacity-100'}`}>
+            <img src={src} alt={`${alt} ${i + 1}`} className="w-full h-full object-cover"
+              onError={e => { e.target.src = FALLBACK_IMG; }} />
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
 
 /* ─────────────────────────── SkeletonCard ───────────────────────────────── */
 function SkeletonCard() {
@@ -485,6 +559,9 @@ function ProductModal({ product, transaction, onClose, onSelect, onInit, onConfi
   const { t } = useI18n();
   const isThisProduct = transaction?.product?.id === product.id;
   const status = isThisProduct ? transaction.status : null;
+  const images = product.images?.length ? product.images : [product.image];
+  const [imgIdxRaw, setImgIdx] = useState(0);
+  const imgIdx = imgIdxRaw < images.length ? imgIdxRaw : 0; // another product's index
 
   // Parse confirmed on_select contract once QUOTE_RECEIVED
   const confirmedQuote = (status === 'QUOTE_RECEIVED' && transaction?.contract)
@@ -520,10 +597,8 @@ function ProductModal({ product, transaction, onClose, onSelect, onInit, onConfi
       >
         {/* ── Hero image ─────────────────────────────────────────────── */}
         <div className="relative h-52 shrink-0 bg-slate-800/80 overflow-hidden">
-          <img src={product.image} alt={product.name}
-            className="w-full h-full object-cover opacity-90"
-            onError={e => { e.target.src = FALLBACK_IMG; }} />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10" />
+          <GalleryHero images={images} index={imgIdx} onIndex={setImgIdx} alt={product.name} />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 pointer-events-none" />
           <button onClick={onClose}
             className="absolute top-3 right-3 w-8 h-8 flex items-center justify-center rounded-full bg-black/50 backdrop-blur text-white hover:bg-black/70 transition-colors z-10">
             <X className="w-4 h-4" />
@@ -537,6 +612,8 @@ function ProductModal({ product, transaction, onClose, onSelect, onInit, onConfi
 
         {/* ── Scrollable body ─────────────────────────────────────────── */}
         <div className="overflow-y-auto flex-grow px-5 py-4 space-y-4">
+
+          <GalleryThumbs images={images} index={imgIdx} onIndex={setImgIdx} alt={product.name} />
 
           {/* Product name & description */}
           <div>
@@ -2993,6 +3070,13 @@ export default function App() {
                         {product.offerValidity && (
                           <span className="absolute bottom-2.5 left-2.5 text-[10px] text-slate-300 bg-black/50 backdrop-blur px-2 py-0.5 rounded-full flex items-center gap-1">
                             <Calendar className="w-2.5 h-2.5" /> {t('Till {date}', { date: fmtDay(product.offerValidity) })}
+                          </span>
+                        )}
+                        {/* More photos: open the product to see them all */}
+                        {product.images?.length > 1 && (
+                          <span title={t('{n} photos', { n: product.images.length })}
+                            className="absolute bottom-2.5 right-2.5 text-[10px] text-slate-200 bg-black/50 backdrop-blur px-2 py-0.5 rounded-full flex items-center gap-1">
+                            <Images className="w-2.5 h-2.5" /> {product.images.length}
                           </span>
                         )}
                       </div>
